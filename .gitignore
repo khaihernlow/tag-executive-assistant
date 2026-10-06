@@ -17,3 +17,4 @@ output/
 notes/
 *.chatlog.txt
 chatlog*.txt
+data/

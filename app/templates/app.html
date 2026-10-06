@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+  <title>TAG Assistant</title>
+  <meta name="theme-color" content="#F6F2E9" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#14171C" media="(prefers-color-scheme: dark)">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Assistant">
+  <link rel="apple-touch-icon" href="/static/icon-180.png">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,500;6..72,600&display=swap">
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <div class="sheet">
+    <header class="masthead">
+      <div>
+        <p class="masthead__date" id="date">&nbsp;</p>
+        <h1 class="masthead__greeting" id="greeting">Your day</h1>
+      </div>
+      <button class="icon-btn" id="new-chat" type="button" aria-label="New conversation" title="New conversation">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+      </button>
+    </header>
+
+    <main class="scroll" id="scroll">
+      <section class="block" aria-labelledby="signoff-title" id="signoff-block" hidden>
+        <h2 class="block__title" id="signoff-title">Awaiting your sign-off</h2>
+        <div id="signoff"></div>
+      </section>
+
+      <section class="block" aria-labelledby="today-title">
+        <h2 class="block__title" id="today-title">Today</h2>
+        <ol class="itinerary" id="itinerary">
+          <li class="itinerary__empty">Loading your calendar…</li>
+        </ol>
+      </section>
+
+      <section class="block block--thread" aria-label="Conversation">
+        <div class="thread" id="thread" aria-live="polite"></div>
+      </section>
+    </main>
+
+    <form class="composer" id="composer" autocomplete="off">
+      <label class="visually-hidden" for="input">Ask your assistant</label>
+      <textarea id="input" rows="1" placeholder="Ask your assistant…" enterkeyhint="send"></textarea>
+      <button class="send" id="send" type="submit" aria-label="Send" disabled>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6"/></svg>
+      </button>
+    </form>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

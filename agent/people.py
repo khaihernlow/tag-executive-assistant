@@ -193,9 +193,13 @@ def match_note(matches: list[Person]) -> str:
 def people_tools(graph: GraphSource) -> list[Tool]:
     def find_person(args: dict[str, Any]) -> dict[str, Any]:
         matches = find_people(graph, args["name"])
-        result: dict[str, Any] = {"matches": [asdict(p) | {"score": round(p.score, 2)} for p in matches]}
-        result["note"] = match_note(matches)
-        return result
+        note = match_note(matches)
+        if note == "Confident match.":
+            # Only the winner: listing near-misses makes the model second-guess
+            # a decision code already made. Dave can still correct it.
+            return {"matches": [asdict(matches[0]) | {"score": round(matches[0].score, 2)}],
+                    "other_matches": len(matches) - 1, "note": note}
+        return {"matches": [asdict(p) | {"score": round(p.score, 2)} for p in matches], "note": note}
 
     return [
         Tool(

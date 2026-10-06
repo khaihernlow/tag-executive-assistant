@@ -38,6 +38,7 @@ class Event:
     attendees: list[str]
     organizer: str
     online: bool
+    join_url: str = ""
 
     @property
     def blocks_time(self) -> bool:
@@ -58,6 +59,7 @@ def parse_event(raw: dict[str, Any], tz: ZoneInfo) -> Event:
         ],
         organizer=((raw.get("organizer") or {}).get("emailAddress") or {}).get("name", ""),
         online=bool(raw.get("isOnlineMeeting")),
+        join_url=(raw.get("onlineMeeting") or {}).get("joinUrl") or "",
     )
 
 

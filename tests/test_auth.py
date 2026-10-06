@@ -39,7 +39,7 @@ def test_bypass_local_dev(client, monkeypatch):
     monkeypatch.setenv("REQUIRE_AUTH", "False")
     resp = client.get("/")
     assert resp.status_code == 200
-    assert "Local Admin" in resp.text
+    assert "TAG Assistant" in resp.text
 
 
 def test_health(client):
