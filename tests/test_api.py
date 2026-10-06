@@ -127,3 +127,24 @@ def test_old_tool_results_are_dropped_but_pairs_stay_intact():
     assert [m["content"][0]["tool_use_id"] for m in trimmed
             if isinstance(m["content"], list) and m["content"][0]["type"] == "tool_result"] == ["t0", "t1", "t2"]
     assert msgs[2]["content"][0]["content"] == "data0"  # caller's history untouched
+
+
+def test_memory_panel_lists_and_removes(client):
+    from agent.memory import Memory
+
+    http, _, _ = client
+    from app.main import app
+
+    memory = Memory(app.state.services.store)
+    app.state.services.memory = memory
+    memory.remember({"kind": "alias", "name": "Kai", "email": "klow@tag.example", "full_name": "Khaihern Low"})
+    memory.remember({"kind": "pref", "key": "day_start", "value": "08:30"})
+
+    items = http.get("/api/memory").json()["items"]
+    assert [(i["kind"], i["text"]) for i in items] == [
+        ("Nickname", "\u201cKai\u201d means Khaihern Low (klow@tag.example)"),
+        ("Preference", "Earliest meeting time, HH:MM: 08:30"),
+    ]
+    assert http.delete(f"/api/memory/{items[0]['key']}").status_code == 200
+    assert [i["kind"] for i in http.get("/api/memory").json()["items"]] == ["Preference"]
+    assert http.delete("/api/memory/alias:nobody").status_code == 404

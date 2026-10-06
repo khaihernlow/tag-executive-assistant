@@ -75,7 +75,7 @@ def test_notes_reach_the_prompt_and_forget_removes_them(memory):
     run(registry, "remember", {"kind": "alias", "name": "Kai", "email": "klow@tag.example", "full_name": "Khaihern Low"})
     section = memory.prompt_section()
     assert "Keep Friday afternoons free for family" in section
-    assert '"kai" means Khaihern Low <klow@tag.example>' in section
+    assert '"Kai" means Khaihern Low <klow@tag.example>' in section
 
     forgot, _ = run(registry, "forget", {"what": "friday afternoons"})
     assert forgot["forgot"] == ["Keep Friday afternoons free for family"]

@@ -131,7 +131,7 @@ button { font: inherit; color: inherit; }
   letter-spacing: -0.01em;
 }
 
-.masthead__actions { display: flex; gap: var(--s2); }
+.masthead__actions { display: flex; gap: 6px; flex: none; }
 
 /* recent conversations: a sheet that drops from the masthead */
 .sheet { position: relative; }
@@ -156,9 +156,13 @@ button { font: inherit; color: inherit; }
 .recent__head .block__title { margin: 0 0 var(--s2); }
 .link-btn { border: 0; background: none; color: var(--navy); font-weight: 600; font-size: 14px; cursor: pointer; padding: var(--s1); }
 .row--current .row__title { color: var(--brass); }
+.memory-hint { margin: 0 0 var(--s3); }
+.row.memory-row { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--s3); }
+.memory-row .tag { margin-right: var(--s2); }
+.memory-row__text { flex: 1; font-size: 15px; }
 
 .icon-btn {
-  width: 40px; height: 40px;
+  width: 36px; height: 36px; flex: none;
   display: grid; place-items: center;
   border: 1px solid var(--rule);
   border-radius: 50%;

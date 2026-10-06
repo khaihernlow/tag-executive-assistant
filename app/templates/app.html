@@ -24,6 +24,9 @@
         <h1 class="masthead__greeting" id="greeting">Your day</h1>
       </div>
       <div class="masthead__actions">
+        <button class="icon-btn" id="memory-btn" type="button" aria-label="What I remember" title="What I remember" aria-expanded="false" aria-controls="memory">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v18l-6-4-6 4z"/></svg>
+        </button>
         <button class="icon-btn" id="recent-btn" type="button" aria-label="Recent conversations" title="Recent conversations" aria-expanded="false" aria-controls="recent">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 7v5l3 2"/><path d="M3.5 12a8.5 8.5 0 1 0 2.5-6"/><path d="M3 4v4h4"/></svg>
         </button>
@@ -40,6 +43,17 @@
           <button class="link-btn" id="recent-close" type="button">Close</button>
         </div>
         <ul class="rows" id="recent-list"></ul>
+      </div>
+    </div>
+
+    <div class="recent" id="memory" hidden>
+      <div class="recent__panel" role="dialog" aria-label="What I remember">
+        <div class="recent__head">
+          <h2 class="block__title">Remembered</h2>
+          <button class="link-btn" id="memory-close" type="button">Close</button>
+        </div>
+        <p class="card__note memory-hint">Tell me things to remember in chat, like “Kai means Khaihern” or “no meetings before 8:30”.</p>
+        <ul class="rows" id="memory-list"></ul>
       </div>
     </div>
 

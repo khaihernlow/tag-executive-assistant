@@ -24,6 +24,7 @@ class Services:
     store: Store
     actions: Actions
     assistant: Assistant
+    memory: Memory
 
 
 def build_services() -> Services:
@@ -39,4 +40,4 @@ def build_services() -> Services:
         + memory_tools(memory)
         + [create_event_tool(graph, actions)]
     )
-    return Services(graph, store, actions, Assistant(HatzAIProvider(), registry, store, actions, memory))
+    return Services(graph, store, actions, Assistant(HatzAIProvider(), registry, store, actions, memory), memory)

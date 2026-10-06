@@ -369,7 +369,53 @@ async function showRecent() {
   }
 }
 
-$("#recent-btn").addEventListener("click", () => ($("#recent").hidden ? showRecent() : closeRecent()));
+// ── what the assistant remembers ───────────────────────────────────────────────────────────
+
+function closeMemory() {
+  $("#memory").hidden = true;
+  $("#memory-btn").setAttribute("aria-expanded", "false");
+}
+
+async function showMemory() {
+  closeRecent();
+  $("#memory").hidden = false;
+  $("#memory-btn").setAttribute("aria-expanded", "true");
+  const list = $("#memory-list");
+  list.replaceChildren(el("li", { class: "itinerary__empty", text: "Loading…" }));
+  try {
+    const { items } = await api("/api/memory");
+    if (!items.length) {
+      list.replaceChildren(el("li", { class: "itinerary__empty", text: "Nothing yet." }));
+      return;
+    }
+    list.replaceChildren(...items.map((m) => {
+      const remove = el("button", { class: "link-btn", type: "button", text: "Remove" });
+      const row = el("li", { class: "row memory-row" },
+        el("span", { class: "memory-row__text" }, el("span", { class: "tag", text: m.kind }), m.text), remove);
+      remove.addEventListener("click", async () => {
+        remove.disabled = true;
+        try {
+          await api(`/api/memory/${encodeURIComponent(m.key)}`, { method: "DELETE" });
+          row.remove();
+          if (!list.children.length) list.append(el("li", { class: "itinerary__empty", text: "Nothing yet." }));
+        } catch (err) {
+          remove.disabled = false;
+          row.append(el("span", { class: "error", text: err.message }));
+        }
+      });
+      return row;
+    }));
+  } catch (err) {
+    list.replaceChildren(el("li", { class: "error", text: `Couldn't load: ${err.message}` }));
+  }
+}
+
+$("#memory-btn").addEventListener("click", () => ($("#memory").hidden ? showMemory() : closeMemory()));
+$("#memory-close").addEventListener("click", closeMemory);
+$("#memory").addEventListener("click", (e) => { if (e.target.id === "memory") closeMemory(); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeMemory(); });
+
+$("#recent-btn").addEventListener("click", () => { closeMemory(); ($("#recent").hidden ? showRecent() : closeRecent()); });
 $("#recent-close").addEventListener("click", closeRecent);
 $("#recent").addEventListener("click", (e) => { if (e.target.id === "recent") closeRecent(); });
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeRecent(); });

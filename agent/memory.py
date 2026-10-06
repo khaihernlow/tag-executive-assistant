@@ -42,12 +42,28 @@ class Memory:
                 return str(row["value"])
         return PREFS[name][1]
 
+    def items(self) -> list[dict[str, str]]:
+        """Everything remembered, worded for Dave (the Remembered panel)."""
+        out = []
+        for row in self.store.list_memory():
+            v, name = row["value"], row["key"].split(":", 1)[1]
+            if row["kind"] == "alias":
+                out.append({"key": row["key"], "kind": "Nickname", "text": f'\u201c{v.get("said", name)}\u201d means {v["name"]} ({v["email"]})'})
+            elif row["kind"] == "pref":
+                out.append({"key": row["key"], "kind": "Preference", "text": f"{PREFS.get(name, (name,))[0]}: {v}"})
+            else:
+                out.append({"key": row["key"], "kind": "Note", "text": str(v)})
+        return out
+
+    def delete(self, key: str) -> bool:
+        return self.store.delete_memory(key)
+
     def prompt_section(self) -> str:
         lines = []
         for row in self.store.list_memory():
             v = row["value"]
             if row["kind"] == "alias":
-                lines.append(f'- "{row["key"].split(":", 1)[1]}" means {v["name"]} <{v["email"]}>')
+                lines.append(f'- "{v.get("said", row["key"].split(":", 1)[1])}" means {v["name"]} <{v["email"]}>')
             elif row["kind"] == "pref":
                 lines.append(f"- {PREFS.get(row['key'].split(':', 1)[1], (row['key'],))[0]}: {v}")
             else:
@@ -65,7 +81,7 @@ class Memory:
             if not name or "@" not in email:
                 raise ValueError("An alias needs the name Dave uses and the person's email (from find_person).")
             full = (args.get("full_name") or email).strip()
-            self.store.set_memory(_alias_key(name), "alias", {"name": full, "email": email})
+            self.store.set_memory(_alias_key(name), "alias", {"name": full, "email": email, "said": name})
             return {"remembered": f'"{name}" means {full} <{email}>'}
         if kind == "pref":
             key, value = args.get("key"), str(args.get("value", "")).strip()

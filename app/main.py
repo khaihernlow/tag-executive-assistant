@@ -199,6 +199,18 @@ def reject(aid: str, user: dict = Depends(require_auth), svc=Depends(services)):
         raise HTTPException(status_code=404, detail="Action not found")
 
 
+@app.get("/api/memory")
+def memory_list(user: dict = Depends(require_auth), svc=Depends(services)):
+    return {"items": svc.memory.items()}
+
+
+@app.delete("/api/memory/{key:path}")
+def memory_delete(key: str, user: dict = Depends(require_auth), svc=Depends(services)):
+    if not svc.memory.delete(key):
+        raise HTTPException(status_code=404, detail="Not found")
+    return {"deleted": key}
+
+
 @app.get("/api/activity")
 def activity(user: dict = Depends(require_auth), svc=Depends(services)):
     return {"actions": [
