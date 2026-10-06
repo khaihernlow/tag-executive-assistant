@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 
 from agent.actions import Actions
 from agent.assistant import Assistant
 from agent.calendar import calendar_tools
 from agent.events import create_event_kind, create_event_tool
+from agent.junk import junk_kind, junk_tools
 from agent.mail import mail_tools
 from agent.memory import Memory, memory_tools
 from agent.people import people_tools
@@ -30,14 +32,18 @@ class Services:
 def build_services() -> Services:
     graph = GraphClient.from_env()
     store = Store()
-    actions = Actions(store, [create_event_kind(graph)])
+    actions = Actions(store, [create_event_kind(graph), junk_kind(graph)])
     memory = Memory(store)
+    llm = HatzAIProvider()
+    # Quick, high-volume judgments (junk triage) use a faster, cheaper model.
+    fast_llm = HatzAIProvider(model=os.environ.get("HATZAI_FAST_MODEL", "anthropic.claude-haiku-4-5"))
     registry = ToolRegistry(
         calendar_tools(graph, memory)
         + people_tools(graph, memory)
         + mail_tools(graph)
         + scheduling_tools(graph, memory)
         + memory_tools(memory)
+        + junk_tools(graph, fast_llm, actions)
         + [create_event_tool(graph, actions)]
     )
-    return Services(graph, store, actions, Assistant(HatzAIProvider(), registry, store, actions, memory), memory)
+    return Services(graph, store, actions, Assistant(llm, registry, store, actions, memory), memory)

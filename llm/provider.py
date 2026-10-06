@@ -76,4 +76,5 @@ class LLMProvider(Protocol):
         tools: list[ToolSpec] | None = None,
         max_tokens: int = 2048,
         temperature: float | None = None,
+        tool_choice: str | None = None,
     ) -> LLMResponse: ...

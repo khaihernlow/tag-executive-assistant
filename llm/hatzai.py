@@ -58,6 +58,7 @@ class HatzAIProvider:
         tools: list[ToolSpec] | None = None,
         max_tokens: int = 2048,
         temperature: float | None = None,
+        tool_choice: str | None = None,
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "model": self.model,
@@ -70,6 +71,9 @@ class HatzAIProvider:
             payload["tools"] = [tool.to_anthropic() for tool in tools]
         if temperature is not None:
             payload["temperature"] = temperature
+        if tool_choice:
+            # Force a specific tool: the way to get schema-shaped output.
+            payload["tool_choice"] = {"type": "tool", "name": tool_choice}
         return payload
 
     def complete(
@@ -79,8 +83,10 @@ class HatzAIProvider:
         tools: list[ToolSpec] | None = None,
         max_tokens: int = 2048,
         temperature: float | None = None,
+        tool_choice: str | None = None,
     ) -> LLMResponse:
-        return parse_response(self.post_raw(self.build_payload(messages, system, tools, max_tokens, temperature)))
+        return parse_response(self.post_raw(
+            self.build_payload(messages, system, tools, max_tokens, temperature, tool_choice)))
 
     def post_raw(self, payload: dict[str, Any]) -> dict[str, Any]:
         last_error: Exception = HatzAIError("Unknown error")

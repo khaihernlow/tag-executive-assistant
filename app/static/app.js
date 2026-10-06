@@ -148,7 +148,7 @@ function renderSignoff(pending) {
 
 // ── cards ──────────────────────────────────────────────────────────────────────
 
-const KIND_LABELS = { create_event: "Calendar invite" };
+const KIND_LABELS = { create_event: "Calendar invite", move_to_junk: "Inbox clean-up" };
 
 function slip(action) {
   const node = el("div", { class: "slip", "data-action-id": action.action_id });
@@ -161,6 +161,11 @@ function fillSlip(node, action) {
   const summary = el("p", { class: "slip__summary" }, main,
     ...warnings.map((w) => el("span", { class: "warn", text: `⚠ ${w}` })));
   const parts = [el("p", { class: "slip__kind", text: KIND_LABELS[action.kind] || action.kind }), summary];
+  if (action.items && action.items.length) {
+    parts.push(el("ul", { class: "slip__items" }, action.items.map((i) => el("li", {},
+      el("span", { class: "slip__item-title", text: i.subject }),
+      el("span", { class: "slip__item-sub", text: [i.from, i.reason].filter(Boolean).join(" \u00b7 ") })))));
+  }
   node.className = "slip";
 
   if (action.status === "pending") {
@@ -168,7 +173,7 @@ function fillSlip(node, action) {
     const decline = el("button", { class: "btn", type: "button", text: "Decline" });
     const decide = async (verb) => {
       approve.disabled = decline.disabled = true;
-      approve.textContent = verb === "approve" ? "Booking…" : approve.textContent;
+      approve.textContent = verb === "approve" ? "Working…" : approve.textContent;
       try {
         const updated = await api(`/api/actions/${action.action_id}/${verb}`, { method: "POST" });
         updateSlips(updated);
@@ -185,7 +190,10 @@ function fillSlip(node, action) {
   } else if (action.status === "executed") {
     node.classList.add("slip--done");
     const r = action.result || {};
-    parts.push(el("span", { class: "stamp stamp--done" }, "✓ Signed · booked",
+    const doneText = action.kind === "move_to_junk"
+      ? `✓ Moved ${r.moved ?? ""} to Junk${r.failed && r.failed.length ? ` · ${r.failed.length} failed` : ""}`
+      : "✓ Signed · booked";
+    parts.push(el("span", { class: "stamp stamp--done" }, doneText,
       r.join_url ? el("a", { href: r.join_url, target: "_blank", rel: "noopener", text: "Teams link" }) : null,
       r.web_link ? el("a", { href: r.web_link, target: "_blank", rel: "noopener", text: "Outlook" }) : null));
   } else if (action.status === "rejected") {
@@ -294,6 +302,11 @@ function renderCard(card) {
     case "people": return peopleCard(card);
     case "events": return eventsCard(card);
     case "action": return slip(card);
+    case "unsure": return el("div", { class: "card" },
+      el("p", { class: "card__label", text: "Not sure \u2014 left in your inbox" }),
+      el("ul", { class: "rows" }, card.items.map((i) => el("li", { class: "row" },
+        el("span", { class: "row__title", text: i.subject }),
+        el("span", { class: "row__sub", text: [i.from, i.reason].filter(Boolean).join(" \u00b7 ") })))));
     case "memory": return el("p", { class: "memory-note", text: `✓ ${card.text}` });
     default: return null;
   }
@@ -476,6 +489,9 @@ $("#composer").addEventListener("submit", (e) => {
   autosize();
   send(text);
 });
+document.querySelectorAll("#quick .chip").forEach((chip) =>
+  chip.addEventListener("click", () => send(chip.dataset.say)));
+
 $("#new-chat").addEventListener("click", () => {
   conversationId = null;
   writeStored(null);

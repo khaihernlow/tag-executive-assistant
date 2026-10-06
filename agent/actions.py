@@ -70,7 +70,7 @@ class Actions:
 
 def public_action(action: dict[str, Any]) -> dict[str, Any]:
     """What the model and UI see: never the raw payload internals beyond what's useful."""
-    return {
+    out = {
         "action_id": action["id"],
         "kind": action["kind"],
         "status": action["status"],
@@ -78,3 +78,8 @@ def public_action(action: dict[str, Any]) -> dict[str, Any]:
         "result": action.get("result"),
         "error": action.get("error"),
     }
+    items = (action.get("payload") or {}).get("items")
+    if items:
+        # Batch actions (e.g. moving several emails): show each one on the slip.
+        out["items"] = [{k: i.get(k) for k in ("from", "subject", "reason")} for i in items]
+    return out

@@ -361,6 +361,22 @@ button { font: inherit; color: inherit; }
 
 .memory-note { margin: 0; font-size: 13px; color: var(--sage); }
 
+.quick { display: flex; gap: var(--s2); flex-wrap: wrap; padding-top: var(--s5); }
+.chip {
+  padding: 6px 12px;
+  border: 1px solid var(--rule-strong);
+  border-radius: 999px;
+  background: var(--paper-raised);
+  font-size: 14px; font-weight: 500;
+  cursor: pointer;
+}
+.chip:active { background: var(--paper-inset); }
+
+.slip__items { list-style: none; margin: var(--s2) 0 0; padding: 0; max-height: 260px; overflow-y: auto; }
+.slip__items li { padding: 6px 0; border-top: 1px solid var(--rule-soft); }
+.slip__item-title { display: block; font-size: 14px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.slip__item-sub { display: block; font-size: 12px; color: var(--ink-faint); }
+
 /* ── sign-off slip (approval) — the signature element ────────────────────── */
 
 .slip {

@@ -66,6 +66,14 @@ def build_cards(trace: list[ToolTrace]) -> list[dict[str, Any]]:
                 verb = "Remembered" if t.name == "remember" else "Forgot"
                 cards.append({"type": "memory", "text": f"{verb}: " + "; ".join(items)})
 
+        elif t.name == "sweep_junk":
+            if data.get("proposal"):
+                p = data["proposal"]
+                cards.append({"type": "action", **{k: p.get(k) for k in
+                                                    ("action_id", "kind", "status", "summary", "result", "error", "items")}})
+            if data.get("unsure"):
+                cards.append({"type": "unsure", "items": data["unsure"]})
+
         elif t.name == "create_event":
             cards.append({"type": "action", **{k: data.get(k) for k in
                                                 ("action_id", "kind", "status", "summary", "result", "error")}})
@@ -77,6 +85,6 @@ def _dedupe(cards: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Keep the last card of each repeated lookup (the model often refines a search)."""
     last_index: dict[str, int] = {}
     for i, card in enumerate(cards):
-        if card["type"] not in ("action", "memory"):
+        if card["type"] not in ("action", "memory", "unsure"):
             last_index[card["type"]] = i
-    return [c for i, c in enumerate(cards) if c["type"] in ("action", "memory") or last_index[c["type"]] == i]
+    return [c for i, c in enumerate(cards) if c["type"] in ("action", "memory", "unsure") or last_index[c["type"]] == i]
