@@ -50,7 +50,9 @@ def _without_results(message: dict[str, Any]) -> dict[str, Any]:
 
 
 class Assistant:
-    def __init__(self, llm: LLMProvider, registry: ToolRegistry, store: Store, actions: Actions) -> None:
+    def __init__(self, llm: LLMProvider, registry: ToolRegistry, store: Store, actions: Actions,
+                 memory: Any = None) -> None:
+        self.memory = memory
         self.llm = llm
         self.registry = registry
         self.store = store
@@ -68,7 +70,8 @@ class Assistant:
         history = trim_history(conversation["llm_messages"]) + [{"role": "user", "content": text}]
         token = current_conversation.set(conversation_id)
         try:
-            result = run_turn(self.llm, self.registry, history, system_prompt(datetime.now(local_zone())))
+            memory = self.memory.prompt_section() if self.memory else ""
+            result = run_turn(self.llm, self.registry, history, system_prompt(datetime.now(local_zone()), memory))
         finally:
             current_conversation.reset(token)
 

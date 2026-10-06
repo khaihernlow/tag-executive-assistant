@@ -40,9 +40,16 @@ CREATE TABLE IF NOT EXISTS actions (
     executed_at     TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_actions_status ON actions(status, created_at);
+
+CREATE TABLE IF NOT EXISTS memory (
+    key        TEXT PRIMARY KEY,   -- e.g. "alias:kai", "pref:day_start", "note:<id>"
+    kind       TEXT NOT NULL,      -- alias | pref | note
+    value      TEXT NOT NULL,      -- JSON
+    updated_at TEXT NOT NULL
+);
 """
 
-_JSON_FIELDS = {"llm_messages", "display", "payload", "result"}
+_JSON_FIELDS = {"llm_messages", "display", "payload", "result", "value"}
 
 
 def now_iso() -> str:
@@ -137,4 +144,24 @@ class Store:
                                  (status, limit)).fetchall()
         else:
             rows = self._execute("SELECT * FROM actions ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()
+        return [self._row(r) for r in rows]
+
+    # ── memory ───────────────────────────────────────────────────────────────
+
+    def set_memory(self, key: str, kind: str, value: Any) -> None:
+        self._execute(
+            "INSERT INTO memory (key, kind, value, updated_at) VALUES (?, ?, ?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET kind = excluded.kind, value = excluded.value, "
+            "updated_at = excluded.updated_at",
+            (key, kind, json.dumps(value), now_iso()),
+        )
+
+    def delete_memory(self, key: str) -> bool:
+        return self._execute("DELETE FROM memory WHERE key = ?", (key,)).rowcount == 1
+
+    def list_memory(self, kind: str | None = None) -> list[dict[str, Any]]:
+        if kind:
+            rows = self._execute("SELECT * FROM memory WHERE kind = ? ORDER BY key", (kind,)).fetchall()
+        else:
+            rows = self._execute("SELECT * FROM memory ORDER BY kind, key").fetchall()
         return [self._row(r) for r in rows]

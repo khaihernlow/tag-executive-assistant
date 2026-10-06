@@ -294,6 +294,7 @@ function renderCard(card) {
     case "people": return peopleCard(card);
     case "events": return eventsCard(card);
     case "action": return slip(card);
+    case "memory": return el("p", { class: "memory-note", text: `✓ ${card.text}` });
     default: return null;
   }
 }

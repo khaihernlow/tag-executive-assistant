@@ -266,6 +266,10 @@ Needs: `find_person`, `search_mail` + `read_email` + `extract_request`, `find_mu
   (e.g. Apollo / People Data Labs) if profiles really need more depth.
 - **R4 — Grubhub.** There's no public ordering API, so it would mean automating the website,
   including payment. Fragile. Phase 5, and maybe "build the cart, Dave/Kai taps order".
+- **R7 — Voice. Checked 2026-10-05: HatzAI has no audio support.** No transcription endpoint, and
+  audio sent to models through its gateways is silently dropped (one model then invented a
+  transcript). For now Dave uses iPhone keyboard dictation in the text box. Options for a real mic
+  button later: self-hosted Whisper on TAG's server (private, free), or a paid speech-to-text API.
 - **R5 — SMS.** Maria texts people. Texting needs Twilio or similar (cost, number registration).
   Not needed until scheduling-by-text or lunch.
 - **R6 — Sending as Dave vs. as the assistant.** Decide whether scheduling emails go from Dave's

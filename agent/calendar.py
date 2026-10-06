@@ -161,7 +161,11 @@ def event_detail(e: Event) -> dict[str, Any]:
     }
 
 
-def calendar_tools(source: CalendarSource) -> list[Tool]:
+def _default(memory: Any, key: str, fallback: str) -> str:
+    return memory.pref(key) if memory else fallback
+
+
+def calendar_tools(source: CalendarSource, memory: Any = None) -> list[Tool]:
     def list_events(args: dict[str, Any]) -> dict[str, Any]:
         tz = local_zone()
         _, _, start, end = day_range(args["start_date"], args["end_date"], tz)
@@ -212,10 +216,10 @@ def calendar_tools(source: CalendarSource) -> list[Tool]:
             events,
             first,
             last,
-            timedelta(minutes=int(args.get("duration_minutes", 30))),
+            timedelta(minutes=int(args.get("duration_minutes") or _default(memory, "meeting_minutes", "30"))),
             tz,
-            day_start=time.fromisoformat(args.get("earliest", "08:00")),
-            day_end=time.fromisoformat(args.get("latest", "17:00")),
+            day_start=time.fromisoformat(args.get("earliest") or _default(memory, "day_start", "08:00")),
+            day_end=time.fromisoformat(args.get("latest") or _default(memory, "day_end", "17:00")),
         )
         return {
             "timezone": str(tz),
@@ -268,9 +272,9 @@ def calendar_tools(source: CalendarSource) -> list[Tool]:
                     "type": "object",
                     "properties": {
                         **date_props,
-                        "duration_minutes": {"type": "integer", "description": "Meeting length, default 30"},
-                        "earliest": {"type": "string", "description": "Day start HH:MM, default 08:00"},
-                        "latest": {"type": "string", "description": "Day end HH:MM, default 17:00"},
+                        "duration_minutes": {"type": "integer", "description": "Meeting length; omit to use Dave's default"},
+                        "earliest": {"type": "string", "description": "Day start HH:MM; omit to use Dave's preference"},
+                        "latest": {"type": "string", "description": "Day end HH:MM; omit to use Dave's preference"},
                     },
                     "required": ["start_date", "end_date"],
                 },

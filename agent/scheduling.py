@@ -10,7 +10,7 @@ from __future__ import annotations
 from datetime import time, timedelta, timezone
 from typing import Any, Protocol
 
-from agent.calendar import day_range, fmt_local, find_free_slots, local_zone, parse_event
+from agent.calendar import _default, day_range, fmt_local, find_free_slots, local_zone, parse_event
 from agent.tools import Tool
 from llm.provider import ToolSpec
 
@@ -49,7 +49,7 @@ def _utc_naive(value) -> str:
     return value.astimezone(timezone.utc).replace(tzinfo=None).isoformat()
 
 
-def scheduling_tools(graph: GraphSource) -> list[Tool]:
+def scheduling_tools(graph: GraphSource, memory: Any = None) -> list[Tool]:
     def mutual_time(args: dict[str, Any]) -> dict[str, Any]:
         attendees = [a.strip().lower() for a in args.get("attendees") or []]
         bad = [a for a in attendees if "@" not in a]
@@ -62,9 +62,9 @@ def scheduling_tools(graph: GraphSource) -> list[Tool]:
         busy, unavailable = get_busy(graph, people, start, end)
         slots = find_free_slots(
             busy, first, last,
-            timedelta(minutes=int(args.get("duration_minutes", 30))), tz,
-            day_start=time.fromisoformat(args.get("earliest", "08:00")),
-            day_end=time.fromisoformat(args.get("latest", "17:00")),
+            timedelta(minutes=int(args.get("duration_minutes") or _default(memory, "meeting_minutes", "30"))), tz,
+            day_start=time.fromisoformat(args.get("earliest") or _default(memory, "day_start", "08:00")),
+            day_end=time.fromisoformat(args.get("latest") or _default(memory, "day_end", "17:00")),
         )
         result: dict[str, Any] = {
             "timezone": str(tz),
@@ -93,9 +93,9 @@ def scheduling_tools(graph: GraphSource) -> list[Tool]:
                                       "description": "Email addresses (Dave is included automatically)"},
                         "start_date": {"type": "string", "description": "First day, YYYY-MM-DD"},
                         "end_date": {"type": "string", "description": "Last day (inclusive), YYYY-MM-DD"},
-                        "duration_minutes": {"type": "integer", "description": "Meeting length, default 30"},
-                        "earliest": {"type": "string", "description": "Day start HH:MM, default 08:00"},
-                        "latest": {"type": "string", "description": "Day end HH:MM, default 17:00"},
+                        "duration_minutes": {"type": "integer", "description": "Meeting length; omit to use Dave's default"},
+                        "earliest": {"type": "string", "description": "Day start HH:MM; omit to use Dave's preference"},
+                        "latest": {"type": "string", "description": "Day end HH:MM; omit to use Dave's preference"},
                     },
                     "required": ["attendees", "start_date", "end_date"],
                 },

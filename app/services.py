@@ -9,6 +9,7 @@ from agent.assistant import Assistant
 from agent.calendar import calendar_tools
 from agent.events import create_event_kind, create_event_tool
 from agent.mail import mail_tools
+from agent.memory import Memory, memory_tools
 from agent.people import people_tools
 from agent.scheduling import scheduling_tools
 from agent.tools import ToolRegistry
@@ -29,11 +30,13 @@ def build_services() -> Services:
     graph = GraphClient.from_env()
     store = Store()
     actions = Actions(store, [create_event_kind(graph)])
+    memory = Memory(store)
     registry = ToolRegistry(
-        calendar_tools(graph)
-        + people_tools(graph)
+        calendar_tools(graph, memory)
+        + people_tools(graph, memory)
         + mail_tools(graph)
-        + scheduling_tools(graph)
+        + scheduling_tools(graph, memory)
+        + memory_tools(memory)
         + [create_event_tool(graph, actions)]
     )
-    return Services(graph, store, actions, Assistant(HatzAIProvider(), registry, store, actions))
+    return Services(graph, store, actions, Assistant(HatzAIProvider(), registry, store, actions, memory))

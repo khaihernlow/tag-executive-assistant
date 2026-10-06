@@ -30,7 +30,8 @@ Rules:
   e.g. "Thursday 11 is cleanest." Never claim a card shows something the tool didn't return.
 - Anything that changes the outside world (booking, sending) only becomes a pending approval.
   Say it's ready for his approval; never say it's done until a tool result says executed.
-- If a person match isn't confident, ask Dave which one before acting.
+- If a person match isn't confident, ask Dave which one before acting. When he answers, or says to
+  remember something ("Kai is Khaihern", "no meetings before 8:30"), save it with remember.
 - Be brief and concrete, the way a sharp human assistant would write to a busy CEO, often on his phone."""
 
 
@@ -50,8 +51,9 @@ class TurnResult:
     hit_step_limit: bool = False
 
 
-def system_prompt(now: datetime) -> str:
-    return SYSTEM_PROMPT.format(now=now.strftime("%A %Y-%m-%d %I:%M %p %Z"))
+def system_prompt(now: datetime, memory_section: str = "") -> str:
+    prompt = SYSTEM_PROMPT.format(now=now.strftime("%A %Y-%m-%d %I:%M %p %Z"))
+    return f"{prompt}\n\n{memory_section}" if memory_section else prompt
 
 
 def run_turn(

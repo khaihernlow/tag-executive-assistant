@@ -202,8 +202,14 @@ def match_note(matches: list[Person]) -> str:
     return "Confident match."
 
 
-def people_tools(graph: GraphSource) -> list[Tool]:
+def people_tools(graph: GraphSource, memory: Any = None) -> list[Tool]:
     def find_person(args: dict[str, Any]) -> dict[str, Any]:
+        alias = memory.alias(args["name"]) if memory else None
+        if alias:
+            # Dave told us who this is; no guessing.
+            person = Person(name=alias["name"], email=alias["email"],
+                            internal=alias["email"].endswith("@" + internal_domain()), score=1.0)
+            return {"matches": [asdict(person)], "note": "Confident match.", "source": "remembered alias"}
         matches = find_people(graph, args["name"])
         note = match_note(matches)
         if note == "Confident match.":
