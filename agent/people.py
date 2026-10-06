@@ -49,7 +49,7 @@ def name_score(query: str, name: str, email: str) -> float:
     mailbox name; 0.9 near-complete prefix ("Garret"); 0.85 prefix of 4+
     letters ("Khai" -> "Khaihern"); 0.8 nickname-like (same first letter,
     query letters in order near the start: "Kai" -> "Khaihern"); 0.75
-    short prefix ("Kai" -> "Kaitlynn"); fuzzy below that.
+    short prefix ("Kai" -> "Kaitlyn"); fuzzy below that.
     """
     q = query.strip().lower().replace(",", "")
     n = name.strip().lower().replace(",", "")
@@ -90,7 +90,7 @@ def _is_subsequence(needle: str, haystack: str) -> bool:
 
 def _is_relay_address(email: str) -> bool:
     # Marketing/transactional senders encode the real address in the local
-    # part (gsmith=tagsolutions.com@...hs-send.com); never a real contact.
+    # part (gstone=tag.example@...hs-send.com); never a real contact.
     return "=" in email.split("@")[0]
 
 
@@ -173,6 +173,18 @@ def find_people(graph: GraphSource, query: str, limit: int = 5) -> list[Person]:
         reverse=True,
     )
     return ranked[:limit]
+
+
+def is_known_address(graph: GraphSource, email: str) -> bool:
+    """Exact check: is this address in TAG's directory or among people Dave
+    deals with? (Name matching is fuzzy on purpose; this must not be.)"""
+    email = email.strip().lower()
+    for raw in graph.get_all("/me/people", {"$search": f'"{email}"', "$top": 5, "$select": PEOPLE_SELECT}, limit=5):
+        if any((e.get("address") or "").lower() == email for e in raw.get("scoredEmailAddresses") or []):
+            return True
+    odata = email.replace("'", "''")
+    return bool(graph.get_all("/users", {"$filter": f"mail eq '{odata}' or userPrincipalName eq '{odata}'",
+                                         "$select": "mail"}, limit=1))
 
 
 def match_note(matches: list[Person]) -> str:

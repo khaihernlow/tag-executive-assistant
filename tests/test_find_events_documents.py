@@ -34,7 +34,7 @@ def raw_event(subject, start_utc, end_utc, attendees=(), preview="", location=""
 
 INTERVIEW = raw_event(
     "Interview SDR Role", "2026-10-06T19:00:00", "2026-10-06T19:30:00",
-    attendees=[("chelsiampawa@gmail.com", "chelsiampawa@gmail.com"), ("Gabe", "gabe@tagsolutions.com")],
+    attendees=[("Jordan Rivera", "candidate@mail.example"), ("Sam", "gabe@tag.example")],
     preview="Interview discussion regarding the sales opportunity. ________________ Microsoft Teams Need help? Join...",
 )
 SALES = raw_event("Sales meeting", "2026-10-06T12:30:00", "2026-10-06T13:15:00")
@@ -42,7 +42,7 @@ SALES = raw_event("Sales meeting", "2026-10-06T12:30:00", "2026-10-06T13:15:00")
 
 def test_find_events_matches_attendee_email_and_all_words():
     events = [parse_event(r, NY) for r in (INTERVIEW, SALES)]
-    assert [e.subject for e in find_events(events, "chelsi")] == ["Interview SDR Role"]
+    assert [e.subject for e in find_events(events, "jordan")] == ["Interview SDR Role"]
     assert [e.subject for e in find_events(events, "interview gabe")] == ["Interview SDR Role"]
     assert find_events(events, "interview bob") == []
     assert find_events(events, "") == []
@@ -54,11 +54,11 @@ def test_find_events_tool_returns_detail_without_teams_boilerplate():
             return [INTERVIEW, SALES]
 
     content, is_error = ToolRegistry(calendar_tools(Source())).run(
-        ToolCall("t", "find_events", {"about": "Chelsi", "start_date": "2026-10-01", "end_date": "2026-10-10"}))
+        ToolCall("t", "find_events", {"about": "Jordan", "start_date": "2026-10-01", "end_date": "2026-10-10"}))
     [event] = json.loads(content)["events"]
     assert not is_error
     assert event["description"] == "Interview discussion regarding the sales opportunity."
-    assert {"name": "Gabe", "email": "gabe@tagsolutions.com"} in event["attendees"]
+    assert {"name": "Sam", "email": "gabe@tag.example"} in event["attendees"]
     assert event["start"] == "Tue Oct 6 3:00 PM"
 
 
@@ -73,8 +73,8 @@ def docx_bytes(paragraphs):
 
 
 def test_extracts_word_html_and_text():
-    assert extract_text(docx_bytes(["Chelsi Ampawa", "SDR, 1 year &amp; counting"]), "resume.docx") == \
-        "Chelsi Ampawa\nSDR, 1 year & counting"
+    assert extract_text(docx_bytes(["Jordan Rivera", "SDR, 1 year &amp; counting"]), "resume.docx") == \
+        "Jordan Rivera\nSDR, 1 year & counting"
     assert extract_text(b"<p>Hello<br>there</p><script>x()</script>", "a.html") == "Hello\nthere"
     assert extract_text(b"plain notes", "", "text/plain") == "plain notes"
 
@@ -88,21 +88,21 @@ def test_unreadable_files_say_so_instead_of_guessing():
 
 def test_read_attachment_accepts_id_or_file_name():
     class Graph:
-        mailbox = "dvener@tagsolutions.com"
+        mailbox = "dave@tag.example"
 
         def __init__(self):
             self.paths = []
 
         def get_all(self, path, params=None, limit=500, headers=None):
-            return [{"id": "a1", "name": "CHELSI Resume.docx", "contentType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"}]
+            return [{"id": "a1", "name": "JORDAN Resume.docx", "contentType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"}]
 
         def get_bytes(self, path):
             self.paths.append(path)
-            return docx_bytes(["Chelsi Ampawa"])
+            return docx_bytes(["Jordan Rivera"])
 
     graph = Graph()
-    assert read_attachment(graph, "m1", "a1") == {"name": "CHELSI Resume.docx", "text": "Chelsi Ampawa"}
-    assert read_attachment(graph, "m1", "chelsi resume.docx")["text"] == "Chelsi Ampawa"
-    assert graph.paths[-1] == "/users/dvener@tagsolutions.com/messages/m1/attachments/a1/$value"
-    with pytest.raises(ValueError, match="Attachments: CHELSI Resume.docx"):
+    assert read_attachment(graph, "m1", "a1") == {"name": "JORDAN Resume.docx", "text": "Jordan Rivera"}
+    assert read_attachment(graph, "m1", "jordan resume.docx")["text"] == "Jordan Rivera"
+    assert graph.paths[-1] == "/users/dave@tag.example/messages/m1/attachments/a1/$value"
+    with pytest.raises(ValueError, match="Attachments: JORDAN Resume.docx"):
         read_attachment(graph, "m1", "other.pdf")

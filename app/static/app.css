@@ -131,6 +131,32 @@ button { font: inherit; color: inherit; }
   letter-spacing: -0.01em;
 }
 
+.masthead__actions { display: flex; gap: var(--s2); }
+
+/* recent conversations: a sheet that drops from the masthead */
+.sheet { position: relative; }
+.recent {
+  position: fixed; inset: 0;
+  z-index: 10;
+  background: rgba(20, 23, 28, 0.25);
+}
+.recent__panel {
+  max-width: 608px;
+  margin: calc(env(safe-area-inset-top) + 72px) auto 0;
+  width: calc(100% - 2 * var(--s4));
+  max-height: 70dvh;
+  overflow-y: auto;
+  background: var(--paper-raised);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-lg);
+  padding: var(--s3) var(--s4);
+  box-shadow: 0 8px 24px rgba(20, 23, 28, 0.12);
+}
+.recent__head { display: flex; justify-content: space-between; align-items: baseline; }
+.recent__head .block__title { margin: 0 0 var(--s2); }
+.link-btn { border: 0; background: none; color: var(--navy); font-weight: 600; font-size: 14px; cursor: pointer; padding: var(--s1); }
+.row--current .row__title { color: var(--brass); }
+
 .icon-btn {
   width: 40px; height: 40px;
   display: grid; place-items: center;
@@ -150,7 +176,19 @@ button { font: inherit; color: inherit; }
   overflow-y: auto;
   overscroll-behavior: contain;
   padding: 0 var(--s4) var(--s6);
+  scrollbar-width: thin;
+  scrollbar-color: var(--rule-strong) transparent;
 }
+/* Quiet scrollbars on desktop (iOS hides them anyway) */
+.scroll::-webkit-scrollbar, .composer textarea::-webkit-scrollbar { width: 8px; }
+.scroll::-webkit-scrollbar-button, .composer textarea::-webkit-scrollbar-button { display: none; height: 0; }
+.scroll::-webkit-scrollbar-thumb, .composer textarea::-webkit-scrollbar-thumb {
+  background: var(--rule-strong);
+  border-radius: 4px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+.scroll::-webkit-scrollbar-track, .composer textarea::-webkit-scrollbar-track { background: transparent; }
 
 .block { padding-top: var(--s5); }
 .block__title {
@@ -384,6 +422,8 @@ button { font: inherit; color: inherit; }
   color: var(--ink);
   font: 16px/1.4 var(--sans); /* 16px stops iOS zooming on focus */
   resize: none;
+  overflow-y: hidden; /* JS turns scrolling on only past max-height */
+  scrollbar-width: thin;
 }
 .composer textarea::placeholder { color: var(--ink-ghost); }
 .send {

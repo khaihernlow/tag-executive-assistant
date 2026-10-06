@@ -23,7 +23,7 @@ def _load(trace: ToolTrace) -> dict[str, Any] | None:
 
 def build_cards(trace: list[ToolTrace]) -> list[dict[str, Any]]:
     cards: list[dict[str, Any]] = []
-    read_ids = {t.input.get("message_id") for t in trace if t.name == "read_email" and not t.is_error}
+    opened_mail = any(t.name in ("read_email", "read_attachment") and not t.is_error for t in trace)
 
     for t in trace:
         data = _load(t)
@@ -42,10 +42,11 @@ def build_cards(trace: list[ToolTrace]) -> list[dict[str, Any]]:
         elif t.name in ("list_calendar_events", "find_events"):
             cards.append({"type": "events", "events": data.get("events", [])})
 
-        elif t.name == "search_mail" and data.get("messages"):
-            # If the model went on to open one of these, the email card says it all.
-            if not read_ids & {m["id"] for m in data["messages"]}:
-                cards.append({"type": "emails", "emails": data["messages"]})
+        elif t.name == "search_mail" and data.get("messages") and not opened_mail:
+            # Once the model opened emails, those are the answer and the search list
+            # is noise. Otherwise show exact matches, falling back to partial ones.
+            exact = [m for m in data["messages"] if m.get("matched") != "some words"]
+            cards.append({"type": "emails", "emails": exact or data["messages"]})
 
         elif t.name == "read_email":
             cards.append({

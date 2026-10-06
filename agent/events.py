@@ -13,6 +13,7 @@ from typing import Any, Protocol
 
 from agent.actions import ActionKind, Actions, public_action
 from agent.calendar import fmt_local, local_zone
+from agent.people import is_known_address
 from agent.scheduling import get_busy
 from agent.tools import Tool
 from llm.provider import ToolSpec
@@ -60,7 +61,13 @@ def validate_event(args: dict[str, Any], now: datetime | None = None) -> dict[st
     }
 
 
-def summarize_event(payload: dict[str, Any], conflicts: list[str], unchecked: list[str]) -> str:
+def unknown_attendees(graph: Any, payload: dict[str, Any]) -> list[str]:
+    """Addresses not found in the directory or Dave's contacts: likely typos."""
+    return [a["email"] for a in payload["attendees"] if not is_known_address(graph, a["email"])]
+
+
+def summarize_event(payload: dict[str, Any], conflicts: list[str], unchecked: list[str],
+                    unknown: list[str] | None = None) -> str:
     start = datetime.fromisoformat(payload["start"])
     end = datetime.fromisoformat(payload["end"])
     who = ", ".join(a["name"] or a["email"] for a in payload["attendees"]) or "just you"
@@ -69,6 +76,8 @@ def summarize_event(payload: dict[str, Any], conflicts: list[str], unchecked: li
     text = f"{kind} “{payload['subject']}” · {fmt_local(start)}–{end.strftime('%I:%M %p').lstrip('0')}{where} · with {who}"
     if conflicts:
         text += f" · ⚠ conflicts: {', '.join(conflicts)}"
+    if unknown:
+        text += f" · ⚠ address not in your contacts or directory (check spelling): {', '.join(unknown)}"
     if unchecked:
         text += f" · couldn't check: {', '.join(unchecked)}"
     return text
@@ -124,8 +133,10 @@ def create_event_tool(graph: GraphSource, actions: Actions) -> Tool:
     def propose(args: dict[str, Any]) -> dict[str, Any]:
         payload = validate_event(args)
         conflicts, unchecked = find_conflicts(graph, payload)
+        unknown = unknown_attendees(graph, payload)
         payload["conflicts"] = conflicts
-        action = actions.propose(KIND, summarize_event(payload, conflicts, unchecked), payload)
+        payload["unknown_attendees"] = unknown
+        action = actions.propose(KIND, summarize_event(payload, conflicts, unchecked, unknown), payload)
         result = public_action(action)
         if action["status"] == "pending":
             result["note"] = ("Not booked yet. Dave sees an approval card; tell him it's ready for his "

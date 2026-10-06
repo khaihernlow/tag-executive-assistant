@@ -243,7 +243,7 @@ def calendar_tools(source: CalendarSource) -> list[Tool]:
                 name="find_events",
                 description=(
                     "Find specific meetings by words in the subject, attendees, location or invite text "
-                    "(e.g. 'Chelsi', 'renewals'). Returns full detail including the invite description "
+                    "(e.g. 'Jordan', 'renewals'). Returns full detail including the invite description "
                     "and attendee emails. Defaults to the last 2 weeks through the next 6 weeks."
                 ),
                 input_schema={

@@ -12,14 +12,14 @@ from llm.provider import ToolCall
 
 @pytest.fixture(autouse=True)
 def env(monkeypatch):
-    monkeypatch.setenv("GRAPH_MAILBOX", "dvener@tagsolutions.com")
+    monkeypatch.setenv("GRAPH_MAILBOX", "dave@tag.example")
     monkeypatch.setenv("ASSISTANT_TIMEZONE", "America/New_York")
 
 
 class FakeGraph:
     """Answers Graph paths from a dict of {(path, marker): items}."""
 
-    mailbox = "dvener@tagsolutions.com"
+    mailbox = "dave@tag.example"
 
     def __init__(self, routes=None, posts=None, single=None):
         self.routes = routes or {}
@@ -56,14 +56,14 @@ def test_name_score_prefers_exact_and_first_name_matches():
 
 def test_find_people_merges_sources_and_marks_internal():
     graph = FakeGraph({
-        ("/me/people", '"Kai"'): [people_entry("Kai Low", "KLow@tagsolutions.com", jobTitle="Engineer")],
+        ("/me/people", '"Kai"'): [people_entry("Kai Low", "KLow@tag.example", jobTitle="Engineer")],
         ("/users", '"displayName:Kai" OR "mail:Kai"'): [
-            {"displayName": "Kai Low", "mail": "klow@tagsolutions.com"},
-            {"displayName": "Kai Smith", "mail": "ksmith@tagsolutions.com", "accountEnabled": False},
+            {"displayName": "Kai Low", "mail": "klow@tag.example"},
+            {"displayName": "Kai Smith", "mail": "ksmith@tag.example", "accountEnabled": False},
         ],
     })
     people = find_people(graph, "Kai")
-    assert [(p.email, p.internal, p.title) for p in people] == [("klow@tagsolutions.com", True, "Engineer")]
+    assert [(p.email, p.internal, p.title) for p in people] == [("klow@tag.example", True, "Engineer")]
     directory_call = [c for c in graph.calls if c[0] == "/users"][0]
     assert directory_call[2] == {"ConsistencyLevel": "eventual"}
 
@@ -71,11 +71,11 @@ def test_find_people_merges_sources_and_marks_internal():
 def test_nickname_beats_short_prefix_and_relay_addresses_are_dropped():
     graph = FakeGraph({
         ("/me/people", '"Kai"'): [people_entry("Kaitlyn Ward", "kaitlyn.ward@vendor.example"),
-                                  people_entry("Kai Relay", "kai=tagsolutions.com@hs-send.com")],
-        ("/users", None): [{"displayName": "Khaihern Low", "mail": "klow@tagsolutions.com"}],
+                                  people_entry("Kai Relay", "kai=tag.example@hs-send.com")],
+        ("/users", None): [{"displayName": "Khaihern Low", "mail": "klow@tag.example"}],
     })
     people = find_people(graph, "Kai")
-    assert [p.email for p in people] == ["klow@tagsolutions.com", "kaitlyn.ward@vendor.example"]
+    assert [p.email for p in people] == ["klow@tag.example", "kaitlyn.ward@vendor.example"]
     assert match_note(people).startswith("Best guess only (Khaihern Low)")
 
 
@@ -83,23 +83,23 @@ def test_match_note_only_flags_real_ties():
     def p(name, score, internal):
         return Person(name=name, email=name.lower() + "@x.com", internal=internal, score=score)
 
-    assert match_note([p("Garrett Smith", 0.95, True), p("Garrett Smith", 0.95, False)]) == "Confident match."
-    assert match_note([p("Joe Yetto", 0.95, True), p("Joe Barone", 0.95, True)]).startswith("Several")
+    assert match_note([p("Garrett Stone", 0.95, True), p("Garrett Stone", 0.95, False)]) == "Confident match."
+    assert match_note([p("Joe Young", 0.95, True), p("Joe Brown", 0.95, True)]).startswith("Several")
     assert match_note([]).startswith("No one found")
 
 
 def test_find_people_falls_back_to_fuzzy_for_misspellings():
     graph = FakeGraph({
-        ("/me/people", None): [people_entry("Kai Low", "klow@tagsolutions.com"),
-                               people_entry("Joe Baronet", "joe@cpa.com")],
+        ("/me/people", None): [people_entry("Kai Low", "klow@tag.example"),
+                               people_entry("Joe Brownt", "joe@cpa.com")],
     })
     people = find_people(graph, "Khai")
-    assert [p.email for p in people] == ["klow@tagsolutions.com"]
+    assert [p.email for p in people] == ["klow@tag.example"]
 
 
 # ── mail ──────────────────────────────────────────────────────────────────────
 
-def message(mid, received, subject="Project X", sender="klow@tagsolutions.com"):
+def message(mid, received, subject="Project X", sender="klow@tag.example"):
     return {"id": mid, "subject": subject, "receivedDateTime": received, "bodyPreview": "hi",
             "from": {"emailAddress": {"name": "Kai Low", "address": sender}}, "isRead": False}
 
@@ -107,26 +107,26 @@ def message(mid, received, subject="Project X", sender="klow@tagsolutions.com"):
 def test_build_search_quotes_phrases():
     assert build_search("Khai", "Project X") == '"from:Khai Project X"'
     assert build_search("Kai Low", None) == '"from:Kai Low"'
-    assert build_search("klow@tagsolutions.com", 'say "hi"') == '"from:klow@tagsolutions.com say hi"'
+    assert build_search("klow@tag.example", 'say "hi"') == '"from:klow@tag.example say hi"'
     assert build_search(None, None) == ""
-    assert build_search("Kai", "Chelsi SDR", any_word=True) == '"from:Kai (Chelsi OR SDR)"'
+    assert build_search("Kai", "Jordan SDR", any_word=True) == '"from:Kai (Jordan OR SDR)"'
 
 
 def test_search_mail_widens_to_some_words_and_lists_real_attachments():
-    path = "/users/dvener@tagsolutions.com/messages"
+    path = "/users/dave@tag.example/messages"
     resume_mail = {**message("r", "2026-09-24T12:00:00Z", subject="New candidates"),
-                   "attachments": [{"name": "logo.png", "isInline": True}, {"name": "Chelsi Resume.pdf", "isInline": False}]}
+                   "attachments": [{"name": "logo.png", "isInline": True}, {"name": "Jordan Resume.pdf", "isInline": False}]}
     graph = FakeGraph({
-        (path, '"Chelsi interview"'): [message("i", "2026-09-28T12:00:00Z", subject="Interview Chelsi")],
-        (path, '"(Chelsi OR interview)"'): [message("i", "2026-09-28T12:00:00Z"), resume_mail],
+        (path, '"Jordan interview"'): [message("i", "2026-09-28T12:00:00Z", subject="Interview Jordan")],
+        (path, '"(Jordan OR interview)"'): [message("i", "2026-09-28T12:00:00Z"), resume_mail],
     })
-    found = search_mail(graph, about="Chelsi interview", now=datetime(2026, 10, 5, tzinfo=timezone.utc))
+    found = search_mail(graph, about="Jordan interview", now=datetime(2026, 10, 5, tzinfo=timezone.utc))
     assert [(m["id"], m["matched"]) for m in found] == [("i", "all words"), ("r", "some words")]
-    assert found[1]["attachments"] == ["Chelsi Resume.pdf"]
+    assert found[1]["attachments"] == ["Jordan Resume.pdf"]
 
 
 def test_search_mail_drops_old_results_and_sorts_newest_first():
-    path = "/users/dvener@tagsolutions.com/messages"
+    path = "/users/dave@tag.example/messages"
     graph = FakeGraph({(path, '"from:Kai Project X"'): [
         message("old", "2026-07-01T12:00:00Z"),
         message("a", "2026-10-01T12:00:00Z"),
@@ -135,11 +135,11 @@ def test_search_mail_drops_old_results_and_sorts_newest_first():
     found = search_mail(graph, "Kai", "Project X", since_days=30, now=datetime(2026, 10, 5, tzinfo=timezone.utc))
     assert [m["id"] for m in found] == ["b", "a"]
     assert found[0]["received"] == "Sun Oct 4 8:00 AM"
-    assert found[0]["from"]["email"] == "klow@tagsolutions.com"
+    assert found[0]["from"]["email"] == "klow@tag.example"
 
 
 def test_read_email_prefers_unique_body_and_lists_attachments():
-    path = "/users/dvener@tagsolutions.com/messages/m1"
+    path = "/users/dave@tag.example/messages/m1"
     graph = FakeGraph(
         routes={(path + "/attachments", None): [{"name": "plan.pdf", "contentType": "application/pdf", "size": 10}]},
         single={path: {**message("m1", "2026-10-04T12:00:00Z"), "hasAttachments": True,
@@ -161,7 +161,7 @@ def busy(start_utc, end_utc, status="busy"):
             "end": {"dateTime": end_utc, "timeZone": "UTC"}}
 
 
-SCHEDULE_PATH = "/users/dvener@tagsolutions.com/calendar/getSchedule"
+SCHEDULE_PATH = "/users/dave@tag.example/calendar/getSchedule"
 
 
 def run_mutual(graph, **args):
@@ -172,26 +172,26 @@ def run_mutual(graph, **args):
 
 def test_mutual_time_intersects_everyone_and_includes_dave():
     graph = FakeGraph(posts={SCHEDULE_PATH: {"value": [
-        {"scheduleId": "dvener@tagsolutions.com", "scheduleItems": [busy("2026-10-13T12:00:00", "2026-10-13T16:00:00")]},  # 8-12
-        {"scheduleId": "klow@tagsolutions.com", "scheduleItems": [busy("2026-10-13T17:00:00", "2026-10-13T19:00:00", "tentative")]},  # 1-3
+        {"scheduleId": "dave@tag.example", "scheduleItems": [busy("2026-10-13T12:00:00", "2026-10-13T16:00:00")]},  # 8-12
+        {"scheduleId": "klow@tag.example", "scheduleItems": [busy("2026-10-13T17:00:00", "2026-10-13T19:00:00", "tentative")]},  # 1-3
     ]}})
-    result, is_error = run_mutual(graph, attendees=["KLow@tagsolutions.com"])
+    result, is_error = run_mutual(graph, attendees=["KLow@tag.example"])
 
     assert not is_error
     assert result["free_windows"] == [{"from": "Tue Oct 13 12:00 PM", "to": "Tue Oct 13 1:00 PM"},
                                       {"from": "Tue Oct 13 3:00 PM", "to": "Tue Oct 13 5:00 PM"}]
     body = graph.calls[0][1]
-    assert body["schedules"] == ["dvener@tagsolutions.com", "klow@tagsolutions.com"]
+    assert body["schedules"] == ["dave@tag.example", "klow@tag.example"]
     assert body["startTime"] == {"dateTime": "2026-10-13T04:00:00", "timeZone": "UTC"}
 
 
 def test_mutual_time_flags_calendars_it_cannot_see():
     graph = FakeGraph(posts={SCHEDULE_PATH: {"value": [
-        {"scheduleId": "dvener@tagsolutions.com", "scheduleItems": []},
+        {"scheduleId": "dave@tag.example", "scheduleItems": []},
         {"scheduleId": "client@acme.com", "error": {"message": "Not found", "responseCode": "ErrorMailRecipientNotFound"}},
     ]}})
     result, _ = run_mutual(graph, attendees=["client@acme.com"])
-    assert result["checked"] == ["dvener@tagsolutions.com"]
+    assert result["checked"] == ["dave@tag.example"]
     assert result["could_not_check"][0]["email"] == "client@acme.com"
     assert "note" in result
 

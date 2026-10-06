@@ -23,10 +23,25 @@
         <p class="masthead__date" id="date">&nbsp;</p>
         <h1 class="masthead__greeting" id="greeting">Your day</h1>
       </div>
-      <button class="icon-btn" id="new-chat" type="button" aria-label="New conversation" title="New conversation">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
-      </button>
+      <div class="masthead__actions">
+        <button class="icon-btn" id="recent-btn" type="button" aria-label="Recent conversations" title="Recent conversations" aria-expanded="false" aria-controls="recent">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 7v5l3 2"/><path d="M3.5 12a8.5 8.5 0 1 0 2.5-6"/><path d="M3 4v4h4"/></svg>
+        </button>
+        <button class="icon-btn" id="new-chat" type="button" aria-label="New conversation" title="New conversation">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+        </button>
+      </div>
     </header>
+
+    <div class="recent" id="recent" hidden>
+      <div class="recent__panel" role="dialog" aria-label="Recent conversations">
+        <div class="recent__head">
+          <h2 class="block__title">Recent</h2>
+          <button class="link-btn" id="recent-close" type="button">Close</button>
+        </div>
+        <ul class="rows" id="recent-list"></ul>
+      </div>
+    </div>
 
     <main class="scroll" id="scroll">
       <section class="block" aria-labelledby="signoff-title" id="signoff-block" hidden>

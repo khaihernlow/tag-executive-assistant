@@ -8,15 +8,23 @@ const input = $("#input");
 const sendBtn = $("#send");
 
 const STORE_KEY = "ea.conversation";
-let conversationId = readStored();
+const ACTIVE_KEY = "ea.lastActive";
+// After a gap this long, opening the app starts a fresh conversation. Dave
+// never has to manage chats; old ones stay under Recent.
+const FRESH_AFTER_MS = 2 * 60 * 60 * 1000;
 let busy = false;
 
-function readStored() {
-  try { return localStorage.getItem(STORE_KEY); } catch { return null; }
+function readStored(key = STORE_KEY) {
+  try { return localStorage.getItem(key); } catch { return null; }
 }
-function writeStored(value) {
-  try { value ? localStorage.setItem(STORE_KEY, value) : localStorage.removeItem(STORE_KEY); } catch { /* private mode */ }
+function writeStored(value, key = STORE_KEY) {
+  try { value ? localStorage.setItem(key, value) : localStorage.removeItem(key); } catch { /* private mode */ }
 }
+
+let conversationId = (() => {
+  const lastActive = Number(readStored(ACTIVE_KEY) || 0);
+  return Date.now() - lastActive < FRESH_AFTER_MS ? readStored() : null;
+})();
 
 function el(tag, attrs = {}, ...children) {
   const node = document.createElement(tag);
@@ -302,19 +310,68 @@ function addBrief(text, cards = []) {
   thread.append(el("div", { class: "brief" }, text ? textNode : null, ...cards.map(renderCard)));
 }
 
-async function restoreConversation() {
-  if (!conversationId) return;
+async function openConversation(id) {
+  if (!id) return;
   try {
-    const convo = await api(`/api/conversations/${encodeURIComponent(conversationId)}`);
+    const convo = await api(`/api/conversations/${encodeURIComponent(id)}`);
+    thread.replaceChildren();
     for (const m of convo.messages) {
       if (m.role === "user") addNote(m.text); else addBrief(m.text, m.cards || []);
     }
+    conversationId = id;
+    writeStored(id);
     scrollToEnd();
   } catch {
     conversationId = null;
     writeStored(null);
   }
 }
+
+// ── recent conversations ───────────────────────────────────────────────────────
+
+function ago(iso) {
+  const minutes = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.round(hours / 24);
+  return days === 1 ? "yesterday" : `${days} days ago`;
+}
+
+function closeRecent() {
+  $("#recent").hidden = true;
+  $("#recent-btn").setAttribute("aria-expanded", "false");
+}
+
+async function showRecent() {
+  $("#recent").hidden = false;
+  $("#recent-btn").setAttribute("aria-expanded", "true");
+  const list = $("#recent-list");
+  list.replaceChildren(el("li", { class: "itinerary__empty", text: "Loading…" }));
+  try {
+    const { conversations } = await api("/api/conversations");
+    if (!conversations.length) {
+      list.replaceChildren(el("li", { class: "itinerary__empty", text: "No conversations yet." }));
+      return;
+    }
+    list.replaceChildren(...conversations.map((c) => el("li", {},
+      el("button", {
+        class: `row row--tap${c.id === conversationId ? " row--current" : ""}`, type: "button",
+        onclick: () => { closeRecent(); openConversation(c.id); },
+      },
+        el("span", { class: "row__top" },
+          el("span", { class: "row__title", text: c.title || "Untitled" }),
+          el("span", { class: "row__when", text: ago(c.updated_at) }))))));
+  } catch (err) {
+    list.replaceChildren(el("li", { class: "error", text: `Couldn't load: ${err.message}` }));
+  }
+}
+
+$("#recent-btn").addEventListener("click", () => ($("#recent").hidden ? showRecent() : closeRecent()));
+$("#recent-close").addEventListener("click", closeRecent);
+$("#recent").addEventListener("click", (e) => { if (e.target.id === "recent") closeRecent(); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeRecent(); });
 
 async function send(text) {
   text = (text || "").trim();
@@ -332,6 +389,7 @@ async function send(text) {
     });
     conversationId = reply.conversation_id;
     writeStored(conversationId);
+    writeStored(String(Date.now()), ACTIVE_KEY);
     thinking.remove();
     addBrief(reply.text, reply.cards);
     if (reply.cards.some((c) => c.type === "action")) loadToday();
@@ -351,7 +409,9 @@ async function send(text) {
 
 function autosize() {
   input.style.height = "auto";
-  input.style.height = `${Math.min(input.scrollHeight, 160)}px`;
+  const full = input.scrollHeight + 2; // + borders, so a single line never shows a scrollbar
+  input.style.height = `${Math.min(full, 160)}px`;
+  input.style.overflowY = full > 160 ? "auto" : "hidden";
 }
 
 input.addEventListener("input", () => { sendBtn.disabled = busy || !input.value.trim(); autosize(); });
@@ -377,7 +437,7 @@ $("#new-chat").addEventListener("click", () => {
 });
 
 loadToday();
-restoreConversation();
+openConversation(conversationId);
 setInterval(loadToday, 5 * 60 * 1000);
 
 if ("serviceWorker" in navigator) {

@@ -26,7 +26,7 @@ def text(value):
 
 
 class FakeGraph:
-    mailbox = "dvener@tagsolutions.com"
+    mailbox = "dave@tag.example"
 
     def calendar_view(self, start, end):
         soon = (datetime.now(timezone.utc) + timedelta(minutes=5)).strftime("%Y-%m-%dT%H:%M:%S")
@@ -109,3 +109,21 @@ def test_trim_history_cuts_only_at_real_user_turns():
     trimmed = trim_history(msgs, max_turns=2)
     assert trimmed[0] == {"role": "user", "content": "q2"}
     assert len(trimmed) == 8
+
+
+def test_old_tool_results_are_dropped_but_pairs_stay_intact():
+    from agent.assistant import STALE_RESULT
+
+    msgs = []
+    for i in range(3):
+        msgs += [{"role": "user", "content": f"q{i}"},
+                 {"role": "assistant", "content": [{"type": "tool_use", "id": f"t{i}", "name": "x", "input": {}}]},
+                 {"role": "user", "content": [{"type": "tool_result", "tool_use_id": f"t{i}", "content": f"data{i}"}]},
+                 {"role": "assistant", "content": [{"type": "text", "text": f"a{i}"}]}]
+    trimmed = trim_history(msgs, max_turns=10, fresh_turns=2)
+    results = [m["content"][0]["content"] for m in trimmed
+               if isinstance(m["content"], list) and m["content"][0]["type"] == "tool_result"]
+    assert results == [STALE_RESULT, "data1", "data2"]
+    assert [m["content"][0]["tool_use_id"] for m in trimmed
+            if isinstance(m["content"], list) and m["content"][0]["type"] == "tool_result"] == ["t0", "t1", "t2"]
+    assert msgs[2]["content"][0]["content"] == "data0"  # caller's history untouched

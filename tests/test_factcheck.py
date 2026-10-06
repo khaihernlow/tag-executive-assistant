@@ -1,0 +1,21 @@
+from agent.factcheck import known_addresses, verify_addresses
+
+
+def test_corrects_a_blended_address_to_the_real_one_at_that_domain():
+    known = known_addresses('{"attendees": [{"email": "sam@staffing.example"}]}', "dave@tag.example")
+    text, changes = verify_addresses("Also on the invite is Sam (samuel@staffing.example).", known)
+    assert text == "Also on the invite is Sam (sam@staffing.example)."
+    assert changes == ["samuel@staffing.example -> sam@staffing.example"]
+
+
+def test_known_addresses_pass_and_unknown_domains_are_flagged():
+    known = known_addresses("klow@tag.example gstone@tag.example")
+    text, changes = verify_addresses("Email klow@tag.example or someone@acme.com", known)
+    assert text == "Email klow@tag.example or someone@acme.com (unverified)"
+    assert changes == ["someone@acme.com unverified"]
+
+
+def test_ambiguous_domain_picks_the_closest():
+    known = known_addresses("gstone@tag.example jyoung@tag.example")
+    text, _ = verify_addresses("gsmyth@tag.example", known)
+    assert text == "gstone@tag.example"

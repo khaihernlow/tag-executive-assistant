@@ -15,7 +15,7 @@ from store.db import Store
 @pytest.fixture(autouse=True)
 def env(monkeypatch):
     monkeypatch.setenv("ASSISTANT_TIMEZONE", "America/New_York")
-    monkeypatch.setenv("GRAPH_MAILBOX", "dvener@tagsolutions.com")
+    monkeypatch.setenv("GRAPH_MAILBOX", "dave@tag.example")
 
 
 @pytest.fixture
@@ -77,11 +77,19 @@ def test_auto_kinds_execute_immediately_and_failures_are_recorded(store):
 # ── create_event ─────────────────────────────────────────────────────────────
 
 class FakeGraph:
-    mailbox = "dvener@tagsolutions.com"
+    mailbox = "dave@tag.example"
 
-    def __init__(self, busy_items=None):
+    def __init__(self, busy_items=None, directory=("gstone@tag.example",)):
         self.busy_items = busy_items or []
+        self.directory = directory
         self.posts = []
+
+    def get_all(self, path, params=None, limit=500, headers=None):
+        # People/directory lookups used to vet attendee addresses.
+        if path == "/users":
+            wanted = (params or {}).get("$filter", "")
+            return [{"mail": e} for e in self.directory if f"'{e}'" in wanted]
+        return []
 
     def post(self, path, body, headers=None):
         self.posts.append((path, body))
@@ -96,10 +104,10 @@ NOW = datetime.fromisoformat("2026-10-06T09:00:00-04:00")
 
 def test_validate_event_normalizes_and_rejects_bad_input():
     payload = validate_event({"subject": "Renewals", "start": "2026-10-08T11:00", "duration_minutes": 30,
-                              "attendees": [{"email": "GSmith@tagsolutions.com", "name": "Garrett Smith"}]}, now=NOW)
+                              "attendees": [{"email": "GStone@tag.example", "name": "Garrett Stone"}]}, now=NOW)
     assert payload["start"] == "2026-10-08T11:00:00-04:00"
     assert payload["end"] == "2026-10-08T11:30:00-04:00"
-    assert payload["attendees"] == [{"email": "gsmith@tagsolutions.com", "name": "Garrett Smith"}]
+    assert payload["attendees"] == [{"email": "gstone@tag.example", "name": "Garrett Stone"}]
     assert payload["teams"] is True
 
     with pytest.raises(ValueError, match="past"):
@@ -112,12 +120,12 @@ def test_validate_event_normalizes_and_rejects_bad_input():
 
 def test_event_body_is_utc_with_teams_and_idempotency_key():
     payload = validate_event({"subject": "Renewals", "start": "2026-10-08T11:00",
-                              "attendees": [{"email": "gsmith@tagsolutions.com"}]}, now=NOW)
+                              "attendees": [{"email": "gstone@tag.example"}]}, now=NOW)
     body = event_body(payload, "action-123")
     assert body["start"] == {"dateTime": "2026-10-08T15:00:00", "timeZone": "UTC"}
     assert body["isOnlineMeeting"] is True and body["onlineMeetingProvider"] == "teamsForBusiness"
     assert body["transactionId"] == "action-123"
-    assert body["attendees"][0]["emailAddress"]["address"] == "gsmith@tagsolutions.com"
+    assert body["attendees"][0]["emailAddress"]["address"] == "gstone@tag.example"
 
 
 def test_create_event_tool_proposes_with_conflicts_and_books_only_on_approval(store, monkeypatch):
@@ -127,17 +135,17 @@ def test_create_event_tool_proposes_with_conflicts_and_books_only_on_approval(st
 
     content, is_error = registry.run(ToolCall("t", "create_event", {
         "subject": "Renewals review", "start": "2099-10-08T11:00",
-        "attendees": [{"email": "gsmith@tagsolutions.com", "name": "Garrett Smith"}]}))
+        "attendees": [{"email": "gstone@tag.example", "name": "Garrett Stone"}]}))
     result = json.loads(content)
     assert not is_error
     assert result["status"] == "pending" and "Never say it's booked" in result["note"]
-    assert "Garrett Smith" in result["summary"]
+    assert "Garrett Stone" in result["summary"]
     assert not [p for p in graph.posts if p[0].endswith("/events")]
 
     executed = actions.approve(result["action_id"], "dave")
     assert executed["status"] == "executed"
     assert executed["result"]["join_url"] == "https://teams/j"
-    assert graph.posts[-1][0] == "/users/dvener@tagsolutions.com/events"
+    assert graph.posts[-1][0] == "/users/dave@tag.example/events"
 
 
 def test_conflicts_appear_in_summary(store, monkeypatch):
@@ -172,3 +180,14 @@ def test_cards_come_from_tool_output_not_model_text():
     ])
     assert [c["type"] for c in cards] == ["email", "slots", "action"]
     assert cards[1]["slots"] == []  # the last search wins
+
+
+def test_unknown_attendee_address_is_flagged_on_the_slip(store):
+    graph = FakeGraph(directory=("gstone@tag.example",))
+    actions = Actions(store, [create_event_kind(graph)], auto=set())
+    content, _ = ToolRegistry([create_event_tool(graph, actions)]).run(ToolCall("t", "create_event", {
+        "subject": "x", "start": "2099-10-08T11:00",
+        "attendees": [{"email": "gstone@tag.example"}, {"email": "samuel@staffing.example"}]}))
+    summary = json.loads(content)["summary"]
+    assert "check spelling): samuel@staffing.example" in summary
+    assert "gstone@tag.example" not in summary.split("check spelling")[1]
