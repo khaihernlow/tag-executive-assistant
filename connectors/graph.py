@@ -19,7 +19,7 @@ import requests
 GRAPH_URL = "https://graph.microsoft.com/v1.0"
 TOKEN_URL = "https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token"
 
-EVENT_FIELDS = "id,subject,start,end,location,attendees,organizer,isAllDay,isCancelled,showAs,isOnlineMeeting,onlineMeeting,webLink"
+EVENT_FIELDS = "id,subject,start,end,location,attendees,organizer,isAllDay,isCancelled,showAs,isOnlineMeeting,onlineMeeting,webLink,bodyPreview"
 
 
 class GraphError(RuntimeError):
@@ -110,6 +110,16 @@ class GraphClient:
         if not resp.ok:
             raise GraphError(f"POST {url} failed ({resp.status_code}): {_error_text(resp)}", resp.status_code)
         return resp.json() if resp.content else {}
+
+    def get_bytes(self, path: str, max_bytes: int = 15_000_000) -> bytes:
+        """Raw content (e.g. an attachment's `$value`), refusing anything huge."""
+        url = f"{GRAPH_URL}{path}"
+        resp = self.session.get(url, headers=self._headers(None), timeout=self.timeout * 2)
+        if not resp.ok:
+            raise GraphError(f"GET {url} failed ({resp.status_code}): {_error_text(resp)}", resp.status_code)
+        if len(resp.content) > max_bytes:
+            raise GraphError(f"{url} is larger than {max_bytes // 1_000_000} MB; not downloading.")
+        return resp.content
 
     def get_all(
         self,

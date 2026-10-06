@@ -233,7 +233,9 @@ function emailsCard(card) {
           el("span", { class: `row__title${m.unread ? " unread" : ""}`, text: m.subject }),
           el("span", { class: "row__when", text: m.received })),
         el("span", { class: "row__sub", text: m.from.name || m.from.email }),
-        m.preview ? el("span", { class: "row__preview", text: m.preview }) : null)))));
+        m.preview ? el("span", { class: "row__preview", text: m.preview }) : null,
+        m.attachments && m.attachments.length
+          ? el("span", { class: "row__preview", text: `📎 ${m.attachments.join(", ")}` }) : null)))));
 }
 
 function emailCard(card) {

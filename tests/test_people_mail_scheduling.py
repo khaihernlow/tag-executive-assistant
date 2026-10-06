@@ -109,6 +109,20 @@ def test_build_search_quotes_phrases():
     assert build_search("Kai Low", None) == '"from:Kai Low"'
     assert build_search("klow@tagsolutions.com", 'say "hi"') == '"from:klow@tagsolutions.com say hi"'
     assert build_search(None, None) == ""
+    assert build_search("Kai", "Chelsi SDR", any_word=True) == '"from:Kai (Chelsi OR SDR)"'
+
+
+def test_search_mail_widens_to_some_words_and_lists_real_attachments():
+    path = "/users/dvener@tagsolutions.com/messages"
+    resume_mail = {**message("r", "2026-09-24T12:00:00Z", subject="New candidates"),
+                   "attachments": [{"name": "logo.png", "isInline": True}, {"name": "Chelsi Resume.pdf", "isInline": False}]}
+    graph = FakeGraph({
+        (path, '"Chelsi interview"'): [message("i", "2026-09-28T12:00:00Z", subject="Interview Chelsi")],
+        (path, '"(Chelsi OR interview)"'): [message("i", "2026-09-28T12:00:00Z"), resume_mail],
+    })
+    found = search_mail(graph, about="Chelsi interview", now=datetime(2026, 10, 5, tzinfo=timezone.utc))
+    assert [(m["id"], m["matched"]) for m in found] == [("i", "all words"), ("r", "some words")]
+    assert found[1]["attachments"] == ["Chelsi Resume.pdf"]
 
 
 def test_search_mail_drops_old_results_and_sorts_newest_first():

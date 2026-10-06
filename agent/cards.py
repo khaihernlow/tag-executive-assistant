@@ -39,7 +39,7 @@ def build_cards(trace: list[ToolTrace]) -> list[dict[str, Any]]:
                 "note": data.get("note"),
             })
 
-        elif t.name == "list_calendar_events":
+        elif t.name in ("list_calendar_events", "find_events"):
             cards.append({"type": "events", "events": data.get("events", [])})
 
         elif t.name == "search_mail" and data.get("messages"):

@@ -39,6 +39,8 @@ class Event:
     organizer: str
     online: bool
     join_url: str = ""
+    description: str = ""
+    attendee_emails: tuple[str, ...] = ()
 
     @property
     def blocks_time(self) -> bool:
@@ -60,7 +62,19 @@ def parse_event(raw: dict[str, Any], tz: ZoneInfo) -> Event:
         organizer=((raw.get("organizer") or {}).get("emailAddress") or {}).get("name", ""),
         online=bool(raw.get("isOnlineMeeting")),
         join_url=(raw.get("onlineMeeting") or {}).get("joinUrl") or "",
+        description=_clean_preview(raw.get("bodyPreview") or ""),
+        attendee_emails=tuple(
+            ((a.get("emailAddress") or {}).get("address") or "").lower() for a in raw.get("attendees") or []
+        ),
     )
+
+
+def _clean_preview(text: str) -> str:
+    # Teams invites append a long boilerplate block; keep what the organizer wrote.
+    for marker in ("________________", "Microsoft Teams Need help?", "Join on your computer"):
+        if marker in text:
+            text = text.split(marker, 1)[0]
+    return " ".join(text.split())[:600]
 
 
 def _graph_time(value: dict[str, Any], tz: ZoneInfo) -> datetime:
@@ -121,6 +135,32 @@ def day_range(start_date: str, end_date: str, tz: ZoneInfo) -> tuple[date, date,
     return first, last, start, end
 
 
+def find_events(events: list[Event], about: str) -> list[Event]:
+    """Events where every word of `about` appears somewhere in the event."""
+    words = [w for w in about.lower().split() if w]
+
+    def text(e: Event) -> str:
+        return " ".join([e.subject, e.location, e.organizer, e.description, *e.attendees, *e.attendee_emails]).lower()
+
+    return [e for e in events if words and all(w in text(e) for w in words)]
+
+
+def event_detail(e: Event) -> dict[str, Any]:
+    return {
+        "subject": e.subject,
+        "start": "all day " + e.start.strftime("%a %b %d") if e.all_day else fmt_local(e.start),
+        "end": fmt_local(e.end),
+        "show_as": e.show_as,
+        "location": e.location,
+        "online": e.online,
+        "organizer": e.organizer,
+        "attendees": [
+            {"name": name, "email": email} for name, email in zip(e.attendees, e.attendee_emails)
+        ][:25],
+        "description": e.description,
+    }
+
+
 def calendar_tools(source: CalendarSource) -> list[Tool]:
     def list_events(args: dict[str, Any]) -> dict[str, Any]:
         tz = local_zone()
@@ -142,6 +182,27 @@ def calendar_tools(source: CalendarSource) -> list[Tool]:
                 for e in events
             ],
         }
+
+    def find(args: dict[str, Any]) -> dict[str, Any]:
+        tz = local_zone()
+        today = datetime.now(tz).date()
+        first, last, start, end = day_range(
+            args.get("start_date") or (today - timedelta(days=14)).isoformat(),
+            args.get("end_date") or (today + timedelta(days=45)).isoformat(),
+            tz,
+        )
+        matches = find_events(
+            [parse_event(raw, tz) for raw in source.calendar_view(start, end) if not raw.get("isCancelled")],
+            args["about"],
+        )
+        result: dict[str, Any] = {
+            "timezone": str(tz),
+            "searched": f"{first.isoformat()} to {last.isoformat()}",
+            "events": [event_detail(e) for e in matches[:10]],
+        }
+        if not matches:
+            result["note"] = "No matching events in that range."
+        return result
 
     def free_time(args: dict[str, Any]) -> dict[str, Any]:
         tz = local_zone()
@@ -169,10 +230,32 @@ def calendar_tools(source: CalendarSource) -> list[Tool]:
         Tool(
             spec=ToolSpec(
                 name="list_calendar_events",
-                description="List Dave's calendar events between two dates (inclusive), in his local time.",
+                description=(
+                    "List ALL of Dave's events between two dates (inclusive), in his local time. "
+                    "For an overview of a day or week. To look up a specific meeting, use find_events."
+                ),
                 input_schema={"type": "object", "properties": date_props, "required": ["start_date", "end_date"]},
             ),
             handler=list_events,
+        ),
+        Tool(
+            spec=ToolSpec(
+                name="find_events",
+                description=(
+                    "Find specific meetings by words in the subject, attendees, location or invite text "
+                    "(e.g. 'Chelsi', 'renewals'). Returns full detail including the invite description "
+                    "and attendee emails. Defaults to the last 2 weeks through the next 6 weeks."
+                ),
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "about": {"type": "string", "description": "Words to match, e.g. a name or topic"},
+                        **date_props,
+                    },
+                    "required": ["about"],
+                },
+            ),
+            handler=find,
         ),
         Tool(
             spec=ToolSpec(

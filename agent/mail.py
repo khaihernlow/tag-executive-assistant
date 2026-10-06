@@ -11,6 +11,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Protocol
 
 from agent.calendar import local_zone
+from agent.documents import extract_text
 from agent.tools import Tool
 from llm.provider import ToolSpec
 
@@ -30,10 +31,11 @@ class GraphSource(Protocol):
                 headers: dict[str, str] | None = None) -> list[dict[str, Any]]: ...
 
 
-def build_search(sender: str | None, about: str | None) -> str:
+def build_search(sender: str | None, about: str | None, any_word: bool = False) -> str:
     """KQL for Graph `$search`, which must be wrapped in double quotes as a
-    whole (`"from:x project"`); terms are ANDed. Graph rejects `$search`
-    combined with date filters, so the date window is applied in code."""
+    whole (`"from:x project"`). Terms are ANDed, or ORed with `any_word`.
+    Graph rejects `$search` combined with date filters, so the date window
+    is applied in code."""
     parts = []
     if sender:
         name = _clean(sender)
@@ -44,7 +46,11 @@ def build_search(sender: str | None, about: str | None) -> str:
             first, *rest = name.split()
             parts += [f"from:{first}", *rest]
     if about:
-        parts.append(_clean(about))
+        words = _clean(about).split()
+        if any_word and len(words) > 1:
+            parts.append("(" + " OR ".join(words) + ")")
+        else:
+            parts.append(" ".join(words))
     return f'"{" ".join(parts)}"' if parts else ""
 
 
@@ -70,8 +76,13 @@ def summarize(raw: dict[str, Any]) -> dict[str, Any]:
         "received": _local(raw["receivedDateTime"]),
         "preview": (raw.get("bodyPreview") or "")[:240],
         "has_attachments": bool(raw.get("hasAttachments")),
+        # Real files only; inline images are signatures and logos.
+        "attachments": [a.get("name") for a in raw.get("attachments") or [] if not a.get("isInline")],
         "unread": not raw.get("isRead", True),
     }
+
+
+ATTACHMENT_NAMES = "attachments($select=name,isInline)"
 
 
 def search_mail(
@@ -82,23 +93,39 @@ def search_mail(
     limit: int = 10,
     now: datetime | None = None,
 ) -> list[dict[str, Any]]:
+    """Newest first. Messages matching every word come first; if that finds
+    few, messages matching some of the words follow (marked "some words"),
+    because an all-words search misses the email that never uses one of
+    them (a resume forward that doesn't say "interview")."""
     cutoff = (now or datetime.now(timezone.utc)) - timedelta(days=since_days)
-    query = build_search(sender, about)
     path = f"/users/{graph.mailbox}/messages"
-    if query:
-        # $search results come back newest first; fetch extra to survive the date cut.
-        raw = graph.get_all(path, {"$search": query, "$select": LIST_FIELDS, "$top": 25}, limit=50)
-    else:
+
+    def recent(raw: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        kept = [m for m in raw if datetime.fromisoformat(m["receivedDateTime"].replace("Z", "+00:00")) >= cutoff]
+        return sorted(kept, key=lambda m: m["receivedDateTime"], reverse=True)
+
+    def run(query: str) -> list[dict[str, Any]]:
+        # $search can't take a date filter; fetch extra to survive the date cut.
+        return recent(graph.get_all(
+            path, {"$search": query, "$select": LIST_FIELDS, "$expand": ATTACHMENT_NAMES, "$top": 25}, limit=50))
+
+    query = build_search(sender, about)
+    if not query:
         raw = graph.get_all(path, {
             "$filter": f"receivedDateTime ge {cutoff.strftime('%Y-%m-%dT%H:%M:%SZ')}",
             "$orderby": "receivedDateTime desc",
             "$select": LIST_FIELDS,
+            "$expand": ATTACHMENT_NAMES,
             "$top": 25,
         }, limit=limit)
-    recent = [m for m in raw
-              if datetime.fromisoformat(m["receivedDateTime"].replace("Z", "+00:00")) >= cutoff]
-    recent.sort(key=lambda m: m["receivedDateTime"], reverse=True)
-    return [summarize(m) for m in recent[:limit]]
+        return [summarize(m) for m in recent(raw)[:limit]]
+
+    results = [summarize(m) | {"matched": "all words"} for m in run(query)]
+    broader = build_search(sender, about, any_word=True)
+    if len(results) < limit and broader != query:
+        seen = {m["id"] for m in results}
+        results += [summarize(m) | {"matched": "some words"} for m in run(broader) if m["id"] not in seen]
+    return results[:limit]
 
 
 def read_email(graph: GraphSource, message_id: str) -> dict[str, Any]:
@@ -115,10 +142,19 @@ def read_email(graph: GraphSource, message_id: str) -> dict[str, Any]:
     result.pop("preview", None)
     if raw.get("hasAttachments"):
         attachments = graph.get_all(f"/users/{graph.mailbox}/messages/{message_id}/attachments",
-                                    {"$select": "name,contentType,size"}, limit=20)
-        result["attachments"] = [{"name": a.get("name"), "type": a.get("contentType"), "size": a.get("size")}
-                                 for a in attachments]
+                                    {"$select": "id,name,contentType,size,isInline"}, limit=20)
+        # Inline images (signatures, logos) aren't documents worth reading.
+        result["attachments"] = [{"id": a.get("id"), "name": a.get("name"), "type": a.get("contentType"),
+                                  "size": a.get("size")}
+                                 for a in attachments if not a.get("isInline")]
     return result
+
+
+def read_attachment(graph: Any, message_id: str, attachment_id: str) -> dict[str, Any]:
+    base = f"/users/{graph.mailbox}/messages/{message_id}/attachments/{attachment_id}"
+    meta = graph.get(base, {"$select": "name,contentType,size"})
+    data = graph.get_bytes(f"{base}/$value")
+    return {"name": meta.get("name"), "text": extract_text(data, meta.get("name") or "", meta.get("contentType") or "")}
 
 
 def mail_tools(graph: GraphSource) -> list[Tool]:
@@ -135,13 +171,17 @@ def mail_tools(graph: GraphSource) -> list[Tool]:
     def read(args: dict[str, Any]) -> dict[str, Any]:
         return read_email(graph, args["message_id"])
 
+    def attachment(args: dict[str, Any]) -> dict[str, Any]:
+        return read_attachment(graph, args["message_id"], args["attachment_id"])
+
     return [
         Tool(
             spec=ToolSpec(
                 name="search_mail",
                 description=(
-                    "Search Dave's mailbox. Returns newest first with id, subject, sender, time and a preview. "
-                    "Use read_email with an id to see the full message."
+                    "Search Dave's mailbox. Returns id, subject, sender, time, preview and attachment names; "
+                    "all-words matches first, then some-words matches. Use read_email to see a full message. "
+                    "Search by the most distinctive word (a surname) rather than a long phrase."
                 ),
                 input_schema={
                     "type": "object",
@@ -166,5 +206,24 @@ def mail_tools(graph: GraphSource) -> list[Tool]:
                 },
             ),
             handler=read,
+        ),
+        Tool(
+            spec=ToolSpec(
+                name="read_attachment",
+                description=(
+                    "Read the text of an email attachment (PDF, Word, text, calendar file). "
+                    "Pass the message id and the attachment's file name (or id), e.g. to read a resume or proposal."
+                ),
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "message_id": {"type": "string"},
+                        "attachment_id": {"type": "string",
+                                          "description": "The attachment's id from read_email, or its file name"},
+                    },
+                    "required": ["message_id", "attachment_id"],
+                },
+            ),
+            handler=attachment,
         ),
     ]
