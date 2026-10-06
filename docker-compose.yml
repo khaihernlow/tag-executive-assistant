@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  web:
+    image: tag-executive-assistant-web:latest
+    container_name: tag-executive-assistant-web
+    ports:
+      - "8001:8000"
+    env_file:
+      - .env
+    restart: unless-stopped
+    networks:
+      - shared-n8n-network
+
+networks:
+  shared-n8n-network:
+    external: true
+    name: n8n-network

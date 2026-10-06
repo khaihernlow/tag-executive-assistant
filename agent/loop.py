@@ -1,0 +1,72 @@
+"""The agent loop: model asks for tools, we run them, repeat until it answers."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from datetime import datetime
+from typing import Any
+
+from agent.tools import ToolRegistry
+from llm.provider import LLMProvider, tool_result_block, tool_results_message
+
+SYSTEM_PROMPT = """You are the executive assistant to Dave, CEO of TAG Solutions, an IT managed services provider.
+Current local time: {now}.
+
+Rules:
+- Use tools to get facts about Dave's calendar, email and systems. Never invent events, times, people or results.
+- If a tool fails or returns nothing, say so plainly.
+- Don't silently drop results. When offering times, include every window the tool returned;
+  you may highlight favourites, but say if you're leaving any out.
+- Be brief and concrete, the way a sharp human assistant would write to a busy CEO."""
+
+
+@dataclass
+class ToolTrace:
+    name: str
+    input: dict[str, Any]
+    output: str
+    is_error: bool
+
+
+@dataclass
+class TurnResult:
+    text: str
+    messages: list[dict[str, Any]]
+    trace: list[ToolTrace] = field(default_factory=list)
+    hit_step_limit: bool = False
+
+
+def system_prompt(now: datetime) -> str:
+    return SYSTEM_PROMPT.format(now=now.strftime("%A %Y-%m-%d %I:%M %p %Z"))
+
+
+def run_turn(
+    llm: LLMProvider,
+    registry: ToolRegistry,
+    messages: list[dict[str, Any]],
+    system: str,
+    max_steps: int = 8,
+    max_tokens: int = 2048,
+) -> TurnResult:
+    """Run one user turn to completion. `messages` must end with the user's message."""
+    history = list(messages)
+    trace: list[ToolTrace] = []
+    for _ in range(max_steps):
+        response = llm.complete(history, system=system, tools=registry.specs(), max_tokens=max_tokens)
+        history.append(response.assistant_message())
+        calls = response.tool_calls
+        if not calls:
+            return TurnResult(text=response.text, messages=history, trace=trace)
+        results = []
+        for call in calls:
+            content, is_error = registry.run(call)
+            trace.append(ToolTrace(call.name, call.input, content, is_error))
+            results.append(tool_result_block(call, content, is_error))
+        history.append(tool_results_message(results))
+
+    return TurnResult(
+        text="I stopped after too many steps without finishing. Try narrowing the request.",
+        messages=history,
+        trace=trace,
+        hit_step_limit=True,
+    )

@@ -1,0 +1,19 @@
+.env
+.secrets/
+.env.*
+!.env.example
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+.pytest_cache/
+pytest-cache-files-*/
+*.egg-info/
+.DS_Store
+*.tar
+output/
+# Transcripts / notes that may contain credentials stay out of git
+notes/
+*.chatlog.txt
+chatlog*.txt
