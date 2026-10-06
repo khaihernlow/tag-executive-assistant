@@ -99,17 +99,22 @@ async function loadToday() {
     const day = await api("/api/today");
     $("#date").textContent = day.date;
     $("#greeting").textContent = day.name ? `${day.greeting}, ${day.name}` : day.greeting;
-    renderItinerary(day.events);
+    const isToday = day.agenda_title === "Today";
+    $("#today-title").textContent = isToday ? "Today" : `${day.agenda_title} · ${day.agenda_date}`;
+    const done = $("#done-today");
+    done.hidden = !day.done_today;
+    done.textContent = day.done_today === 1 ? "Today's meeting is done." : `Today's ${day.done_today} meetings are done.`;
+    renderItinerary(day.events, isToday ? "today" : day.agenda_title.toLowerCase());
     renderSignoff(day.pending);
   } catch (err) {
     $("#itinerary").replaceChildren(el("li", { class: "itinerary__empty", text: `Couldn't load your calendar: ${err.message}` }));
   }
 }
 
-function renderItinerary(events) {
+function renderItinerary(events, when) {
   const list = $("#itinerary");
   if (!events.length) {
-    list.replaceChildren(el("li", { class: "itinerary__empty", text: "Nothing on the calendar today." }));
+    list.replaceChildren(el("li", { class: "itinerary__empty", text: `Nothing on the calendar ${when === "today" || when === "tomorrow" ? when : `on ${when}`}.` }));
     return;
   }
   list.replaceChildren(...events.map((e) => {

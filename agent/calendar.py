@@ -195,3 +195,49 @@ def calendar_tools(source: CalendarSource) -> list[Tool]:
             handler=free_time,
         ),
     ]
+
+
+# ── home screen agenda ───────────────────────────────────────────────────────
+
+LOOK_AHEAD_HOUR = 17  # from 5 PM, an empty rest-of-day means "show tomorrow"
+
+
+def next_working_day(day: date) -> date:
+    day += timedelta(days=1)
+    while day.weekday() >= 5:
+        day += timedelta(days=1)
+    return day
+
+
+def agenda_day(now: datetime, anything_left_today: bool) -> date:
+    """Which day the home screen should lead with.
+
+    Today while it still matters; the next working day once today is done
+    and it's evening, or on a weekend with nothing left (Fri night -> Mon).
+    """
+    today = now.date()
+    if anything_left_today:
+        return today
+    if today.weekday() >= 5 or now.hour >= LOOK_AHEAD_HOUR:
+        return next_working_day(today)
+    return today
+
+
+_ONLINE_PLACEHOLDERS = {"microsoft teams meeting", "teams meeting", "zoom meeting", "google meet", "online"}
+
+
+def meeting_place(location: str, join_url: str) -> tuple[str, str]:
+    """(physical place to show, join link) from Outlook's location field.
+
+    Outlook stuffs "Microsoft Teams Meeting" and pasted Zoom/Meet links into
+    the location. The Join button covers those, so only real places remain.
+    """
+    place_parts, link = [], join_url
+    for part in (p.strip() for p in (location or "").split(";")):
+        if not part:
+            continue
+        if part.lower().startswith(("http://", "https://")):
+            link = link or part
+        elif part.lower() not in _ONLINE_PLACEHOLDERS:
+            place_parts.append(part)
+    return "; ".join(place_parts), link

@@ -15,7 +15,7 @@ from starlette.middleware.sessions import SessionMiddleware
 load_dotenv(override=True)
 
 from agent.actions import public_action
-from agent.calendar import local_zone, parse_event
+from agent.calendar import agenda_day, local_zone, meeting_place, parse_event
 from app.auth import is_allowed, require_auth, user_email
 
 BASE_DIR = Path(__file__).parent
@@ -115,32 +115,48 @@ class ChatIn(BaseModel):
     conversation_id: str | None = None
 
 
-@app.get("/api/today")
-def today(user: dict = Depends(require_auth), svc=Depends(services)):
+def _agenda_events(svc, day, now) -> list[dict]:
     tz = local_zone()
-    now = datetime.now(tz)
-    start = datetime.combine(now.date(), time.min, tz)
-    raw = svc.graph.calendar_view(start, start + timedelta(days=1))
+    start = datetime.combine(day, time.min, tz)
     events = []
-    for item in raw:
+    for item in svc.graph.calendar_view(start, start + timedelta(days=1)):
         if item.get("isCancelled"):
             continue
         e = parse_event(item, tz)
+        place, join_url = meeting_place(e.location, e.join_url)
         events.append({
             "subject": e.subject,
             "start": "All day" if e.all_day else e.start.strftime("%I:%M %p").lstrip("0"),
             "end": e.end.strftime("%I:%M %p").lstrip("0"),
-            "location": e.location,
+            "location": place,
             "show_as": e.show_as,
-            "join_url": e.join_url,
+            "join_url": join_url,
             "past": e.end <= now,
             "now": e.start <= now < e.end,
         })
+    return events
+
+
+@app.get("/api/today")
+def today(user: dict = Depends(require_auth), svc=Depends(services)):
+    now = datetime.now(local_zone())
+    todays = _agenda_events(svc, now.date(), now)
+    day = agenda_day(now, anything_left_today=any(not e["past"] for e in todays))
+
+    if day == now.date():
+        title, events, done_today = "Today", todays, 0
+    else:
+        title = "Tomorrow" if day == now.date() + timedelta(days=1) else day.strftime("%A")
+        events, done_today = _agenda_events(svc, day, now), len(todays)
+
     pending = [public_action(a) for a in svc.store.list_actions(status="pending", limit=20)]
     return {
         "date": now.strftime("%A, %b %d").replace(" 0", " "),
         "greeting": "Good morning" if now.hour < 12 else "Good afternoon" if now.hour < 17 else "Good evening",
         "name": "" if user.get("name") == "Local Admin" else (user.get("name") or "").split(" ")[0],
+        "agenda_title": title,
+        "agenda_date": day.strftime("%a, %b %d").replace(" 0", " "),
+        "done_today": done_today,
         "events": events,
         "pending": pending,
     }

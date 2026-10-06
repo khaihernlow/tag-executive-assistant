@@ -92,3 +92,34 @@ def test_bad_range_is_reported_as_tool_error():
     content, is_error = ToolRegistry(calendar_tools(FakeCalendar([]))).run(
         ToolCall("t1", "list_calendar_events", {"start_date": "2026-10-13", "end_date": "2026-10-01"}))
     assert is_error and "before" in content
+
+
+# ── home screen: which day to lead with ──────────────────────────────────────
+
+from agent.calendar import agenda_day, next_working_day
+
+
+def at(day, hour):
+    return datetime(2026, 10, day, hour, 0, tzinfo=NY)
+
+
+def test_agenda_day_switches_to_tomorrow_only_when_today_is_done_and_evening():
+    assert agenda_day(at(5, 20), anything_left_today=False) == date(2026, 10, 6)   # Mon 8 PM, done
+    assert agenda_day(at(5, 20), anything_left_today=True) == date(2026, 10, 5)    # late meeting still ahead
+    assert agenda_day(at(5, 14), anything_left_today=False) == date(2026, 10, 5)   # 2 PM gap: stay on today
+
+
+def test_agenda_day_skips_weekends():
+    assert agenda_day(at(9, 18), anything_left_today=False) == date(2026, 10, 12)  # Fri evening -> Mon
+    assert agenda_day(at(10, 9), anything_left_today=False) == date(2026, 10, 12)  # Sat morning -> Mon
+    assert next_working_day(date(2026, 10, 11)) == date(2026, 10, 12)              # Sun -> Mon
+
+
+from agent.calendar import meeting_place
+
+
+def test_meeting_place_keeps_real_places_and_turns_links_into_join():
+    assert meeting_place("Microsoft Teams Meeting; TAG Conference", "https://teams/x") == ("TAG Conference", "https://teams/x")
+    assert meeting_place("Microsoft Teams Meeting", "https://teams/x") == ("", "https://teams/x")
+    assert meeting_place("https://us06web.zoom.us/j/123?pwd=abc", "") == ("", "https://us06web.zoom.us/j/123?pwd=abc")
+    assert meeting_place("Dave's office", "") == ("Dave's office", "")

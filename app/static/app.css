@@ -166,6 +166,13 @@ button { font: inherit; color: inherit; }
 
 .itinerary { list-style: none; margin: 0; padding: 0; }
 
+.done-today {
+  margin: calc(-1 * var(--s1)) 0 var(--s3);
+  font-size: 13px;
+  color: var(--ink-faint);
+}
+.done-today::before { content: "✓ "; color: var(--sage); }
+
 .stop {
   display: grid;
   grid-template-columns: 64px 1fr auto;
