@@ -160,3 +160,89 @@ def test_declined_rule_is_not_suggested_again():
     suggest_rules(graph, store, actions)
     actions.reject(store.list_actions(status="pending")[0]["id"], "dave")
     assert suggest_rules(graph, store, actions) == 0
+
+
+# ── filing by content ────────────────────────────────────────────────────────
+
+import json
+
+from agent.filing import PROFILES, learn_filing as _learn
+from llm.provider import LLMResponse
+
+
+class ChooseLLM:
+    def __init__(self, picks):
+        self.picks, self.calls = picks, []
+
+    def complete(self, messages, system=None, tools=None, max_tokens=2048, temperature=None, tool_choice=None):
+        self.calls.append({"content": messages[0]["content"], "system": system, "tool_choice": tool_choice})
+        return LLMResponse(content=[{"type": "tool_use", "id": "x", "name": "choose_folders",
+                                     "input": {"emails": self.picks}}], stop_reason="tool_use")
+
+
+PROFILE_LIST = [{"id": "fin", "path": "Inbox/Receipts/Financial", "count": 7,
+                 "examples": ["Monthly financials (from cpa.example)"], "senders": ["cpa.example"]},
+                {"id": "hr-rj", "path": "Inbox/HR/RJ", "count": 3,
+                 "examples": ["PTO request (from tag.example)"], "senders": ["rj@tag.example", "tag.example"]}]
+
+
+def content_inbox():
+    flagged = {**mail("joe@cpa.example", mid="flagged"), "flag": {"flagStatus": "flagged"}}
+    in_request = {**mail("pat@client.example", mid="thread"), "conversationId": "t-open"}
+    return [mail("joe@cpa.example", mid="fin-mail"), mail("rj@tag.example", mid="rj-mail"),
+            mail("someone@x.example", mid="unclear"), flagged, in_request]
+
+
+def test_learning_builds_folder_profiles_from_recent_examples():
+    graph = FakeGraph(folder_mail={"hr-rj": [mail("rj@tag.example")] * 2, "board": []})
+    store = Store(":memory:")
+    _learn(graph, store)
+    profiles = json.loads(store.get_state(PROFILES))
+    assert [p["path"] for p in profiles] == ["Inbox/HR/RJ"]            # empty folders aren't offered
+    assert profiles[0]["examples"] == ["From rj@tag.example (from tag.example)"]
+    assert profiles[0]["senders"] == ["rj@tag.example", "tag.example"]
+
+
+def test_a_confident_pick_without_sender_history_stays_in_the_inbox():
+    graph = FakeGraph(inbox=[mail("newcomer@other.example", mid="new")])
+    store = Store(":memory:")
+    store.set_state(PROFILES, json.dumps(PROFILE_LIST))
+    actions = Actions(store, [file_kind(graph, store)], auto=set())
+    llm = ChooseLLM([{"n": 0, "folder": 1, "confidence": "high", "reason": "looks financial"}])
+    assert file_read_mail(graph, store, actions, llm=llm) == 0 and graph.posts == []
+
+
+def test_content_filing_files_only_confident_picks_and_asks_once():
+    graph = FakeGraph(inbox=content_inbox())
+    store = Store(":memory:")
+    store.set_state(PROFILES, json.dumps(PROFILE_LIST))
+    store.save_request("thread", "t-open", "2026-10-08T10:00:00Z", "new", {"from_email": "pat@client.example"})
+    actions = Actions(store, [file_kind(graph, store)], auto=set())
+    llm = ChooseLLM([
+        {"n": 0, "folder": 1, "confidence": "high", "reason": "monthly financials"},
+        {"n": 1, "folder": 2, "confidence": "medium", "reason": "maybe RJ's"},
+        {"n": 2, "folder": 0, "confidence": "high", "reason": "needs Dave"},
+    ])
+    assert file_read_mail(graph, store, actions, llm=llm) == 1
+    assert graph.posts == [(f"/users/{DAVE}/messages/fin-mail/move", {"destinationId": "fin"})]
+    sent = llm.calls[0]["content"]
+    assert "flagged" not in sent and "pat@client.example" not in sent   # flagged and live requests are skipped
+    assert "1. Inbox/Receipts/Financial: Monthly financials" in llm.calls[0]["system"]
+    [filed] = filed_today(store)
+    assert filed["reason"] == "monthly financials"
+
+    file_read_mail(graph, store, actions, llm=llm)
+    assert len(llm.calls) == 1   # every email judged once: no second model call
+
+
+def test_undoing_a_content_filing_keeps_the_sender_rule_and_the_email_stays_put():
+    graph = FakeGraph(inbox=[mail("joe@cpa.example", mid="fin-mail")])
+    store = Store(":memory:")
+    store.set_state(PROFILES, json.dumps(PROFILE_LIST))
+    store.set_filing("other@cpa.example", "fin", "Inbox/Receipts/Financial", 5, 1.0, 0.0)
+    actions = Actions(store, [file_kind(graph, store)], auto=set())
+    file_read_mail(graph, store, actions, llm=ChooseLLM([{"n": 0, "folder": 1, "confidence": "high"}]))
+    [filed] = filed_today(store)
+    undo_filing(graph, store, filed["action_id"], "fin-mail")
+    assert store.filing_seen_ids(["new-fin-mail"]) == {"new-fin-mail"}   # won't be refiled
+    assert [r["address"] for r in store.filing_rules()] == ["other@cpa.example"]

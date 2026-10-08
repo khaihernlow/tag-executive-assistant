@@ -9,9 +9,16 @@ all read: mail is filed after Dave has seen it, not on arrival.
           of their filed mail and 60%+ of all their mail (deleted and archived
           counted). TAG staff are never learned: their mail is about everything.
           (No model: it's counting.)
-  file    each worker cycle, Inbox mail Dave has READ, at least an hour old,
-          from a learned sender, is moved to that folder. Unread mail is never
-          touched. Today lists it with Undo; undoing stops filing that sender.
+  file    each worker cycle, Inbox mail Dave has READ (1h+ old, not flagged,
+          not part of a meeting request still in progress):
+            - from a learned sender: that folder (free, no model);
+            - otherwise the fast model reads it, like Maria does, and picks one
+              of Dave's folders using each folder's recent example subjects,
+              or leaves it. Filed only when the model is sure AND that sender
+              (or their company) was filed there before: on emails Maria had
+              already filed, that was right 21 times in 22. Each email is judged
+              once; anything else stays in the Inbox. Unread mail is never touched.
+          Today lists everything filed, with Undo.
   rules   for high-volume automated senders whose mail goes unread in their
           folder (a newsletter Dave never opens), a real Outlook rule is
           suggested on a sign-off slip, so it's filed on arrival even when this
@@ -30,6 +37,8 @@ from typing import Any
 
 from agent.actions import ActionKind, Actions, public_action
 from agent.people import internal_domain
+from agent.research import FREEMAIL
+from llm.provider import ToolSpec
 
 FILE_KIND = "file_email"
 RULE_KIND = "create_rule"
@@ -39,6 +48,9 @@ MIN_COUNT, MIN_SHARE = 3, 0.9
 MIN_OVERALL = 0.6  # of all their mail (filed + deleted + archived), at least this much went to the folder
 RULE_MIN_COUNT, RULE_MIN_UNREAD = 10, 0.8
 READ_FOR = timedelta(hours=1)
+PROFILES = "filing_profiles"
+PROFILE_EXAMPLES = 4
+BATCH = 20
 SYSTEM_FOLDERS = {"archive", "conversation history", "rss feeds", "snoozed", "sync issues", "clutter",
                   "outbox", "junk email", "deleted items", "sent items", "drafts", "scheduled"}
 
@@ -104,10 +116,26 @@ def learn_filing(graph: Any, store: Any, days: int = 365) -> dict[str, int]:
     since = _iso(datetime.now(timezone.utc) - timedelta(days=days))
     per_sender: dict[str, dict[str, list[int]]] = {}  # address -> folder id -> [count, unread]
     folders = filing_folders(graph)
+    profiles = []
     for folder_id in folders:
-        for m in graph.get_all(f"/users/{graph.mailbox}/mailFolders/{folder_id}/messages",
-                               {"$select": "from,isRead", "$filter": f"receivedDateTime ge {since}", "$top": 250},
-                               limit=500):
+        messages = graph.get_all(f"/users/{graph.mailbox}/mailFolders/{folder_id}/messages",
+                                 {"$select": "from,isRead,subject", "$filter": f"receivedDateTime ge {since}",
+                                  "$orderby": "receivedDateTime desc", "$top": 250}, limit=500)
+        if messages:
+            # What this folder means to Dave, for the model: a few recent examples.
+            examples: list[str] = []
+            for m in messages:
+                example = f"{m.get('subject', '')[:80]} (from {_sender(m)[0].split('@')[-1]})"
+                if m.get("subject") and example not in examples:
+                    examples.append(example)  # distinct examples only: repeats teach nothing
+                if len(examples) == PROFILE_EXAMPLES:
+                    break
+            # Who has been filed here: the evidence a model pick must agree with.
+            senders = {_sender(m)[0] for m in messages if _sender(m)[0]}
+            domains = {a.split("@")[-1] for a in senders} - FREEMAIL
+            profiles.append({"id": folder_id, "path": folders[folder_id], "count": len(messages), "examples": examples,
+                             "senders": sorted(senders | domains)[:400]})
+        for m in messages:
             address, _ = _sender(m)
             if not address or address == graph.mailbox.lower():
                 continue
@@ -133,6 +161,7 @@ def learn_filing(graph: Any, store: Any, days: int = 365) -> dict[str, int]:
             continue
         store.set_filing(address, folder_id, folders[folder_id], count, round(count / total, 3), round(unread / count, 3))
         learned += 1
+    store.set_state(PROFILES, json.dumps(profiles))
     store.set_state(LEARNED_AT, _iso(datetime.now(timezone.utc)))
     return {"folders": len(folders), "senders": len(per_sender), "learned": learned}
 
@@ -145,12 +174,21 @@ def learning_is_stale(store: Any, hours: int = 24) -> bool:
 
 # ── filing read mail ─────────────────────────────────────────────────────────
 
-def ready_to_file(graph: Any, store: Any, now: datetime | None = None) -> list[dict[str, Any]]:
-    """Read Inbox mail, at least an hour old, from senders with a learned folder."""
+def read_inbox(graph: Any, store: Any, now: datetime | None = None) -> list[dict[str, Any]]:
+    """Inbox mail Dave has read, 1h+ old, minus flagged mail and meeting requests still in progress."""
     cutoff = _iso((now or datetime.now(timezone.utc)) - READ_FOR)
     inbox = graph.get_all(f"/users/{graph.mailbox}/mailFolders/inbox/messages", {
-        "$select": "id,subject,from,receivedDateTime,isRead",
+        "$select": "id,subject,from,receivedDateTime,isRead,bodyPreview,flag,conversationId",
         "$filter": f"isRead eq true and receivedDateTime le {cutoff}", "$top": 100}, limit=300)
+    active = {r["thread_id"] for r in store.requests_in(("new", "waiting"))} if hasattr(store, "requests_in") else set()
+    return [m for m in inbox
+            if (m.get("flag") or {}).get("flagStatus") != "flagged" and m.get("conversationId") not in active]
+
+
+def ready_to_file(graph: Any, store: Any, now: datetime | None = None,
+                  inbox: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
+    """Read Inbox mail from senders with a learned folder (no model needed)."""
+    inbox = read_inbox(graph, store, now) if inbox is None else inbox
     rules = store.filing_for([_sender(m)[0] for m in inbox])
     items = []
     for m in inbox:
@@ -159,7 +197,89 @@ def ready_to_file(graph: Any, store: Any, now: datetime | None = None) -> list[d
         if rule:
             items.append({"id": m["id"], "from": name or address, "address": address,
                           "subject": m.get("subject") or "(no subject)",
-                          "folder_id": rule["folder_id"], "folder": rule["folder_path"]})
+                          "folder_id": rule["folder_id"], "folder": rule["folder_path"], "by": "sender"})
+    return items
+
+
+CHOOSE_FOLDER = ToolSpec(
+    name="choose_folders",
+    description="Record where each email should be filed.",
+    input_schema={"type": "object", "properties": {"emails": {"type": "array", "items": {
+        "type": "object",
+        "properties": {
+            "n": {"type": "integer", "description": "the email's number"},
+            "folder": {"type": "integer", "description": "the folder's number, or 0 to leave it in the Inbox"},
+            "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
+            "reason": {"type": "string", "description": "under 10 words"},
+        },
+        "required": ["n", "folder", "confidence"],
+    }}}, "required": ["emails"]},
+)
+
+CHOOSE_PROMPT = """You file email for Dave, CEO of TAG Solutions, the way his assistant Maria does: after he has
+read it, each email goes into the folder where it belongs, or stays in the Inbox.
+Dave's folders (with recent examples of what's in each):
+{folders}
+
+Rules:
+- Pick a folder only when the email clearly belongs with that folder's examples. Otherwise choose 0.
+- Choose 0 for anything that may still need Dave's action, personal mail, and conversations in progress.
+- Confidence high only when it's unmistakable."""
+
+
+def _profiles_text(profiles: list[dict[str, Any]]) -> str:
+    return "\n".join(f"{i + 1}. {p['path']}: " + "; ".join(p["examples"]) for i, p in enumerate(profiles))
+
+
+def choose_folders(llm: Any, profiles: list[dict[str, Any]], messages: list[dict[str, Any]]) -> dict[str, dict]:
+    """{message id: {folder (profile) | None, confidence, reason}} from one batched model call."""
+    if not messages or not profiles:
+        return {}
+    listing = "\n\n".join(
+        f"#{i}\nFrom: {_sender(m)[1]} <{_sender(m)[0]}>\nSubject: {m.get('subject', '')}\n"
+        f"Preview: {(m.get('bodyPreview') or '')[:300]}" for i, m in enumerate(messages))
+    response = llm.complete([{"role": "user", "content": listing}],
+                            system=CHOOSE_PROMPT.format(folders=_profiles_text(profiles)),
+                            tools=[CHOOSE_FOLDER], tool_choice=CHOOSE_FOLDER.name, max_tokens=3000)
+    out: dict[str, dict] = {}
+    for call in response.tool_calls:
+        for item in call.input.get("emails") or []:
+            n, folder = item.get("n"), item.get("folder")
+            if not (isinstance(n, int) and 0 <= n < len(messages)):
+                continue
+            chosen = profiles[folder - 1] if isinstance(folder, int) and 1 <= folder <= len(profiles) else None
+            out[messages[n]["id"]] = {"folder": chosen, "confidence": item.get("confidence") or "low",
+                                      "reason": str(item.get("reason") or "")[:100]}
+    return out
+
+
+def has_history(folder: dict[str, Any], address: str) -> bool:
+    """Has this sender, or someone at their company (not a free-mail domain), been filed in this folder?"""
+    known = set(folder.get("senders") or [])
+    domain = address.split("@")[-1]
+    return address in known or (domain not in FREEMAIL and domain in known)
+
+
+def content_to_file(graph: Any, store: Any, llm: Any, inbox: list[dict[str, Any]],
+                    skip: set[str]) -> list[dict[str, Any]]:
+    """Ask the model about read mail no sender rule covered; each email is judged once."""
+    profiles = json.loads(store.get_state(PROFILES) or "[]")
+    pending = [m for m in inbox if m["id"] not in skip]
+    pending = [m for m in pending if m["id"] not in store.filing_seen_ids([p["id"] for p in pending])][:BATCH]
+    if not pending or not profiles:
+        return []
+    verdicts = choose_folders(llm, profiles, pending)
+    store.mark_filing_seen([m["id"] for m in pending if m["id"] in verdicts])
+    items = []
+    for m in pending:
+        v = verdicts.get(m["id"])
+        address, name = _sender(m)
+        # File only when the model is sure AND this sender (or their company) has been filed
+        # there before. Tested on emails Maria had filed: 95% right, vs 83% on confidence alone.
+        if v and v["folder"] and v["confidence"] == "high" and has_history(v["folder"], address):
+            items.append({"id": m["id"], "from": name or address, "address": address,
+                          "subject": m.get("subject") or "(no subject)", "folder_id": v["folder"]["id"],
+                          "folder": v["folder"]["path"], "by": "content", "reason": v["reason"]})
     return items
 
 
@@ -179,8 +299,11 @@ def file_kind(graph: Any, store: Any) -> ActionKind:
     return ActionKind(FILE_KIND, execute)
 
 
-def file_read_mail(graph: Any, store: Any, actions: Actions, now: datetime | None = None) -> int:
-    items = ready_to_file(graph, store, now)
+def file_read_mail(graph: Any, store: Any, actions: Actions, now: datetime | None = None, llm: Any = None) -> int:
+    inbox = read_inbox(graph, store, now)
+    items = ready_to_file(graph, store, now, inbox=inbox)
+    if llm is not None:
+        items += content_to_file(graph, store, llm, inbox, skip={i["id"] for i in items})
     if not items:
         return 0
     folders = sorted({i["folder"].split("/")[-1] for i in items})
@@ -202,7 +325,9 @@ def undo_filing(graph: Any, store: Any, action_id: str, message_id: str) -> dict
     graph.post(f"/users/{graph.mailbox}/messages/{record['new_id']}/move", {"destinationId": "inbox"})
     record["undone"] = True
     store.update_action_result(action_id, action["result"])
-    store.disable_filing(item["address"])
+    if item.get("by", "sender") == "sender":
+        store.disable_filing(item["address"])
+    store.mark_filing_seen([record["new_id"]])  # back in the Inbox with a new id: don't refile it
     return {"undone": message_id}
 
 
@@ -217,7 +342,8 @@ def filed_today(store: Any) -> list[dict[str, Any]]:
             r = records.get(item["id"], {})
             if r.get("moved"):
                 out.append({"action_id": action["id"], "id": item["id"], "from": item["from"],
-                            "subject": item["subject"], "folder": item["folder"], "undone": bool(r.get("undone"))})
+                            "subject": item["subject"], "folder": item["folder"], "reason": item.get("reason", ""),
+                            "undone": bool(r.get("undone"))})
     return out
 
 

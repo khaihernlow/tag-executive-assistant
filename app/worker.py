@@ -87,7 +87,7 @@ class Worker:
                     if learning_is_stale(self.store):
                         log.info("learned filing: %s", learn_filing(self.graph, self.store))
                         suggest_rules(self.graph, self.store, self.actions)
-                    filed = file_read_mail(self.graph, self.store, self.actions)
+                    filed = file_read_mail(self.graph, self.store, self.actions, llm=self.fast_llm)
                     if filed:
                         log.info("filed %s read emails", filed)
                 except Exception:  # noqa: BLE001

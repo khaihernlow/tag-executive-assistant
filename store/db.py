@@ -83,6 +83,11 @@ CREATE TABLE IF NOT EXISTS filing (
     updated_at   TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS filing_seen (
+    message_id  TEXT PRIMARY KEY,       -- judged once (filed or left); never asked about again
+    decided_at  TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS state (
     key         TEXT PRIMARY KEY,       -- small bits of worker state, e.g. the junk sweep checkpoint
     value       TEXT NOT NULL
@@ -405,3 +410,18 @@ class Store:
     def clear_learned_filing(self) -> None:
         """Before relearning: drop learned patterns, but keep the ones Dave switched off."""
         self._execute("DELETE FROM filing WHERE disabled = 0")
+
+    def filing_seen_ids(self, message_ids: list[str]) -> set[str]:
+        if not message_ids:
+            return set()
+        marks = ",".join("?" * len(message_ids))
+        rows = self._execute(f"SELECT message_id FROM filing_seen WHERE message_id IN ({marks})",
+                             tuple(message_ids)).fetchall()
+        return {r["message_id"] for r in rows}
+
+    def mark_filing_seen(self, message_ids: list[str]) -> None:
+        stamp = now_iso()
+        with self._lock:
+            self._conn.executemany("INSERT OR IGNORE INTO filing_seen (message_id, decided_at) VALUES (?, ?)",
+                                   [(m, stamp) for m in message_ids])
+            self._conn.commit()
