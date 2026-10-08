@@ -33,7 +33,6 @@ from agent.people import internal_domain
 from agent.filing import file_read_mail, learn_filing, learning_is_stale, suggest_rules
 from agent.junk import history_is_stale, learn_history, sweep_new
 from agent.requests import scan as scan_requests
-from agent.pipeline import pipeline_is_stale, refresh_pipeline
 
 log = logging.getLogger("assistant.worker")
 
@@ -101,13 +100,6 @@ class Worker:
                         log.info("meeting requests found: %s", added)
                 except Exception:  # noqa: BLE001
                     log.exception("meeting request scan failed")
-            if self.autotask is not None:
-                try:
-                    if pipeline_is_stale(self.store):
-                        snapshot = refresh_pipeline(self.autotask, self.store)
-                        log.info("pipeline: %s open, %s past close", snapshot["open"], len(snapshot["overdue"]))
-                except Exception:  # noqa: BLE001
-                    log.exception("pipeline check failed")
             self._stop.wait(self.interval)
 
     def queue_briefs(self) -> int:

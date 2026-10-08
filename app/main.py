@@ -20,7 +20,6 @@ from agent.briefs import needs_brief
 from agent.filing import filed_today, undo_filing
 from agent.junk import moved_today, undo as undo_junk
 from agent.changes import answer_invite, pending_invites
-from agent.pipeline import pipeline_view, quick_update
 from agent.requests import open_requests_view, propose_booking, propose_hold, propose_nudge, propose_reply
 from agent.calendar import agenda_day, local_zone, meeting_place, parse_event
 from agent.people import internal_domain
@@ -195,7 +194,6 @@ def today(user: dict = Depends(require_auth), svc=Depends(services)):
         "pending": pending,
         "requests": requests_view,
         "invites": invites,
-        "pipeline": pipeline_view(svc.store) if getattr(svc, "autotask", None) else None,
         "junk_moved": moved_today(svc.store) if hasattr(svc.store, "actions_since") else [],
         "filed": filed_today(svc.store) if hasattr(svc.store, "actions_since") else [],
     }
@@ -325,23 +323,6 @@ def request_nudge(message_id: str, user: dict = Depends(require_auth), svc=Depen
     """Draft a short email asking the colleague handling it to reply (a sign-off slip)."""
     try:
         return propose_nudge(svc.graph, svc.store, svc.actions, message_id, getattr(svc, "memory", None))
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-
-class PipelineIn(BaseModel):
-    choice: str
-    close_date: str = ""
-
-
-@app.post("/api/pipeline/{opportunity_id}")
-def pipeline_answer(opportunity_id: int, body: PipelineIn, user: dict = Depends(require_auth), svc=Depends(services)):
-    """Dave tapped Push / Pick date / On hold / Lost on an overdue opportunity: save it now."""
-    if not getattr(svc, "autotask", None):
-        raise HTTPException(status_code=404, detail="Autotask isn't connected")
-    try:
-        return quick_update(svc.autotask, svc.actions, svc.store, opportunity_id, body.choice, body.close_date,
-                            decided_by=f"dave: {user.get('email', '')}")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 

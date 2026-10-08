@@ -1,13 +1,15 @@
 """Dave's pipeline check: open opportunities that are past their close date.
 
-When this was built, 48 of his 52 open opportunities were overdue, so Today
-shows a short clean-up queue (oldest first) rather than the lot, with one-tap
-answers: push the close date out a month, pick a date, put it on hold, or mark
-it lost. A tap is Dave's decision, so it saves straight away. Once the backlog
-is cleared, only newly overdue ones appear.
+When this was built, 48 of his 52 open opportunities were overdue. The idea:
+a short clean-up queue (oldest first) with one-tap answers: push the close
+date out a month, pick a date, put it on hold, or mark it lost. A tap is
+Dave's decision, so it saves straight away.
 
-Autotask is slow to query (company names, paging), so the background worker
-takes a snapshot hourly and Today reads that.
+Autotask is slow to query (company names, paging), so it's meant to be read
+from a snapshot rather than live.
+
+Not shown anywhere yet: a 48-item backlog didn't belong on Today. Kept for
+wherever it ends up (a weekly review, say); Dave can ask in chat meanwhile.
 """
 
 from __future__ import annotations

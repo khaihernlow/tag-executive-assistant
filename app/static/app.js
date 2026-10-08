@@ -141,7 +141,6 @@ async function loadToday() {
     renderSignoff(day.pending.filter((a) => !["reply_email", "book_meeting"].includes(a.kind)));
     renderRequests(day.requests || []);
     renderInvites(day.invites || []);
-    renderPipeline(day.pipeline);
     renderJunk(day.junk_moved || [], day.filed || []);
     // While the worker is preparing briefs, check back so the "Brief" buttons appear.
     clearTimeout(loadToday.timer);
@@ -569,72 +568,6 @@ function requestCard(r) {
   buttons.push(dismiss);
   body.append(status, el("div", { class: "request__foot" }, dismiss));
   return card;
-}
-
-// ── pipeline ───────────────────────────────────────────────────────────────────
-
-const PIPELINE_SHOWN = 3;
-let pipelineExpanded = false;
-
-function renderPipeline(p) {
-  const items = (p && p.overdue) || [];
-  $("#pipeline-block").hidden = !items.length;
-  if (!items.length) return;
-  const list = el("ul", { class: "pipe__list" });
-  const shown = pipelineExpanded ? items : items.slice(0, PIPELINE_SHOWN);
-  list.append(...shown.map(pipelineRow));
-  const more = items.length - shown.length;
-  const card = el("div", { class: "card pipe" },
-    el("p", { class: "pipe__lead" }, el("strong", { text: `${items.length} of your ${p.open} open opportunities` }),
-      " are past their close date. Oldest first:"),
-    list,
-    more > 0 ? el("button", { class: "link-btn pipe__more", type: "button", text: `Show all ${items.length}`,
-      onclick: () => { pipelineExpanded = true; renderPipeline(p); } }) : null,
-    el("p", { class: "card__note", text: "Each answer saves to Autotask straight away." }));
-  $("#pipeline").replaceChildren(card);
-}
-
-function pipelineRow(o) {
-  const status = el("p", { class: "card__note" });
-  const row = el("li", { class: "pipe__row" });
-  const buttons = [];
-  const answer = async (choice, close_date = "") => {
-    buttons.forEach((b) => { b.disabled = true; });
-    status.textContent = "Saving\u2026";
-    try {
-      const action = await api(`/api/pipeline/${o.opportunity_id}`, { method: "POST", body: JSON.stringify({ choice, close_date }) });
-      if (action.status !== "executed") throw new Error(action.error || "it didn't save");
-      const done = { push: "Close date pushed a month", date: "Close date moved", on_hold: "On hold", lost: "Marked lost" }[choice];
-      row.replaceChildren(el("div", { class: "pipe__text" },
-        el("span", { class: "pipe__title", text: o.title }), el("span", { class: "stamp stamp--done", text: `\u2713 ${done}` })));
-    } catch (err) {
-      buttons.forEach((b) => { b.disabled = false; });
-      status.textContent = `Couldn't save: ${err.message}`;
-    }
-  };
-  const datePick = el("input", { type: "date", class: "pipe__date", "aria-label": "New close date" });
-  datePick.addEventListener("change", () => datePick.value && answer("date", datePick.value));
-  const pickBtn = el("button", { class: "btn", type: "button", text: "Pick date",
-    onclick: () => { if (datePick.showPicker) { try { datePick.showPicker(); return; } catch (e) { /* fall through */ } } datePick.focus(); } });
-  const push = el("button", { class: "btn btn--sign", type: "button", text: "+1 month", onclick: () => answer("push") });
-  const hold = el("button", { class: "btn", type: "button", text: "On hold", onclick: () => answer("on_hold") });
-  // Lost ends the deal, so it takes a second tap.
-  const lost = el("button", { class: "btn", type: "button", text: "Lost", onclick: () => {
-    if (lost.dataset.armed) return answer("lost");
-    lost.dataset.armed = "1";
-    lost.textContent = "Confirm";
-    lost.classList.add("btn--warn");
-    setTimeout(() => { delete lost.dataset.armed; lost.textContent = "Lost"; lost.classList.remove("btn--warn"); }, 4000);
-  } });
-  buttons.push(push, pickBtn, hold, lost);
-  row.append(
-    el("a", { class: "pipe__text", href: o.link, target: "_blank", rel: "noopener" },
-      el("span", { class: "pipe__title", text: o.title }),
-      el("span", { class: "pipe__sub", text: `${o.company} \u00b7 ${o.stage}` }),
-      el("span", { class: "pipe__late overdue", text: `Expected to close ${o.close_date} \u00b7 ${o.late || "past close"}` })),
-    el("div", { class: "pipe__actions" }, push, pickBtn, hold, lost, datePick),
-    status);
-  return row;
 }
 
 // ── invitations ────────────────────────────────────────────────────────────────
