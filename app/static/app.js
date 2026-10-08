@@ -138,7 +138,8 @@ async function loadToday() {
     done.hidden = !day.done_today;
     done.textContent = day.done_today === 1 ? "Today's meeting is done." : `Today's ${day.done_today} meetings are done.`;
     renderItinerary(day.events, isToday ? "today" : day.agenda_title.toLowerCase());
-    renderSignoff(day.pending);
+    renderSignoff(day.pending.filter((a) => !["reply_email", "book_meeting"].includes(a.kind)));
+    renderRequests(day.requests || []);
     // While the worker is preparing briefs, check back so the "Brief" buttons appear.
     clearTimeout(loadToday.timer);
     if (day.events.some((e) => e.brief === "preparing")) loadToday.timer = setTimeout(loadToday, 5000);
@@ -360,6 +361,87 @@ $("#bs-ask").addEventListener("click", () => {
 });
 document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("#briefsheet").hidden) closeBrief(); });
 
+// ── meeting requests ───────────────────────────────────────────────────────────
+
+function renderRequests(requests) {
+  $("#requests-block").hidden = !requests.length;
+  $("#requests").replaceChildren(...requests.map(requestCard));
+}
+
+function requestCard(r) {
+  const card = el("div", { class: "card request" });
+  const meta = [r.purpose, r.duration_minutes ? `${r.duration_minutes} min` : "",
+                r.format && r.format !== "unspecified" ? r.format.replace("_", " ") : ""].filter(Boolean).join(" \u00b7 ");
+  const head = [
+    el("p", { class: "request__who" }, el("strong", { text: r.from }), " wants to meet"),
+    meta ? el("p", { class: "request__meta", text: meta }) : null,
+    el("p", { class: "request__subject" }, `\u201c${r.subject}\u201d `,
+      r.web_link ? el("a", { href: r.web_link, target: "_blank", rel: "noopener", text: "Open email" }) : null),
+  ];
+  const body = el("div", { class: "request__body" });
+  card.append(...head.filter(Boolean), body);
+
+  if (r.action) {
+    body.append(slip(r.action));
+    return card;
+  }
+
+  const chosen = new Set(r.slots.map((s) => s.start));
+  const status = el("p", { class: "card__note" });
+  const busyButtons = [];
+  const run = async (label, path, payload) => {
+    busyButtons.forEach((b) => { b.disabled = true; });
+    status.textContent = label;
+    try {
+      const action = await api(path, { method: "POST", body: JSON.stringify(payload) });
+      body.replaceChildren(slip(action));
+    } catch (err) {
+      busyButtons.forEach((b) => { b.disabled = false; });
+      status.textContent = `Couldn't do that: ${err.message}`;
+    }
+  };
+
+  if (r.proposed) {
+    const book = el("button", { class: "btn btn--sign", type: "button", text: `Book ${r.proposed.label.replace(" ET", "")}`,
+      onclick: () => run("Checking your calendar\u2026", `/api/requests/${encodeURIComponent(r.id)}/book`, { start: r.proposed.start }) });
+    busyButtons.push(book);
+    body.append(el("p", { class: "request__meta", text: "They suggested a time:" }), book);
+  }
+
+  if (r.slots.length) {
+    const chips = el("div", { class: "slots" }, r.slots.map((s) => {
+      const chip = el("button", { class: "slot slot--pick", type: "button", "aria-pressed": "true" },
+        el("span", { class: "slot__start", text: s.label.replace(/ at /, " \u00b7 ").replace(" ET", "") }));
+      chip.addEventListener("click", () => {
+        chosen.has(s.start) ? chosen.delete(s.start) : chosen.add(s.start);
+        chip.setAttribute("aria-pressed", String(chosen.has(s.start)));
+        reply.disabled = !chosen.size;
+      });
+      return chip;
+    }));
+    const reply = el("button", { class: "btn " + (r.proposed ? "" : "btn--sign"), type: "button",
+      text: r.proposed ? "Reply with other times" : "Reply with these times",
+      onclick: () => run("Drafting your reply\u2026", `/api/requests/${encodeURIComponent(r.id)}/reply`,
+                         { starts: r.slots.map((s) => s.start).filter((s) => chosen.has(s)) }) });
+    busyButtons.push(reply);
+    body.append(el("p", { class: "request__meta", text: r.proposed ? "Or offer other times:" : "Times that work for you:" }),
+      chips, el("div", { class: "slip__actions" }, reply));
+  } else if (!r.proposed) {
+    body.append(el("p", { class: "card__note", text: "No free time found in that range." }));
+  }
+
+  const dismiss = el("button", { class: "link-btn", type: "button", text: "Dismiss",
+    onclick: async () => {
+      dismiss.disabled = true;
+      try { await api(`/api/requests/${encodeURIComponent(r.id)}/dismiss`, { method: "POST" }); card.remove(); }
+      catch (err) { dismiss.disabled = false; status.textContent = err.message; }
+      if (!$("#requests").children.length) $("#requests-block").hidden = true;
+    } });
+  busyButtons.push(dismiss);
+  body.append(status, el("div", { class: "request__foot" }, dismiss));
+  return card;
+}
+
 function renderSignoff(pending) {
   $("#signoff-block").hidden = !pending.length;
   $("#signoff").replaceChildren(...pending.map(slip));
@@ -367,7 +449,10 @@ function renderSignoff(pending) {
 
 // ── cards ──────────────────────────────────────────────────────────────────────
 
-const KIND_LABELS = { create_event: "Calendar invite", move_to_junk: "Inbox clean-up" };
+const KIND_LABELS = {
+  create_event: "Calendar invite", book_meeting: "Calendar invite",
+  move_to_junk: "Inbox clean-up", reply_email: "Email reply",
+};
 
 function slip(action) {
   const node = el("div", { class: "slip", "data-action-id": action.action_id });
@@ -380,6 +465,14 @@ function fillSlip(node, action) {
   const summary = el("p", { class: "slip__summary" }, main,
     ...warnings.map((w) => el("span", { class: "warn", text: `⚠ ${w}` })));
   const parts = [el("p", { class: "slip__kind", text: KIND_LABELS[action.kind] || action.kind }), summary];
+  let emailBox = null;
+  if (action.email) {
+    parts.push(el("p", { class: "slip__email-meta", text: `To ${action.email.to} \u00b7 ${action.email.subject}` }));
+    emailBox = el("textarea", { class: "slip__email", rows: "7", "aria-label": "Email text" });
+    emailBox.value = action.email.comment || "";
+    emailBox.readOnly = action.status !== "pending";
+    parts.push(emailBox);
+  }
   if (action.items && action.items.length) {
     parts.push(el("ul", { class: "slip__items" }, action.items.map((i) => el("li", {},
       el("span", { class: "slip__item-title", text: i.subject }),
@@ -388,18 +481,22 @@ function fillSlip(node, action) {
   node.className = "slip";
 
   if (action.status === "pending") {
-    const approve = el("button", { class: "btn btn--sign", type: "button", text: "Approve" });
+    const approveLabel = action.kind === "reply_email" ? "Send" : "Approve";
+    const approve = el("button", { class: "btn btn--sign", type: "button", text: approveLabel });
     const decline = el("button", { class: "btn", type: "button", text: "Decline" });
     const decide = async (verb) => {
       approve.disabled = decline.disabled = true;
       approve.textContent = verb === "approve" ? "Working…" : approve.textContent;
       try {
-        const updated = await api(`/api/actions/${action.action_id}/${verb}`, { method: "POST" });
+        const edits = verb === "approve" && emailBox ? { comment: emailBox.value } : null;
+        const updated = await api(`/api/actions/${action.action_id}/${verb}`, {
+          method: "POST", body: JSON.stringify(edits ? { edits } : {}),
+        });
         updateSlips(updated);
         loadToday();
       } catch (err) {
         approve.disabled = decline.disabled = false;
-        approve.textContent = "Approve";
+        approve.textContent = approveLabel;
         node.append(el("p", { class: "error", text: `Couldn't ${verb}: ${err.message}` }));
       }
     };
@@ -411,7 +508,7 @@ function fillSlip(node, action) {
     const r = action.result || {};
     const doneText = action.kind === "move_to_junk"
       ? `✓ Moved ${r.moved ?? ""} to Junk${r.failed && r.failed.length ? ` · ${r.failed.length} failed` : ""}`
-      : "✓ Signed · booked";
+      : action.kind === "reply_email" ? "✓ Sent" : "✓ Signed · booked";
     parts.push(el("span", { class: "stamp stamp--done" }, doneText,
       r.join_url ? el("a", { href: r.join_url, target: "_blank", rel: "noopener", text: "Teams link" }) : null,
       r.web_link ? el("a", { href: r.web_link, target: "_blank", rel: "noopener", text: "Outlook" }) : null));

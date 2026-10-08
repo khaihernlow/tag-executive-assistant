@@ -11,6 +11,7 @@ from agent.calendar import calendar_tools
 from agent.events import create_event_kind, create_event_tool
 from agent.junk import junk_kind, junk_tools
 from agent.mail import mail_tools
+from agent.requests import request_kinds
 from agent.memory import Memory, memory_tools
 from agent.people import people_tools
 from agent.scheduling import scheduling_tools
@@ -29,12 +30,13 @@ class Services:
     assistant: Assistant
     memory: Memory
     worker: Worker
+    llm: HatzAIProvider
 
 
 def build_services() -> Services:
     graph = GraphClient.from_env()
     store = Store()
-    actions = Actions(store, [create_event_kind(graph), junk_kind(graph)])
+    actions = Actions(store, [create_event_kind(graph), junk_kind(graph), *request_kinds(graph, store)])
     memory = Memory(store)
     llm = HatzAIProvider()
     # Quick, high-volume judgments (junk triage) use a faster, cheaper model.
@@ -49,4 +51,5 @@ def build_services() -> Services:
         + [create_event_tool(graph, actions)]
     )
     assistant = Assistant(llm, registry, store, actions, memory)
-    return Services(graph, store, actions, assistant, memory, Worker(graph, llm, store, searcher=llm))
+    worker = Worker(graph, llm, store, searcher=llm, fast_llm=fast_llm)
+    return Services(graph, store, actions, assistant, memory, worker, llm)

@@ -17,6 +17,7 @@ load_dotenv(override=True)
 
 from agent.actions import public_action
 from agent.briefs import needs_brief
+from agent.requests import open_requests_view, propose_booking, propose_reply
 from agent.calendar import agenda_day, local_zone, meeting_place, parse_event
 from agent.people import internal_domain
 from connectors.graph import EVENT_FIELDS
@@ -167,6 +168,10 @@ def today(user: dict = Depends(require_auth), svc=Depends(services)):
         title = "Tomorrow" if day == now.date() + timedelta(days=1) else day.strftime("%A")
         events, done_today = _agenda_events(svc, day, now), len(todays)
 
+    try:
+        requests_view = open_requests_view(svc.graph, svc.store, svc.store, getattr(svc, "memory", None))
+    except Exception:  # noqa: BLE001 - the agenda must load even if this part fails
+        requests_view = []
     statuses = svc.store.brief_statuses([e["id"] for e in events if e["id"]])
     for e in events:
         e["brief"] = statuses.get(e["id"])
@@ -180,6 +185,7 @@ def today(user: dict = Depends(require_auth), svc=Depends(services)):
         "done_today": done_today,
         "events": events,
         "pending": pending,
+        "requests": requests_view,
     }
 
 
@@ -224,10 +230,15 @@ def conversation(cid: str, user: dict = Depends(require_auth), svc=Depends(servi
     return {"id": convo["id"], "title": convo["title"], "messages": convo["display"]}
 
 
+class ApproveIn(BaseModel):
+    edits: dict[str, str] | None = None
+
+
 @app.post("/api/actions/{aid}/approve")
-def approve(aid: str, user: dict = Depends(require_auth), svc=Depends(services)):
+def approve(aid: str, body: ApproveIn | None = None, user: dict = Depends(require_auth), svc=Depends(services)):
     try:
-        return public_action(svc.actions.approve(aid, decided_by=user_email(user) or user.get("name", "")))
+        return public_action(svc.actions.approve(aid, decided_by=user_email(user) or user.get("name", ""),
+                                                 edits=body.edits if body else None))
     except KeyError:
         raise HTTPException(status_code=404, detail="Action not found")
 
@@ -261,6 +272,39 @@ def prepare(event_id: str, refresh: bool = False, user: dict = Depends(require_a
     raw = svc.graph.get(f"/users/{svc.graph.mailbox}/events/{event_id}", {"$select": EVENT_FIELDS})
     svc.worker.prepare_now(parse_event(raw, local_zone()), force=refresh)
     return {"event_id": event_id, "status": "preparing"}
+
+
+class SlotsIn(BaseModel):
+    starts: list[str]
+
+
+class SlotIn(BaseModel):
+    start: str
+
+
+@app.post("/api/requests/{message_id}/reply")
+def request_reply(message_id: str, body: SlotsIn, user: dict = Depends(require_auth), svc=Depends(services)):
+    """Draft a reply proposing these times; it waits on a sign-off slip."""
+    try:
+        return propose_reply(svc.graph, svc.llm, svc.store, svc.actions, message_id, body.starts)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/requests/{message_id}/book")
+def request_book(message_id: str, body: SlotIn, user: dict = Depends(require_auth), svc=Depends(services)):
+    try:
+        return propose_booking(svc.graph, svc.store, svc.actions, message_id, body.start, getattr(svc, "memory", None))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/requests/{message_id}/dismiss")
+def request_dismiss(message_id: str, user: dict = Depends(require_auth), svc=Depends(services)):
+    if svc.store.get_request(message_id) is None:
+        raise HTTPException(status_code=404, detail="Not found")
+    svc.store.update_request(message_id, status="dismissed")
+    return {"dismissed": message_id}
 
 
 @app.get("/api/memory")

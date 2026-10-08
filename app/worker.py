@@ -4,7 +4,9 @@ Runs inside the web process for now (one server, one SQLite file); the
 jobs only touch the store and Graph, so it can move to its own container
 later without changes.
 
-Jobs:
+Jobs (each cycle):
+  requests one inbox read; new mail that looks like "can we meet?" is classified
+           by the fast model and shown on Today with suggested times.
   briefs   every BRIEF_INTERVAL (3 min): one calendar read; prepare briefs for
            new qualifying meetings (rest of today + next working day), soonest
            first, and refresh any whose invite changed. Unchanged meetings cost
@@ -22,6 +24,7 @@ from typing import Any
 from agent.briefs import needs_brief, prepare_brief, upcoming_meetings
 from agent.calendar import Event
 from agent.people import internal_domain
+from agent.requests import scan as scan_requests
 
 log = logging.getLogger("assistant.worker")
 
@@ -29,9 +32,11 @@ BRIEF_INTERVAL = int(os.environ.get("BRIEF_INTERVAL_SECONDS", str(3 * 60)))
 
 
 class Worker:
-    def __init__(self, graph: Any, llm: Any, store: Any, interval: int = BRIEF_INTERVAL, searcher: Any = None) -> None:
+    def __init__(self, graph: Any, llm: Any, store: Any, interval: int = BRIEF_INTERVAL, searcher: Any = None,
+                 fast_llm: Any = None) -> None:
         self.graph, self.llm, self.store = graph, llm, store
         self.searcher = searcher  # web research for briefs; None skips it
+        self.fast_llm = fast_llm  # quick classification (meeting requests); None skips the inbox scan
         self.interval = interval
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
@@ -59,6 +64,13 @@ class Worker:
                 self.queue_briefs()
             except Exception:  # noqa: BLE001 - a bad cycle must not kill the worker
                 log.exception("brief cycle failed")
+            if self.fast_llm is not None:
+                try:
+                    added = scan_requests(self.graph, self.fast_llm, self.store)
+                    if added:
+                        log.info("meeting requests found: %s", added)
+                except Exception:  # noqa: BLE001
+                    log.exception("meeting request scan failed")
             self._stop.wait(self.interval)
 
     def queue_briefs(self) -> int:

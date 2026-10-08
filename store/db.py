@@ -52,6 +52,17 @@ CREATE TABLE IF NOT EXISTS briefs (
     updated_at   TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS meeting_requests (
+    message_id   TEXT PRIMARY KEY,
+    thread_id    TEXT,
+    status       TEXT NOT NULL,          -- ignored | new | replied | booked | dismissed
+    received_at  TEXT NOT NULL,
+    request      TEXT,                   -- JSON: who, purpose, length, timeframe... (null when ignored)
+    action_id    TEXT,                   -- the reply/booking awaiting or given approval
+    updated_at   TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_requests_status ON meeting_requests(status, received_at);
+
 CREATE TABLE IF NOT EXISTS memory (
     key        TEXT PRIMARY KEY,   -- e.g. "alias:kai", "pref:day_start", "note:<id>"
     kind       TEXT NOT NULL,      -- alias | pref | note
@@ -60,7 +71,7 @@ CREATE TABLE IF NOT EXISTS memory (
 );
 """
 
-_JSON_FIELDS = {"llm_messages", "display", "payload", "result", "value", "brief", "topic"}
+_JSON_FIELDS = {"llm_messages", "display", "payload", "result", "value", "brief", "topic", "request"}
 
 
 def now_iso() -> str:
@@ -234,3 +245,34 @@ class Store:
     def reset_stuck_briefs(self) -> None:
         """A restart mid-generation leaves 'preparing' rows behind; let them be retried."""
         self._execute("UPDATE briefs SET status = 'failed', error = 'interrupted' WHERE status = 'preparing'")
+
+    # ── meeting requests ─────────────────────────────────────────────────────
+
+    def seen_request_ids(self, message_ids: list[str]) -> set[str]:
+        if not message_ids:
+            return set()
+        marks = ",".join("?" * len(message_ids))
+        rows = self._execute(f"SELECT message_id FROM meeting_requests WHERE message_id IN ({marks})",
+                             tuple(message_ids)).fetchall()
+        return {r["message_id"] for r in rows}
+
+    def save_request(self, message_id: str, thread_id: str, received_at: str, status: str,
+                     request: dict | None = None) -> None:
+        self._execute(
+            "INSERT INTO meeting_requests (message_id, thread_id, status, received_at, request, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(message_id) DO NOTHING",
+            (message_id, thread_id, status, received_at, json.dumps(request) if request else None, now_iso()),
+        )
+
+    def get_request(self, message_id: str) -> dict[str, Any] | None:
+        return self._row(self._execute("SELECT * FROM meeting_requests WHERE message_id = ?", (message_id,)).fetchone())
+
+    def open_requests(self) -> list[dict[str, Any]]:
+        rows = self._execute("SELECT * FROM meeting_requests WHERE status = 'new' ORDER BY received_at DESC").fetchall()
+        return [self._row(r) for r in rows]
+
+    def update_request(self, message_id: str, **fields: Any) -> None:
+        columns = {**fields, "updated_at": now_iso()}
+        assignments = ", ".join(f"{k} = ?" for k in columns)
+        values = [json.dumps(v) if k in _JSON_FIELDS else v for k, v in columns.items()]
+        self._execute(f"UPDATE meeting_requests SET {assignments} WHERE message_id = ?", (*values, message_id))

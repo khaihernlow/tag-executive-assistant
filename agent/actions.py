@@ -24,6 +24,8 @@ current_conversation: ContextVar[str | None] = ContextVar("current_conversation"
 class ActionKind:
     name: str
     execute: Callable[[dict[str, Any], str], dict[str, Any]]  # (payload, action_id) -> result
+    editable: tuple[str, ...] = ()  # payload fields Dave may change on the slip (e.g. an email's text)
+    on_done: Callable[[dict[str, Any], dict[str, Any]], None] | None = None  # (payload, result) after success
 
 
 def auto_kinds() -> set[str]:
@@ -44,12 +46,19 @@ class Actions:
             return self.approve(aid, decided_by="auto")
         return self.store.get_action(aid)
 
-    def approve(self, aid: str, decided_by: str) -> dict[str, Any]:
-        if not self.store.transition_action(aid, "pending", "executing", decided_at=now_iso(), decided_by=decided_by):
-            action = self.store.get_action(aid)
-            if action is None:
-                raise KeyError(aid)
-            return action  # already decided: no double execution
+    def approve(self, aid: str, decided_by: str, edits: dict[str, Any] | None = None) -> dict[str, Any]:
+        current = self.store.get_action(aid)
+        if current is None:
+            raise KeyError(aid)
+        fields: dict[str, Any] = {"decided_at": now_iso(), "decided_by": decided_by}
+        kind = self.kinds.get(current["kind"])
+        if edits and kind and current["status"] == "pending":
+            # Only fields the kind allows: an edited email body, never the recipient.
+            allowed = {k: v for k, v in edits.items() if k in kind.editable and isinstance(v, str) and v.strip()}
+            if allowed:
+                fields["payload"] = {**current["payload"], **allowed}
+        if not self.store.transition_action(aid, "pending", "executing", **fields):
+            return self.store.get_action(aid)  # already decided: no double execution
         action = self.store.get_action(aid)
         try:
             result = self.kinds[action["kind"]].execute(action["payload"], aid)
@@ -58,6 +67,11 @@ class Actions:
                                          executed_at=now_iso())
         else:
             self.store.transition_action(aid, "executing", "executed", result=result, executed_at=now_iso())
+            if kind and kind.on_done:
+                try:
+                    kind.on_done(action["payload"], result)
+                except Exception:  # noqa: BLE001 - follow-up bookkeeping must not undo a done action
+                    pass
         return self.store.get_action(aid)
 
     def reject(self, aid: str, decided_by: str) -> dict[str, Any]:
@@ -78,7 +92,11 @@ def public_action(action: dict[str, Any]) -> dict[str, Any]:
         "result": action.get("result"),
         "error": action.get("error"),
     }
-    items = (action.get("payload") or {}).get("items")
+    payload = action.get("payload") or {}
+    if "comment" in payload:
+        # Emails: the slip shows (and lets Dave edit) the exact text that will be sent.
+        out["email"] = {"to": payload.get("to"), "subject": payload.get("subject"), "comment": payload["comment"]}
+    items = payload.get("items")
     if items:
         # Batch actions (e.g. moving several emails): show each one on the slip.
         out["items"] = [{k: i.get(k) for k in ("from", "subject", "reason")} for i in items]
