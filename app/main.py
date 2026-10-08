@@ -19,6 +19,7 @@ from agent.actions import public_action
 from agent.briefs import needs_brief
 from agent.filing import filed_today, undo_filing
 from agent.junk import moved_today, undo as undo_junk
+from agent.changes import answer_invite, pending_invites
 from agent.requests import open_requests_view, propose_booking, propose_hold, propose_nudge, propose_reply
 from agent.calendar import agenda_day, local_zone, meeting_place, parse_event
 from agent.people import internal_domain
@@ -174,6 +175,10 @@ def today(user: dict = Depends(require_auth), svc=Depends(services)):
         requests_view = open_requests_view(svc.graph, svc.store, svc.store, getattr(svc, "memory", None))
     except Exception:  # noqa: BLE001 - the agenda must load even if this part fails
         requests_view = []
+    try:
+        invites = pending_invites(svc.graph, now)
+    except Exception:  # noqa: BLE001
+        invites = []
     statuses = svc.store.brief_statuses([e["id"] for e in events if e["id"]])
     for e in events:
         e["brief"] = statuses.get(e["id"])
@@ -188,6 +193,7 @@ def today(user: dict = Depends(require_auth), svc=Depends(services)):
         "events": events,
         "pending": pending,
         "requests": requests_view,
+        "invites": invites,
         "junk_moved": moved_today(svc.store) if hasattr(svc.store, "actions_since") else [],
         "filed": filed_today(svc.store) if hasattr(svc.store, "actions_since") else [],
     }
@@ -317,6 +323,19 @@ def request_nudge(message_id: str, user: dict = Depends(require_auth), svc=Depen
     """Draft a short email asking the colleague handling it to reply (a sign-off slip)."""
     try:
         return propose_nudge(svc.graph, svc.store, svc.actions, message_id, getattr(svc, "memory", None))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+class InviteIn(BaseModel):
+    response: str
+
+
+@app.post("/api/invites/{event_id:path}/respond")
+def invite_respond(event_id: str, body: InviteIn, user: dict = Depends(require_auth), svc=Depends(services)):
+    """Dave tapped Accept, Maybe or Decline on Today: that tap is his decision, so it goes straight out."""
+    try:
+        return answer_invite(svc.graph, svc.actions, event_id, body.response, decided_by=f"dave: {user.get('email', '')}")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 

@@ -140,6 +140,7 @@ async function loadToday() {
     renderItinerary(day.events, isToday ? "today" : day.agenda_title.toLowerCase());
     renderSignoff(day.pending.filter((a) => !["reply_email", "book_meeting"].includes(a.kind)));
     renderRequests(day.requests || []);
+    renderInvites(day.invites || []);
     renderJunk(day.junk_moved || [], day.filed || []);
     // While the worker is preparing briefs, check back so the "Brief" buttons appear.
     clearTimeout(loadToday.timer);
@@ -569,6 +570,49 @@ function requestCard(r) {
   return card;
 }
 
+// ── invitations ────────────────────────────────────────────────────────────────
+
+const INVITE_DONE = { accept: "\u2713 Accepted", tentative: "Maybe sent", decline: "Declined" };
+
+function renderInvites(invites) {
+  $("#invites-block").hidden = !invites.length;
+  $("#invites").replaceChildren(...invites.map(inviteCard));
+}
+
+function inviteCard(inv) {
+  const card = el("div", { class: "card invite" });
+  const others = inv.attendees > 1 ? ` \u00b7 ${inv.attendees} people` : "";
+  card.append(
+    el("p", { class: "invite__title", text: inv.subject }),
+    el("p", { class: "invite__when", text: inv.when }),
+    el("p", { class: "invite__meta" }, `From ${inv.organizer}${inv.where ? ` \u00b7 ${inv.where}` : ""}${others}`,
+      inv.web_link ? el("a", { href: inv.web_link, target: "_blank", rel: "noopener", text: "Open" }) : null),
+    inv.clashes.length
+      ? el("p", { class: "avail avail--busy" }, el("strong", { text: "\u26a0 Clashes with: " }), inv.clashes.join("; "))
+      : el("p", { class: "avail avail--free", text: "\u2713 You\u2019re free" }));
+  const status = el("p", { class: "card__note" });
+  const row = el("div", { class: "invite__actions" });
+  const choices = [["accept", "Accept"], ["tentative", "Maybe"], ["decline", "Decline"]].map(([response, label]) =>
+    el("button", { class: response === "accept" && !inv.clashes.length ? "btn btn--sign" : "btn", type: "button", text: label,
+      onclick: async () => {
+        choices.forEach((b) => { b.disabled = true; });
+        status.textContent = "Sending\u2026";
+        try {
+          const action = await api(`/api/invites/${encodeURIComponent(inv.id)}/respond`, {
+            method: "POST", body: JSON.stringify({ response }) });
+          if (action.status !== "executed") throw new Error(action.error || "it didn't go through");
+          row.replaceWith(el("span", { class: "stamp stamp--done", text: `${INVITE_DONE[response]} \u00b7 ${firstName(inv.organizer)} is told` }));
+          status.textContent = "";
+        } catch (err) {
+          choices.forEach((b) => { b.disabled = false; });
+          status.textContent = `Couldn't send that: ${err.message}`;
+        }
+      } }));
+  row.append(...choices);
+  card.append(row, status);
+  return card;
+}
+
 function renderSignoff(pending) {
   $("#signoff-block").hidden = !pending.length;
   $("#signoff").replaceChildren(...pending.map(slip));
@@ -579,6 +623,7 @@ function renderSignoff(pending) {
 const KIND_LABELS = {
   create_event: "Calendar invite", book_meeting: "Calendar invite", create_rule: "Outlook rule",
   move_to_junk: "Inbox clean-up", reply_email: "Email reply", hold_time: "Calendar hold", nudge_colleague: "Email to colleague",
+  move_event: "Move meeting", cancel_event: "Cancel meeting", respond_invite: "Invite reply",
 };
 
 function slip(action) {

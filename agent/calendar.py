@@ -165,6 +165,7 @@ def find_events(events: list[Event], about: str) -> tuple[list[Event], bool]:
 
 def event_detail(e: Event) -> dict[str, Any]:
     return {
+        "id": e.id,
         "subject": e.subject,
         "start": "all day " + e.start.strftime("%a %b %d") if e.all_day else fmt_local(e.start),
         "end": fmt_local(e.end),
@@ -192,6 +193,7 @@ def calendar_tools(source: CalendarSource, memory: Any = None) -> list[Tool]:
             "timezone": str(tz),
             "events": [
                 {
+                    "id": e.id,
                     "subject": e.subject,
                     "start": "all day " + e.start.strftime("%a %b %d") if e.all_day else fmt_local(e.start),
                     "end": fmt_local(e.end),

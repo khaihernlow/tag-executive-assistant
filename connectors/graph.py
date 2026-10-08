@@ -111,6 +111,19 @@ class GraphClient:
             raise GraphError(f"POST {url} failed ({resp.status_code}): {_error_text(resp)}", resp.status_code)
         return resp.json() if resp.content else {}
 
+    def patch(self, path: str, body: dict[str, Any]) -> dict[str, Any]:
+        url = f"{GRAPH_URL}{path}"
+        resp = self.session.patch(url, json=body, headers=self._headers(None), timeout=self.timeout)
+        if not resp.ok:
+            raise GraphError(f"PATCH {url} failed ({resp.status_code}): {_error_text(resp)}", resp.status_code)
+        return resp.json() if resp.content else {}
+
+    def delete(self, path: str) -> None:
+        url = f"{GRAPH_URL}{path}"
+        resp = self.session.delete(url, headers=self._headers(None), timeout=self.timeout)
+        if not resp.ok:
+            raise GraphError(f"DELETE {url} failed ({resp.status_code}): {_error_text(resp)}", resp.status_code)
+
     def get_bytes(self, path: str, max_bytes: int = 15_000_000) -> bytes:
         """Raw content (e.g. an attachment's `$value`), refusing anything huge."""
         url = f"{GRAPH_URL}{path}"

@@ -736,3 +736,14 @@ button.cite:active { background: var(--rule-strong); }
 .request__stall strong { color: var(--ink); font-weight: 600; }
 .request__stall .btn { margin-top: var(--s2); width: 100%; }
 p.request__stall { padding: var(--s2) var(--s3); background: var(--sage-wash); border-radius: var(--r-sm); }
+
+/* ── invitations ────────────────────────────────────────────────────────────── */
+
+.invite + .invite { margin-top: var(--s3); }
+.invite__title { margin: 0; font-weight: 600; font-size: 16px; }
+.invite__when { margin: 2px 0 0; font-family: var(--serif); font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.invite__meta { margin: 2px 0 var(--s2); font-size: 13px; color: var(--ink-faint); }
+.invite__meta a { margin-left: var(--s2); color: var(--navy); font-weight: 600; text-decoration: none; }
+.invite__actions { display: flex; gap: var(--s2); margin-top: var(--s3); }
+.invite__actions .btn { flex: 1; }
+.invite .stamp { margin-top: var(--s3); }
