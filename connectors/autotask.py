@@ -76,8 +76,11 @@ class AutotaskClient:
         zone = payload.get("url") or payload.get("webUrl")
         if not zone:
             raise AutotaskAPIError("Autotask zone response did not include a URL.")
+        # Autotask answers with e.g. "https://webservices1.autotask.net/ATServicesRest/".
         zone = str(zone).rstrip("/")
-        if not zone.lower().endswith("/atservicesrest/v1.0"):
+        if zone.lower().endswith("/atservicesrest"):
+            zone += "/v1.0"
+        elif not zone.lower().endswith("/atservicesrest/v1.0"):
             zone += "/atservicesrest/v1.0"
         self.zone_url = zone
         return zone
