@@ -669,3 +669,11 @@ button.cite:active { background: var(--rule-strong); }
   resize: vertical;
 }
 .slip__email[readonly] { background: transparent; border-color: var(--rule); resize: none; }
+.request--waiting, .request--done { background: transparent; }
+.request__offered { margin: 0 0 var(--s2); padding-left: var(--s5); font-size: 14px; color: var(--ink-soft); }
+.request__answer {
+  margin: 0 0 var(--s3);
+  padding-left: var(--s3);
+  border-left: 2px solid var(--brass);
+  font-size: 14px; color: var(--ink-soft);
+}

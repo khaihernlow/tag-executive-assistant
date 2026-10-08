@@ -47,22 +47,29 @@ INBOX = [
 class FakeGraph:
     mailbox = DAVE
 
-    def __init__(self, busy=None, sent_after=None):
+    def __init__(self, busy=None, thread=None, calendar=None, reply_body=""):
         self.busy = busy or []
-        self.sent_after = sent_after
+        self.thread = thread or []          # later messages in a conversation
+        self.calendar = calendar or []      # upcoming events
+        self.reply_body = reply_body
         self.posts = []
 
     def get(self, path, params=None, headers=None):
+        if "/messages/" in path:  # read_email
+            return {"id": path.rsplit("/", 1)[-1], "subject": "Re: times", "receivedDateTime": "2026-10-09T14:00:00Z",
+                    "from": {"emailAddress": {"name": "Mark", "address": "mark@vendor.example"}},
+                    "uniqueBody": {"content": self.reply_body}}
         return {"id": "junk-folder"} if path.endswith("/junkemail") else {"id": path.rsplit("/", 1)[-1]}
 
     def get_all(self, path, params=None, limit=500, headers=None):
         if path == f"/users/{DAVE}/messages":
-            return INBOX
+            return self.thread if "conversationId" in (params or {}).get("$filter", "") else INBOX
         if path.endswith("/sentitems/messages"):
-            if "conversationId" in (params or {}).get("$filter", ""):
-                return [{"id": "s1", "sentDateTime": self.sent_after}] if self.sent_after else []
             return [{"bodyPreview": "Sounds great, let's do it. Dave Vener President"}, {"bodyPreview": "Yes"}]
         return []
+
+    def calendar_view(self, start, end):
+        return self.calendar
 
     def post(self, path, body, headers=None):
         self.posts.append((path, body))
@@ -105,11 +112,22 @@ def test_scan_saves_requests_and_ignores_the_rest_without_reclassifying():
     assert len(llm.calls) == 1  # both already seen: no second model call
 
 
-def test_dave_replying_in_outlook_retires_the_request():
+def msg_from(address, mid="later"):
+    return {"id": mid, "receivedDateTime": "2026-10-08T16:00:00Z", "bodyPreview": "...",
+            "from": {"emailAddress": {"address": address}}}
+
+
+@pytest.mark.parametrize("graph, status", [
+    (FakeGraph(thread=[msg_from("maria@tag.example")]), "handled"),        # Maria replied from her own mailbox
+    (FakeGraph(thread=[msg_from(DAVE)]), "handled"),                      # Dave replied in Outlook
+    (FakeGraph(thread=[msg_from("mark@vendor.example")]), "new"),         # just Mark again: still open
+    (FakeGraph(calendar=[{"attendees": [{"emailAddress": {"address": "Mark@vendor.example"}}]}]), "handled"),
+])
+def test_requests_close_when_the_team_already_handled_them(graph, status):
     store = Store(":memory:")
-    store.save_request("req", "t1", "2026-10-08T14:00:00Z", "new", {"from_name": "Mark"})
-    scan(FakeGraph(sent_after="2026-10-08T15:00:00Z"), FakeLLM("record_requests", {"emails": []}), store)
-    assert store.get_request("req")["status"] == "replied"
+    store.save_request("req", "t1", "2026-10-08T14:00:00Z", "new", {"from_name": "Mark", "from_email": "mark@vendor.example"})
+    scan(graph, FakeLLM("record_requests", {"emails": []}), store)
+    assert store.get_request("req")["status"] == status
 
 
 # ── suggesting times ─────────────────────────────────────────────────────────
@@ -161,7 +179,8 @@ def test_reply_waits_for_approval_edits_only_the_text_and_sends_in_thread():
     assert path == f"/users/{DAVE}/messages/req/reply"
     assert body == {"comment": "Hi Mark,<br>10:00 &lt;b&gt;works&lt;/b&gt;<br>Dave"}
     assert done["payload"]["to"] == "mark@vendor.example"  # recipient can't be edited
-    assert store.get_request("req")["status"] == "replied"
+    row = store.get_request("req")
+    assert row["status"] == "waiting" and row["request"]["offered"] == [s.isoformat() for s in SLOTS]
     assert store.open_requests() == []
 
 
@@ -187,3 +206,63 @@ def test_today_view_lists_open_requests_with_times_and_pending_slip():
     [view] = open_requests_view(graph, store, store)
     assert view["from"] == "Mark Greco" and view["proposed"]["label"] == "Tuesday, Oct 13 at 10:00 AM ET"
     assert view["action"] is None
+
+
+# ── following up on their answer ─────────────────────────────────────────────
+
+from agent.requests import follow_up
+
+
+def waiting_request(store):
+    store.save_request("req", "t1", "2026-10-08T14:00:00Z", "waiting",
+                       {**REQUEST, "offered": [s.isoformat() for s in SLOTS], "replied_at": "2026-10-08T15:00:00Z"})
+
+
+def test_picking_an_offered_free_time_books_it_without_asking_again():
+    graph, store = FakeGraph(thread=[msg_from("mark@vendor.example", "ans")], reply_body="Wednesday works!"), Store(":memory:")
+    actions = Actions(store, request_kinds(graph, store), auto=set())
+    waiting_request(store)
+    follow_up(graph, FakeLLM("record_answer", {"outcome": "picked_offered", "slot_number": 2, "summary": "Wed works"}),
+              store, actions)
+
+    row = store.get_request("req")
+    assert row["status"] == "booked" and row["request"]["booked_start"].startswith("2099-10-14T14:30")
+    [booked] = store.list_actions()
+    assert booked["status"] == "executed" and booked["decided_by"].startswith("auto: Mark Greco picked")
+    assert any(p.endswith("/events") for p, _ in graph.posts)
+
+
+def test_a_picked_time_that_is_no_longer_free_comes_back_for_approval():
+    busy = [{"status": "busy", "start": {"dateTime": "2099-10-14T18:00:00", "timeZone": "UTC"},
+             "end": {"dateTime": "2099-10-14T19:00:00", "timeZone": "UTC"}}]  # 2-3 PM local, Wed
+    graph, store = FakeGraph(busy=busy, thread=[msg_from("mark@vendor.example", "ans")]), Store(":memory:")
+    actions = Actions(store, request_kinds(graph, store), auto=set())
+    waiting_request(store)
+    follow_up(graph, FakeLLM("record_answer", {"outcome": "picked_offered", "slot_number": 2, "summary": "Wed"}),
+              store, actions)
+
+    assert store.get_request("req")["status"] == "new"
+    [pending] = store.list_actions()
+    assert pending["status"] == "pending" and "conflicts" in pending["summary"]
+    assert not any(p.endswith("/events") for p, _ in graph.posts)
+
+
+def test_a_different_time_brings_the_card_back_with_their_suggestion():
+    graph, store = FakeGraph(thread=[msg_from("mark@vendor.example", "ans")]), Store(":memory:")
+    actions = Actions(store, request_kinds(graph, store), auto=set())
+    waiting_request(store)
+    follow_up(graph, FakeLLM("record_answer", {"outcome": "proposed_other", "proposed_start": "2099-10-15T15:00",
+                                                "summary": "Thursday at 3 instead?"}), store, actions)
+    row = store.get_request("req")
+    assert row["status"] == "new" and row["request"]["kind"] == "proposes_time"
+    assert row["request"]["proposed_start"] == "2099-10-15T15:00"
+    assert row["request"]["answer"]["summary"] == "Thursday at 3 instead?"
+
+
+def test_no_answer_yet_changes_nothing():
+    graph, store = FakeGraph(thread=[msg_from(DAVE)]), Store(":memory:")
+    actions = Actions(store, request_kinds(graph, store), auto=set())
+    waiting_request(store)
+    llm = FakeLLM("record_answer", {})
+    follow_up(graph, llm, store, actions)
+    assert store.get_request("req")["status"] == "waiting" and llm.calls == []

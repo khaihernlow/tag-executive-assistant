@@ -381,6 +381,23 @@ function requestCard(r) {
   const body = el("div", { class: "request__body" });
   card.append(...head.filter(Boolean), body);
 
+  if (r.status === "booked") {
+    card.classList.add("request--done");
+    body.append(el("span", { class: "stamp stamp--done", text: `✓ Booked${r.booked ? ` · ${r.booked.replace(" ET", "")}` : ""}` }));
+    return card;
+  }
+  if (r.status === "waiting") {
+    card.classList.add("request--waiting");
+    body.append(
+      el("p", { class: "request__meta", text: `Times sent. Waiting for ${(r.from || "them").split(" ")[0]} to pick one:` }),
+      el("ul", { class: "request__offered" }, r.offered.map((t) => el("li", { text: t.replace(" ET", "") }))),
+      el("p", { class: "card__note", text: "I'll book it as soon as they choose one of these." }));
+    return card;
+  }
+  if (r.answer) {
+    body.append(el("p", { class: "request__answer", text: `They replied: “${r.answer}”` }));
+  }
+
   if (r.action) {
     body.append(slip(r.action));
     return card;

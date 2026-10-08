@@ -33,10 +33,11 @@ BRIEF_INTERVAL = int(os.environ.get("BRIEF_INTERVAL_SECONDS", str(3 * 60)))
 
 class Worker:
     def __init__(self, graph: Any, llm: Any, store: Any, interval: int = BRIEF_INTERVAL, searcher: Any = None,
-                 fast_llm: Any = None) -> None:
+                 fast_llm: Any = None, actions: Any = None) -> None:
         self.graph, self.llm, self.store = graph, llm, store
         self.searcher = searcher  # web research for briefs; None skips it
         self.fast_llm = fast_llm  # quick classification (meeting requests); None skips the inbox scan
+        self.actions = actions    # lets follow-ups book a time the other person picked
         self.interval = interval
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
@@ -66,7 +67,7 @@ class Worker:
                 log.exception("brief cycle failed")
             if self.fast_llm is not None:
                 try:
-                    added = scan_requests(self.graph, self.fast_llm, self.store)
+                    added = scan_requests(self.graph, self.fast_llm, self.store, actions=self.actions)
                     if added:
                         log.info("meeting requests found: %s", added)
                 except Exception:  # noqa: BLE001

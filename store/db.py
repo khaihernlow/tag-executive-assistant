@@ -276,3 +276,13 @@ class Store:
         assignments = ", ".join(f"{k} = ?" for k in columns)
         values = [json.dumps(v) if k in _JSON_FIELDS else v for k, v in columns.items()]
         self._execute(f"UPDATE meeting_requests SET {assignments} WHERE message_id = ?", (*values, message_id))
+
+    def requests_in(self, statuses: tuple[str, ...], since: str | None = None) -> list[dict[str, Any]]:
+        marks = ",".join("?" * len(statuses))
+        sql = f"SELECT * FROM meeting_requests WHERE status IN ({marks})"
+        params: tuple = statuses
+        if since:
+            sql += " AND updated_at >= ?"
+            params += (since,)
+        rows = self._execute(sql + " ORDER BY received_at DESC", params).fetchall()
+        return [self._row(r) for r in rows]
