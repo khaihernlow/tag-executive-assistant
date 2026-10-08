@@ -120,7 +120,8 @@ def test_suggest_slots_one_per_day_inside_hours_and_checks_staff_calendars():
     now = datetime(2026, 10, 8, 16, 0, tzinfo=NY)
     picks = suggest_slots(graph, {"earliest_date": "2026-10-12", "latest_date": "2026-10-14",
                                   "from_email": "garrett@tag.example", "time_of_day": "morning"}, now=now)
-    assert [p.strftime("%a %H:%M") for p in picks] == ["Mon 11:00", "Tue 08:00", "Wed 08:00"]
+    # Morning only (8-12): Mon is busy until 11; targets 10:00, 2:00 (capped to the morning), 11:00.
+    assert [p.strftime("%a %H:%M") for p in picks] == ["Mon 11:00", "Tue 11:30", "Wed 11:00"]
     schedule_call = [b for p, b in graph.posts if p.endswith("getSchedule")][0]
     assert schedule_call["schedules"] == [DAVE, "garrett@tag.example"]
 

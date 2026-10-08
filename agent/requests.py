@@ -204,15 +204,25 @@ def suggest_slots(graph: Any, request: dict[str, Any], memory: Any = None, now: 
     busy, _ = get_busy(graph, people, start, end)
     windows = find_free_slots(busy, first, last, duration, tz, day_start=day_start, day_end=day_end)
 
+    # Every possible start on the half hour, then one per day near a sensible time.
+    # The earliest free slot is usually 8:00, a poor offer to someone outside, so
+    # each day aims for a different target (10:00, 2:00, 11:00) to give real choice.
     options: list[datetime] = []
     for begin, finish in windows:
         candidate = _round_up(max(begin, now + timedelta(hours=2)))
-        if candidate + duration <= finish:
+        while candidate + duration <= finish:
             options.append(candidate)
-    by_day: dict[date, datetime] = {}
+            candidate += timedelta(minutes=30)
+    by_day: dict[date, list[datetime]] = {}
     for option in options:
-        by_day.setdefault(option.date(), option)
-    picks = list(by_day.values())[:count]
+        by_day.setdefault(option.date(), []).append(option)
+    targets = (time(10, 0), time(14, 0), time(11, 0))
+
+    def nearest(day_options: list[datetime], target: time) -> datetime:
+        aim = datetime.combine(day_options[0].date(), target, tz)
+        return min(day_options, key=lambda o: abs((o - aim).total_seconds()))
+
+    picks = [nearest(day_options, targets[i % len(targets)]) for i, day_options in enumerate(by_day.values())][:count]
     picks += [o for o in options if o not in picks][: count - len(picks)]
     return sorted(picks)
 
