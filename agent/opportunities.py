@@ -84,6 +84,13 @@ class Directory:
             self._companies[company_id] = rows[0]["companyName"] if rows else str(company_id)
         return self._companies.get(company_id, "")
 
+    def prefetch_companies(self, ids: list[int]) -> None:
+        missing = sorted({i for i in ids if i and i not in self._companies})
+        for start in range(0, len(missing), 200):
+            for r in self.at.query("Companies", [{"op": "in", "field": "id", "value": missing[start:start + 200]}],
+                                   ["id", "companyName"]):
+                self._companies[r["id"]] = r["companyName"]
+
     def resource_name(self, resource_id: int) -> str:
         if not self._resources:
             for r in self.at.query("Resources", [{"op": "exist", "field": "id"}], ["id", "firstName", "lastName"]):
@@ -167,6 +174,7 @@ def describe_opportunity(directory: Directory, o: dict[str, Any], today: date) -
         "probability": o.get("probability"),
         "status": STATUS_LABELS.get(status, status),
         "close_date": _day(o.get("projectedCloseDate")),
+        "close_iso": close,
         "overdue": bool(close) and status in OPEN_STATUSES and close < today.isoformat(),
         "amount": o.get("amount"),
         "owner": directory.resource_name(o.get("ownerResourceID")),
@@ -193,6 +201,7 @@ def find_opportunities(directory: Directory, company_id: int | None = None, abou
         raise ValueError("Say whose opportunities, or for which company.")
     rows = directory.at.query("Opportunities", filters, FIELDS, 200)
     rows.sort(key=lambda o: o.get("projectedCloseDate") or "")
+    directory.prefetch_companies([o.get("companyID") for o in rows])
     return [describe_opportunity(directory, o, today) for o in rows]
 
 

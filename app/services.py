@@ -35,6 +35,7 @@ class Services:
     memory: Memory
     worker: Worker
     llm: HatzAIProvider
+    autotask: Directory | None = None
 
 
 def build_services() -> Services:
@@ -45,6 +46,7 @@ def build_services() -> Services:
     actions = Actions(store, [create_event_kind(graph), junk_kind(graph, store), *request_kinds(graph, store),
                               file_kind(graph, store), rule_kind(graph, store), *change_kinds(graph),
                               *(opportunity_kinds(autotask) if autotask else [])])
+    directory = Directory(autotask) if autotask else None
     memory = Memory(store)
     llm = HatzAIProvider()
     # Quick, high-volume judgments (junk triage) use a faster, cheaper model.
@@ -58,8 +60,8 @@ def build_services() -> Services:
         + junk_tools(graph, fast_llm, actions, store)
         + [create_event_tool(graph, actions)]
         + change_tools(graph, actions)
-        + (opportunity_tools(Directory(autotask), actions) if autotask else [])
+        + (opportunity_tools(directory, actions) if directory else [])
     )
     assistant = Assistant(llm, registry, store, actions, memory)
-    worker = Worker(graph, llm, store, searcher=llm, fast_llm=fast_llm, actions=actions)
-    return Services(graph, store, actions, assistant, memory, worker, llm)
+    worker = Worker(graph, llm, store, searcher=llm, fast_llm=fast_llm, actions=actions, autotask=directory)
+    return Services(graph, store, actions, assistant, memory, worker, llm, directory)

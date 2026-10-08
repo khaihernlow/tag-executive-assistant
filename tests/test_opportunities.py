@@ -182,3 +182,39 @@ def test_stage_close_date_and_owner_can_be_changed_on_the_slip():
     assert (body["stage"], body["probability"], body["status"]) == (14, 70, 1)
     assert body["projectedCloseDate"] == "2026-12-01T00:00:00Z"
     assert body["ownerResourceID"] == DAVE_ID  # 501 wasn't offered, so it's ignored
+
+
+# ── pipeline check ───────────────────────────────────────────────────────────
+
+def test_pipeline_snapshot_lists_overdue_oldest_first_and_a_tap_saves_and_clears_it():
+    from agent.pipeline import pipeline_is_stale, pipeline_view, quick_update, refresh_pipeline
+
+    at, directory, _ = setup()
+    store = Store(":memory:")
+    actions = Actions(store, opportunity_kinds(at), auto=set())
+    assert pipeline_is_stale(store)
+    snap = refresh_pipeline(directory, store, today=TODAY)
+    assert snap["open"] == 2 and [o["title"] for o in snap["overdue"]] == ["Managed Services"]
+    assert not pipeline_is_stale(store)
+    view = pipeline_view(store, today=TODAY)
+    assert view["overdue"][0]["late"] == "4 months past close"
+
+    result = quick_update(directory, actions, store, 100, "push", today=TODAY)
+    assert result["status"] == "executed"
+    assert at.updated == [("Opportunities", {"id": 100, "projectedCloseDate": "2026-11-07T00:00:00Z"})]
+    assert pipeline_view(store, today=TODAY)["overdue"] == []  # gone from the queue right away
+
+
+@pytest.mark.parametrize("choice, extra, patch", [
+    ("date", "2027-01-15", {"projectedCloseDate": "2027-01-15T00:00:00Z"}),
+    ("on_hold", "", {"stage": 17, "probability": 0, "status": 0}),
+    ("lost", "", {"stage": 18, "probability": 0, "status": 2}),
+])
+def test_pipeline_answers(choice, extra, patch):
+    from agent.pipeline import quick_update
+
+    at, directory, _ = setup()
+    store = Store(":memory:")
+    actions = Actions(store, opportunity_kinds(at), auto=set())
+    quick_update(directory, actions, store, 100, choice, extra, today=TODAY)
+    assert at.updated == [("Opportunities", {"id": 100, **patch})]
