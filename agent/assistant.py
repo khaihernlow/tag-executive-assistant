@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import os
 from datetime import datetime
 from typing import Any
@@ -10,7 +11,7 @@ from typing import Any
 from agent.actions import Actions, current_conversation
 from agent.calendar import local_zone
 from agent.cards import build_cards
-from agent.factcheck import known_addresses, no_long_dashes, verify_addresses
+from agent.factcheck import known_addresses, no_long_dashes, verify_addresses, verify_names
 from agent.loop import _run_tools, run_turn, run_turn_stream, system_prompt
 from agent.tools import ToolRegistry
 from llm.provider import LLMProvider
@@ -19,6 +20,22 @@ from store.db import Store
 MAX_USER_TURNS = 10        # model context: last N exchanges of the conversation
 FRESH_RESULT_TURNS = 2     # ...but full tool results only for the most recent ones
 STALE_RESULT = "[Earlier result omitted. Calendar and mail may have changed: call the tool again if you need this.]"
+
+
+def _staff_names(trace: list[Any]) -> set[str]:
+    """People named in this turn's time-entry reports: the names a reply about them must use."""
+    names: set[str] = set()
+    for t in trace:
+        if t.name == "check_time_entries" and not t.is_error:
+            try:
+                data = json.loads(t.output)
+            except ValueError:
+                continue
+            names |= {p["name"] for p in data.get("people", [])}
+            silent = re.search(r"no time at all \(new, or gone\?\): ([^.]+)\.", data.get("note", ""))
+            if silent:
+                names |= {n.strip() for n in silent.group(1).split(",")}
+    return names
 
 
 def trim_history(messages: list[dict[str, Any]], max_turns: int = MAX_USER_TURNS,
@@ -77,6 +94,8 @@ class Assistant:
 
     def _finish(self, text: str, conversation: dict[str, Any], result: Any) -> dict[str, Any]:
         reply, fixes = verify_addresses(result.text, known_addresses(*_ground_truth(result.messages)))
+        reply, name_fixes = verify_names(reply, _staff_names(result.trace))
+        fixes += name_fixes
         reply = no_long_dashes(reply)
         if fixes:
             print(f"factcheck corrected reply in {conversation['id']}: {fixes}")

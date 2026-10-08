@@ -770,3 +770,16 @@ a.row { color: inherit; text-decoration: none; }
 .slip__fields { align-items: center; }
 select.slip__field-input { width: 100%; text-overflow: ellipsis; }
 .btn--warn { color: var(--pencil); border-color: var(--pencil); }
+
+/* ── time entries ───────────────────────────────────────────────────────────── */
+
+.time__lead { margin: 0 0 var(--s2); font-size: 14px; color: var(--ink-soft); }
+.time__list, .time__days { list-style: none; margin: 0; padding: 0; }
+.time__row { display: grid; grid-template-columns: 1fr auto; gap: 0 var(--s3); padding: 6px 0;
+             border-top: 1px solid var(--rule-soft); font-size: 14px; }
+.time__hours { font-variant-numeric: tabular-nums; text-align: right; }
+.time__why { grid-column: 1 / -1; font-size: 12px; color: var(--pencil); }
+.time__row--flag .time__name, .time__row--flag .time__hours { color: var(--pencil); font-weight: 600; }
+.time__days li { display: flex; justify-content: space-between; padding: 4px 0; border-top: 1px solid var(--rule-soft);
+                 font-size: 14px; font-variant-numeric: tabular-nums; }
+.time__more summary { margin-top: var(--s2); font-size: 13px; color: var(--ink-faint); cursor: pointer; }

@@ -14,6 +14,7 @@ from agent.filing import file_kind, rule_kind
 from agent.junk import junk_kind, junk_tools
 from agent.mail import mail_tools
 from agent.opportunities import Directory, opportunity_kinds, opportunity_tools
+from agent.timesheets import timesheet_tools
 from connectors.autotask import AutotaskClient
 from agent.requests import request_kinds
 from agent.memory import Memory, memory_tools
@@ -61,6 +62,7 @@ def build_services() -> Services:
         + [create_event_tool(graph, actions)]
         + change_tools(graph, actions)
         + (opportunity_tools(directory, actions) if directory else [])
+        + (timesheet_tools(autotask, store) if autotask else [])
     )
     assistant = Assistant(llm, registry, store, actions, memory)
     worker = Worker(graph, llm, store, searcher=llm, fast_llm=fast_llm, actions=actions, autotask=directory)

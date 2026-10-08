@@ -805,6 +805,32 @@ function emailsCard(card) {
           ? el("span", { class: "row__preview", text: `📎 ${m.attachments.join(", ")}` }) : null)))));
 }
 
+function timesheetCard(card) {
+  // Flagged people first, then everyone else; occasional loggers folded away.
+  const regular = card.people.filter((p) => !p.occasional);
+  const occasional = card.people.filter((p) => p.occasional);
+  const row = (p) => el("li", { class: `time__row${p.flagged ? " time__row--flag" : ""}` },
+    el("span", { class: "time__name", text: p.name }),
+    el("span", { class: "time__hours", text: `${p.hours}h` }),
+    p.why ? el("span", { class: "time__why", text: p.why }) : null);
+  const one = card.people.length === 1 ? card.people[0] : null;
+  return el("div", { class: "card" },
+    el("p", { class: "card__label", text: `Time entries \u00b7 ${card.week}` }),
+    one
+      ? el("ul", { class: "time__days" }, ...Object.entries(one.by_day).map(([d, h]) =>
+          el("li", { class: h ? "" : "time__row--flag" }, el("span", { text: d }), el("span", { text: `${h}h` }))))
+      : el("p", { class: "time__lead", text: card.flagged
+          ? `${card.flagged} of ${regular.length} behind (target ${card.target_hours}h)`
+          : `Everyone's logged their time (target ${card.target_hours}h)` }),
+    one ? null : el("ul", { class: "time__list" }, ...regular.filter((p) => p.flagged).map(row)),
+    !one && regular.some((p) => !p.flagged) ? el("details", { class: "time__more" },
+      el("summary", { text: `${regular.filter((p) => !p.flagged).length} on track` }),
+      el("ul", { class: "time__list" }, ...regular.filter((p) => !p.flagged).map(row))) : null,
+    !one && occasional.length ? el("details", { class: "time__more" },
+      el("summary", { text: `${occasional.length} occasional loggers` }),
+      el("ul", { class: "time__list" }, ...occasional.map(row))) : null);
+}
+
 function opportunitiesCard(card) {
   return el("div", { class: "card" },
     el("p", { class: "card__label", text: "Opportunities" }),
@@ -863,6 +889,7 @@ function renderCard(card) {
     case "slots": return slotsCard(card);
     case "emails": return emailsCard(card);
     case "opportunities": return opportunitiesCard(card);
+    case "timesheet": return timesheetCard(card);
     case "email": return emailCard(card);
     case "people": return peopleCard(card);
     case "events": return eventsCard(card);

@@ -140,6 +140,7 @@ STEP_LABELS = {
     "find_opportunities": "Checking Autotask opportunities",
     "create_opportunity": "Preparing the opportunity",
     "update_opportunity": "Preparing the update",
+    "check_time_entries": "Checking time entries in Autotask",
 }
 
 

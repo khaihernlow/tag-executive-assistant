@@ -56,3 +56,44 @@ def no_long_dashes(text: str) -> str:
     Only long dashes: markdown bullets and hyphenated words are left alone."""
     text = _DASH_RANGE.sub(r"\1-\2", text)
     return _LONG_DASH.sub(", ", text)
+
+
+_NAME = re.compile(r"\b([A-Z][a-z'\u2019]+)\s+([A-Z][A-Za-z'\u2019]+)\b")
+
+
+def verify_names(reply: str, known: set[str]) -> tuple[str, list[str]]:
+    """Fix or flag staff names that blend two real people.
+
+    In a time-entry answer the model wrote "Cory Lawrence" for Cory Keller and
+    Chris Lawrence. Only names that borrow a known person's first or last name
+    are checked, so ordinary capitalised phrases pass. A blend that fits one
+    person is corrected to them; one that fits several is marked unclear.
+    """
+    if not known:
+        return reply, []
+    full = {n.lower() for n in known}
+    firsts: dict[str, set[str]] = {}
+    lasts: dict[str, set[str]] = {}
+    for n in known:
+        parts = n.split()
+        if len(parts) >= 2:
+            firsts.setdefault(parts[0].lower(), set()).add(n)
+            lasts.setdefault(parts[-1].lower(), set()).add(n)
+    changes: list[str] = []
+
+    def check(match: re.Match) -> str:
+        name = match.group(0)
+        if name.lower() in full:
+            return name
+        first, last = match.group(1).lower(), match.group(2).lower()
+        candidates = firsts.get(first, set()) | lasts.get(last, set())
+        if not candidates or (first not in firsts and last not in lasts):
+            return name
+        if len(candidates) == 1:
+            fixed = next(iter(candidates))
+            changes.append(f"{name} -> {fixed}")
+            return fixed
+        changes.append(f"{name} unclear")
+        return f"{name} (name unclear: {' or '.join(sorted(candidates))})"
+
+    return _NAME.sub(check, reply), changes

@@ -28,3 +28,16 @@ def test_chat_replies_lose_long_dashes_but_keep_bullets_and_hyphens():
     assert no_long_dashes(text) == "- **Oct 6, 3:00-3:30 PM**, You interviewed Jordan\n- Follow-up call"
     assert no_long_dashes("she isn't in Autotask -- add her first") == "she isn't in Autotask, add her first"
     assert no_long_dashes("--verbose flag") == "--verbose flag"  # not a dash between words
+
+
+def test_blended_staff_names_are_corrected_or_flagged():
+    from agent.factcheck import verify_names
+
+    known = {"Cory Keller", "Chris Lawrence", "Dan Lawrence", "Riley Jones"}
+    text, changes = verify_names("Cory Lawrence and Riley Jones logged little. Riley Smith too.", known)
+    assert "Cory Lawrence (name unclear: Chris Lawrence or Cory Keller or Dan Lawrence)" in text
+    assert "Riley Jones logged" in text
+    assert "Riley Jones too" in text  # only one Riley: corrected
+    assert changes == ["Cory Lawrence unclear", "Riley Smith -> Riley Jones"]
+    # Ordinary capitalised words and names nobody listed are left alone.
+    assert verify_names("Last Week, Sawyer Savings met Jordan Rivera.", known)[0] == "Last Week, Sawyer Savings met Jordan Rivera."
