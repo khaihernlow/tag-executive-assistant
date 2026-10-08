@@ -5,7 +5,8 @@ import pytest
 
 from agent.actions import Actions
 from agent.requests import (
-    candidates, draft_reply, open_requests_view, propose_booking, propose_reply, request_kinds, scan, suggest_slots,
+    addressing, candidates, check_time, draft_reply, open_requests_view, propose_booking, propose_hold, propose_reply,
+    request_kinds, scan, suggest_slots,
 )
 from llm.provider import LLMResponse
 from store.db import Store
@@ -119,7 +120,8 @@ def test_scan_saves_requests_and_ignores_the_rest_without_reclassifying():
 def test_scan_tells_the_model_who_the_sender_is_and_ignores_cold_outreach():
     pitch = mail("pitch", "rep@staffing.example", "Re: IT support role", "Following up. Let me know a good time "
                  "to talk. Reply 'Stop' if you'd rather not hear from me.", thread="tp")
-    graph = FakeGraph(thread=[{"id": "first", "parentFolderId": "deleteditems"}])  # Dave deleted the first one
+    graph = FakeGraph(thread=[{"id": "first", "parentFolderId": "deleteditems", "receivedDateTime": "2026-10-01T14:00:00Z",
+                               "from": {"emailAddress": {"address": "rep@staffing.example"}}}])  # Dave deleted the first one
     graph_all = graph.get_all
     graph.get_all = lambda path, params=None, **kw: (
         [pitch] if path == f"/users/{DAVE}/messages" and "conversationId" not in (params or {}).get("$filter", "")
@@ -143,13 +145,78 @@ def test_scan_never_asks_about_senders_dave_junked():
 
 def test_each_request_says_why_it_is_there():
     llm = FakeLLM("record_requests", {"emails": [
-        {"n": 0, "kind": "asks_for_times", "purpose": "AI audit", "why": "Vendor following up on the AI audit"},
+        {"n": 0, "kind": "asks_for_times", "purpose": "AI audit", "who": "Sales director, Vendor Co"},
         {"n": 1, "kind": "not_a_request"}]})
     store = Store(":memory:")
     scan(FakeGraph(), llm, store)
     [view] = [r for r in open_requests_view(FakeGraph(), store, None) if r["id"] == "req"]
-    assert view["why"] == "Vendor following up on the AI audit"
+    assert view["who"] == "Sales director, Vendor Co"
     assert view["relationship"].startswith("first contact")
+
+
+def to(*addresses):
+    return [{"emailAddress": {"address": a, "name": a.split("@")[0].title()}} for a in addresses]
+
+
+@pytest.mark.parametrize("to_line, cc_line, expected", [
+    ([DAVE], [], ("dave", None)),
+    (["rj@tag.example"], [DAVE], ("colleague", {"email": "rj@tag.example", "name": "Rj"})),
+    (["someone@client.example"], [DAVE], ("fyi", None)),
+])
+def test_addressing_decides_whose_request_it_is_to_answer(to_line, cc_line, expected):
+    m = {"toRecipients": to(*to_line), "ccRecipients": to(*cc_line)}
+    assert addressing(m, DAVE) == expected
+
+
+def test_a_request_to_a_colleague_is_a_heads_up_and_a_cc_only_one_is_ignored():
+    asked = {**mail("asked", "cfo@bank.example", "RE: follow-up", "Can we schedule the onsite for Oct 22 at 11?", thread="ta"),
+             "toRecipients": to("rj@tag.example"), "ccRecipients": to(DAVE, "gs@tag.example")}
+    fyi = {**mail("fyi", "a@client.example", "Meeting", "Could we meet next week?", thread="tf"),
+           "toRecipients": to("b@client.example"), "ccRecipients": to(DAVE)}
+    graph = FakeGraph(calendar=[{"subject": "Project review", "showAs": "busy",
+                                 "start": {"dateTime": "2026-10-22T14:30:00", "timeZone": "UTC"},
+                                 "end": {"dateTime": "2026-10-22T15:30:00", "timeZone": "UTC"}}])
+    graph_all = graph.get_all
+    graph.get_all = lambda path, params=None, **kw: (
+        [asked, fyi] if path == f"/users/{DAVE}/messages" and "conversationId" not in (params or {}).get("$filter", "")
+        else graph_all(path, params, **kw))
+    llm = FakeLLM("record_requests", {"emails": [
+        {"n": 0, "kind": "proposes_time", "purpose": "Onsite meeting", "format": "in_person", "proposed_start": "2026-10-22T11:00"},
+        {"n": 1, "kind": "asks_for_times"}]})
+    store = Store(":memory:")
+    assert scan(graph, llm, store, now=datetime(2026, 10, 8, 16, 0, tzinfo=NY)) == 1
+    assert store.get_request("fyi")["status"] == "ignored"
+    [view] = open_requests_view(graph, store, store)
+    assert view["handler"] == "Rj" and view["team"] == ["Rj", "Gs"]
+    assert view["slots"] == []  # RJ answers; no reply buttons for Dave
+    assert view["proposed"]["free"] is False and view["proposed"]["clashes"][0].startswith("Project review, 10:30 AM")
+    assert view["minutes"] == 60  # onsite
+
+
+def test_holding_the_time_blocks_daves_calendar_without_inviting_anyone():
+    store = Store(":memory:")
+    store.save_request("req", "t1", "2026-10-08T14:00:00Z", "new", {
+        "from_name": "Casey Morgan", "from_email": "cfo@bank.example", "kind": "proposes_time", "purpose": "Onsite meeting",
+        "proposed_start": "2030-10-22T11:00", "format": "in_person", "handler": {"email": "rj@tag.example", "name": "Riley Jones"}})
+    graph = FakeGraph()
+    actions = Actions(store, request_kinds(graph, store), auto=set())
+    slip = propose_hold(graph, store, actions, "req")
+    assert "while Riley confirms" in slip["summary"]
+    actions.approve(slip["action_id"], decided_by="test")
+    path, body = [p for p in graph.posts if p[0].endswith("/events")][0]
+    assert body["attendees"] == [] and body["subject"].startswith("Hold: Onsite meeting")
+    assert store.get_request("req")["request"]["held"] is True
+
+
+def test_check_time_names_what_is_in_the_way():
+    graph = FakeGraph(calendar=[{"subject": "Board call", "showAs": "busy",
+                                 "start": {"dateTime": "2030-10-22T15:00:00", "timeZone": "UTC"},
+                                 "end": {"dateTime": "2030-10-22T16:00:00", "timeZone": "UTC"}},
+                                {"subject": "Lunch maybe", "showAs": "free",
+                                 "start": {"dateTime": "2030-10-22T15:00:00", "timeZone": "UTC"},
+                                 "end": {"dateTime": "2030-10-22T16:00:00", "timeZone": "UTC"}}])
+    result = check_time(graph, datetime(2030, 10, 22, 11, 0, tzinfo=NY), 60)
+    assert result == {"free": False, "clashes": ["Board call, 11 AM to 12 PM"]}
 
 
 def msg_from(address, mid="later"):
@@ -210,13 +277,13 @@ def test_reply_waits_for_approval_edits_only_the_text_and_sends_in_thread():
 
     proposal = propose_reply(graph, llm, store, actions, "req", [s.isoformat() for s in SLOTS])
     assert proposal["status"] == "pending" and proposal["email"]["to"] == "mark@vendor.example"
-    assert not [p for p, _ in graph.posts if p.endswith("/reply")]
+    assert not [p for p, _ in graph.posts if p.endswith("/replyAll")]
 
     done = actions.approve(proposal["action_id"], "dave", edits={"comment": "Hi Mark,\n10:00 <b>works</b>\nDave",
                                                                  "to": "attacker@evil.example"})
     assert done["status"] == "executed"
-    path, body = [p for p in graph.posts if p[0].endswith("/reply")][0]
-    assert path == f"/users/{DAVE}/messages/req/reply"
+    path, body = [p for p in graph.posts if p[0].endswith("/replyAll")][0]
+    assert path == f"/users/{DAVE}/messages/req/replyAll"  # everyone on the thread stays in the loop
     assert body == {"comment": "Hi Mark,<br>10:00 &lt;b&gt;works&lt;/b&gt;<br>Dave"}
     assert done["payload"]["to"] == "mark@vendor.example"  # recipient can't be edited
     row = store.get_request("req")

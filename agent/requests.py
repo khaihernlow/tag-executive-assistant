@@ -31,22 +31,23 @@ from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
 
 from agent.actions import ActionKind, Actions, public_action
-from agent.calendar import find_free_slots, local_zone, next_working_day
+from agent.calendar import find_free_slots, local_zone, next_working_day, parse_event
 from agent.events import create_event_kind, find_conflicts, summarize_event, validate_event
 from agent.people import internal_domain
 from agent.junk import known_correspondents
 from agent.mail import read_email
-from agent.relationship import automated, clean_preview, describe, thread_deleted_before
+from agent.relationship import automated, clean_preview, describe, has_emailed, relationship_label, thread_history
 from agent.scheduling import get_busy
 from llm.provider import ToolSpec
 
 REPLY_KIND = "reply_email"
 BOOK_KIND = "book_meeting"
+HOLD_KIND = "hold_time"
 SCAN_DAYS = 3
 MEETING_WORDS = re.compile(
     r"\b(meet|meeting|call|chat|catch up|catch-up|connect|sync|availability|available|free (?:time|for)|"
     r"time to|find (?:a )?time|schedule|calendar|zoom|teams|coffee|lunch|this week|next week|grab \d+)\b", re.I)
-LIST_SELECT = "id,subject,from,receivedDateTime,bodyPreview,conversationId,webLink,parentFolderId"
+LIST_SELECT = "id,subject,from,toRecipients,ccRecipients,receivedDateTime,bodyPreview,conversationId,webLink,parentFolderId"
 SKIP_FOLDERS = ("sentitems", "drafts", "junkemail", "deleteditems", "outbox")
 _skip_folder_ids: dict[str, set[str]] = {}
 
@@ -104,7 +105,8 @@ CLASSIFY = ToolSpec(
             "kind": {"type": "string",
                      "enum": ["asks_for_times", "proposes_time", "cold_outreach", "not_a_request"]},
             "purpose": {"type": "string", "description": "What the meeting is about, under 8 words"},
-            "why": {"type": "string", "description": "For a genuine request: who they are and why they want to meet, under 15 words"},
+            "who": {"type": "string", "description": "Their role and organization, from the signature or domain, "
+                    "e.g. 'AVP Finance & IT, Sawyer Savings Bank'. Under 10 words. Empty if unknown."},
             "duration_minutes": {"type": "integer", "description": "Only if stated"},
             "earliest_date": {"type": "string", "description": "YYYY-MM-DD, from phrases like 'next week'"},
             "latest_date": {"type": "string", "description": "YYYY-MM-DD"},
@@ -157,19 +159,93 @@ def classify(llm: Any, messages: list[dict[str, Any]], facts: dict[str, dict[str
 
 
 def sender_facts(graph: Any, store: Any, messages: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
-    """Relationship, deleted-earlier and automation facts per message (code, no model)."""
+    """Who each sender is to Dave, what happened earlier in the thread, and whether it's
+    an automated sequence. Code, no model."""
     correspondents = known_correspondents(graph)
     domain = internal_domain()
     facts = {}
     for m in messages:
         address = (((m.get("from") or {}).get("emailAddress") or {}).get("address") or "").lower()
         info = describe(address, correspondents, store, domain)
-        if not info["known"]:
-            # Only worth the extra lookup for senders Dave doesn't already know.
-            info["deleted_before"] = thread_deleted_before(graph, m)
+        if info["kind"] == "first_contact" and has_emailed(graph, address):
+            info = {"kind": "correspondent", "label": "you've emailed them before", "known": True}
+        history = thread_history(graph, m, domain)
+        if history["started_by"] or history["dave_replied"]:
+            # An ongoing conversation TAG is part of: as genuine as it gets.
+            info = {**info, "kind": "ongoing", "known": True}
+        info["label"] = relationship_label(info, history)
+        info["deleted_before"] = history["deleted_before"]
         info["automated"] = automated(m.get("bodyPreview") or "")
         facts[m["id"]] = info
     return facts
+
+
+def _recipients(message: dict[str, Any], field: str) -> list[dict[str, str]]:
+    out = []
+    for r in message.get(field) or []:
+        e = r.get("emailAddress") or {}
+        if e.get("address"):
+            out.append({"email": e["address"].lower(), "name": e.get("name") or e["address"]})
+    return out
+
+
+def addressing(message: dict[str, Any], mailbox: str) -> tuple[str, dict[str, str] | None]:
+    """Whose request is this to answer?
+
+    ("dave", None)          addressed to Dave: he answers
+    ("colleague", person)   Dave only copied, a TAG colleague on To: they answer, Dave gets a heads-up
+    ("fyi", None)           Dave only copied, nobody from TAG on To: not his to schedule
+    """
+    mailbox = mailbox.lower()
+    to = _recipients(message, "toRecipients")
+    if not to or any(r["email"] == mailbox for r in to):
+        return "dave", None
+    domain = internal_domain()
+    colleague = next((r for r in to if domain and r["email"].endswith("@" + domain)), None)
+    return ("colleague", colleague) if colleague else ("fyi", None)
+
+
+def thread_team(message: dict[str, Any], mailbox: str) -> list[dict[str, str]]:
+    """TAG colleagues on the email (To or CC), not Dave: they're part of the meeting."""
+    domain = internal_domain()
+    team, seen = [], {mailbox.lower()}
+    for r in _recipients(message, "toRecipients") + _recipients(message, "ccRecipients"):
+        if domain and r["email"].endswith("@" + domain) and r["email"] not in seen:
+            seen.add(r["email"])
+            team.append(r)
+    return team
+
+
+def meeting_minutes(request: dict[str, Any], memory: Any = None) -> int:
+    if request.get("duration_minutes"):
+        return int(request["duration_minutes"])
+    if request.get("format") == "in_person":
+        return 60  # an onsite visit is rarely a 30-minute slot
+    return int(memory.pref("meeting_minutes")) if memory else 30
+
+
+def check_time(graph: Any, start: datetime, minutes: int, team: list[dict[str, str]] = ()) -> dict[str, Any]:
+    """Is Dave (and the TAG people on the thread) free then? Names what's in the way."""
+    tz = local_zone()
+    end = start + timedelta(minutes=minutes)
+    clashes = []
+    for raw in graph.calendar_view(start, end):
+        event = parse_event(raw, tz)
+        if event.blocks_time and event.response != "declined" and event.start < end and event.end > start:
+            clashes.append(f"{event.subject}, {_clock(event.start)} to {_clock(event.end)}")
+    if team:
+        busy, _ = get_busy(graph, [t["email"] for t in team], start, end)
+        if any(b.blocks_time and b.start < end and b.end > start for b in busy):
+            # Free/busy for several people comes back merged, so ask per person only when needed.
+            for t in team:
+                theirs, _ = get_busy(graph, [t["email"]], start, end)
+                if any(b.blocks_time and b.start < end and b.end > start for b in theirs):
+                    clashes.append(f"{t['name']} is busy")
+    return {"free": not clashes, "clashes": clashes}
+
+
+def _clock(moment: datetime) -> str:
+    return moment.strftime("%I:%M %p").lstrip("0").replace(":00", "")
 
 
 def scan(graph: Any, llm: Any, store: Any, now: datetime | None = None, actions: Any = None) -> int:
@@ -189,7 +265,8 @@ def scan(graph: Any, llm: Any, store: Any, now: datetime | None = None, actions:
     for m in fresh:
         verdict = verdicts.get(m["id"], {"kind": "not_a_request"})
         thread = m.get("conversationId") or m["id"]
-        if verdict.get("kind") not in ("asks_for_times", "proposes_time"):
+        role, handler = addressing(m, graph.mailbox)
+        if verdict.get("kind") not in ("asks_for_times", "proposes_time") or role == "fyi":
             store.save_request(m["id"], thread, m["receivedDateTime"], "ignored")
             continue
         sender = (m.get("from") or {}).get("emailAddress") or {}
@@ -201,6 +278,8 @@ def scan(graph: Any, llm: Any, store: Any, now: datetime | None = None, actions:
             "preview": clean_preview(m.get("bodyPreview") or "")[:300],
             "web_link": m.get("webLink"),
             "relationship": facts[m["id"]]["label"],
+            "team": thread_team(m, graph.mailbox),
+            "handler": handler,  # a colleague answers this one; Dave just needs to know
         }
         # A newer message in the same thread replaces any older open request for it.
         for old in store.open_requests():
@@ -326,8 +405,10 @@ def suggest_slots(graph: Any, request: dict[str, Any], memory: Any = None, now: 
     """Up to `count` start times, one per day where possible, inside Dave's preferred hours."""
     tz = local_zone()
     now = now or datetime.now(tz)
-    duration = timedelta(minutes=int(request.get("duration_minutes") or (memory.pref("meeting_minutes") if memory else 30)))
-    first = _parse_day(request.get("earliest_date")) or next_working_day(now.date())
+    duration = timedelta(minutes=meeting_minutes(request, memory))
+    # Counter-offers belong near the day they asked for, not next week by default.
+    first = (_parse_day(request.get("earliest_date")) or _parse_day(request.get("proposed_start"))
+             or next_working_day(now.date()))
     last = _parse_day(request.get("latest_date")) or first + timedelta(days=7)
     first, last = max(first, now.date()), max(last, first)
     day_start = time.fromisoformat(memory.pref("day_start") if memory else "08:00")
@@ -341,6 +422,7 @@ def suggest_slots(graph: Any, request: dict[str, Any], memory: Any = None, now: 
     requester = request.get("from_email", "")
     if requester.endswith("@" + internal_domain()):
         people.append(requester)  # staff: their free/busy is visible, so find a time that works for both
+    people += [t["email"] for t in request.get("team") or [] if t["email"] not in people]
     start = datetime.combine(first, time.min, tz)
     end = datetime.combine(last + timedelta(days=1), time.min, tz)
     busy, _ = get_busy(graph, people, start, end)
@@ -364,6 +446,12 @@ def suggest_slots(graph: Any, request: dict[str, Any], memory: Any = None, now: 
         aim = datetime.combine(day_options[0].date(), target, tz)
         return min(day_options, key=lambda o: abs((o - aim).total_seconds()))
 
+    proposed = _parse_time(request.get("proposed_start"))
+    if proposed:
+        # Their own suggestion is already on the card.
+        options = [o for o in options if o != proposed]
+        by_day = {d: [o for o in opts if o != proposed] for d, opts in by_day.items()}
+        by_day = {d: opts for d, opts in by_day.items() if opts}
     picks = [nearest(day_options, targets[i % len(targets)]) for i, day_options in enumerate(by_day.values())][:count]
     picks += [o for o in options if o not in picks][: count - len(picks)]
     return sorted(picks)
@@ -372,6 +460,13 @@ def suggest_slots(graph: Any, request: dict[str, Any], memory: Any = None, now: 
 def _parse_day(value: Any) -> date | None:
     try:
         return date.fromisoformat(str(value)[:10]) if value else None
+    except ValueError:
+        return None
+
+
+def _parse_time(value: Any) -> datetime | None:
+    try:
+        return datetime.fromisoformat(str(value)).replace(tzinfo=local_zone()) if value else None
     except ValueError:
         return None
 
@@ -436,10 +531,11 @@ def draft_reply(llm: Any, graph: Any, request: dict[str, Any], slots: list[datet
 
 def request_kinds(graph: Any, store: Any) -> list[ActionKind]:
     def send_reply(payload: dict[str, Any], action_id: str) -> dict[str, Any]:
-        # Reply in the thread (keeps their email quoted below); sends immediately.
+        # Reply-all in the thread: keeps their email quoted below and everyone on it
+        # (RJ, their colleagues) in the loop. Sends immediately.
         # The reply API reads the comment as HTML: escape it and keep the line breaks.
         body = html.escape(payload["comment"]).replace("\n", "<br>")
-        graph.post(f"/users/{graph.mailbox}/messages/{payload['message_id']}/reply", {"comment": body})
+        graph.post(f"/users/{graph.mailbox}/messages/{payload['message_id']}/replyAll", {"comment": body})
         return {"sent": True}
 
     def mark(status: str):
@@ -456,10 +552,15 @@ def request_kinds(graph: Any, store: Any) -> list[ActionKind]:
         request = {**(row["request"] or {}), "booked_start": payload.get("start")}
         store.update_request(payload["message_id"], status="booked", request=request)
 
+    def held(payload: dict[str, Any], result: dict[str, Any]) -> None:
+        row = store.get_request(payload["message_id"])
+        store.update_request(payload["message_id"], request={**(row["request"] or {}), "held": True})
+
     book = create_event_kind(graph)
     return [
         ActionKind(REPLY_KIND, send_reply, editable=("comment",), on_done=sent),
         ActionKind(BOOK_KIND, book.execute, on_done=booked),
+        ActionKind(HOLD_KIND, book.execute, on_done=held),
     ]
 
 
@@ -490,11 +591,12 @@ def propose_booking(graph: Any, store: Any, actions: Actions, message_id: str, s
         raise ValueError("This request is no longer open.")
     request = row["request"]
     local = datetime.fromisoformat(start).astimezone(local_zone()).strftime("%Y-%m-%dT%H:%M")
-    duration = int(request.get("duration_minutes") or (memory.pref("meeting_minutes") if memory else 30))
+    duration = meeting_minutes(request, memory)
     payload = validate_event({
         "subject": request.get("purpose") or f"Meeting with {request['from_name']}",
         "start": local, "duration_minutes": duration,
-        "attendees": [{"email": request["from_email"], "name": request.get("from_name", "")}],
+        "attendees": [{"email": request["from_email"], "name": request.get("from_name", "")}]
+                     + [{"email": t["email"], "name": t["name"]} for t in request.get("team") or []],
         "teams": request.get("format") != "in_person",
     })
     conflicts, unchecked = find_conflicts(graph, payload)
@@ -504,6 +606,30 @@ def propose_booking(graph: Any, store: Any, actions: Actions, message_id: str, s
     return {**public_action(action), "conflicts_found": bool(conflicts)}
 
 
+def propose_hold(graph: Any, store: Any, actions: Actions, message_id: str, memory: Any = None) -> dict[str, Any]:
+    """A colleague is confirming the time they asked for: block it on Dave's calendar
+    meanwhile. No attendees, so nobody gets an invite."""
+    row = store.get_request(message_id)
+    if row is None or row["status"] != "new":
+        raise ValueError("This request is no longer open.")
+    request = row["request"]
+    start = _parse_time(request.get("proposed_start"))
+    if start is None:
+        raise ValueError("They didn't suggest a time to hold.")
+    handler = (request.get("handler") or {}).get("name", "your colleague")
+    payload = validate_event({
+        "subject": f"Hold: {request.get('purpose') or 'meeting'} with {request['from_name']}",
+        "start": start.strftime("%Y-%m-%dT%H:%M"), "duration_minutes": meeting_minutes(request, memory),
+        "attendees": [], "teams": False,
+        "description": f"Holding this while {handler} confirms with {request['from_name']}.",
+    })
+    payload["message_id"] = message_id
+    action = actions.propose(HOLD_KIND, f"Hold {slot_label(start).replace(' ET', '')} on your calendar "
+                             f"while {handler.split(' ')[0]} confirms", payload)
+    store.update_request(message_id, action_id=action["id"])
+    return public_action(action)
+
+
 def open_requests_view(graph: Any, store: Any, actions_store: Any, memory: Any = None) -> list[dict[str, Any]]:
     """What the Today screen shows for each open request, with fresh suggested times."""
     out = []
@@ -511,7 +637,7 @@ def open_requests_view(graph: Any, store: Any, actions_store: Any, memory: Any =
     rows = store.requests_in(("new", "waiting")) + store.requests_in(("booked",), since=recent)
     for row in rows:
         request = row["request"] or {}
-        if row["status"] == "new":
+        if row["status"] == "new" and not request.get("handler"):
             try:
                 slots = suggest_slots(graph, request, memory)
             except Exception:  # noqa: BLE001 - a calendar hiccup shouldn't hide the request
@@ -519,12 +645,13 @@ def open_requests_view(graph: Any, store: Any, actions_store: Any, memory: Any =
         else:
             slots = []
         proposed = None
-        if request.get("kind") == "proposes_time" and request.get("proposed_start"):
+        start = _parse_time(request.get("proposed_start")) if request.get("kind") == "proposes_time" else None
+        if start and row["status"] == "new":
+            proposed = {"start": start.isoformat(), "label": slot_label(start)}
             try:
-                start = datetime.fromisoformat(request["proposed_start"]).replace(tzinfo=local_zone())
-                proposed = {"start": start.isoformat(), "label": slot_label(start)}
-            except ValueError:
-                pass
+                proposed.update(check_time(graph, start, meeting_minutes(request, memory), request.get("team") or []))
+            except Exception:  # noqa: BLE001 - say we couldn't check rather than guess
+                proposed.update({"free": None, "clashes": []})
         action = actions_store.get_action(row["action_id"]) if row.get("action_id") else None
         out.append({
             "id": row["message_id"],
@@ -538,8 +665,12 @@ def open_requests_view(graph: Any, store: Any, actions_store: Any, memory: Any =
             "from_email": request.get("from_email"),
             "subject": request.get("subject"),
             "purpose": request.get("purpose"),
-            "why": request.get("why"),
+            "who": request.get("who"),
             "relationship": request.get("relationship"),
+            "handler": (request.get("handler") or {}).get("name"),
+            "held": bool(request.get("held")),
+            "team": [t["name"] for t in request.get("team") or []],
+            "minutes": meeting_minutes(request, memory),
             "kind": request.get("kind"),
             "duration_minutes": request.get("duration_minutes"),
             "format": request.get("format"),

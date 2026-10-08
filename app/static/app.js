@@ -421,84 +421,118 @@ function renderRequests(requests) {
   $("#requests").replaceChildren(...requests.map(requestCard));
 }
 
+// "Thursday, Oct 22 at 11:00 AM ET" -> "Thu, Oct 22 · 11:00 AM"
+const shortSlot = (label) => label.replace(" ET", "").replace(/^(\w{3})\w*/, "$1").replace(" at ", " \u00b7 ");
+const firstName = (name) => (name || "").split(" ")[0];
+
 function requestCard(r) {
   const card = el("div", { class: "card request" });
-  const meta = [r.purpose, r.duration_minutes ? `${r.duration_minutes} min` : "",
-                r.format && r.format !== "unspecified" ? r.format.replace("_", " ") : ""].filter(Boolean).join(" \u00b7 ");
-  const head = [
-    el("p", { class: "request__who" }, el("strong", { text: r.from }), " wants to meet"),
-    meta ? el("p", { class: "request__meta", text: meta }) : null,
-    r.why || r.relationship ? el("p", { class: "request__why" },
-      el("strong", { text: "Why it's here: " }), [r.why, r.relationship].filter(Boolean).join(" \u00b7 ")) : null,
-    el("p", { class: "request__subject" }, `\u201c${r.subject}\u201d `,
-      r.web_link ? el("a", { href: r.web_link, target: "_blank", rel: "noopener", text: "Open email" }) : null),
-  ];
+  const head = el("header", { class: "request__head" },
+    el("p", { class: "request__who" }, el("strong", { text: r.from }),
+      r.purpose ? el("span", { class: "request__purpose", text: ` \u00b7 ${r.purpose}` }) : null),
+    r.who ? el("p", { class: "request__role", text: r.who }) : null,
+    el("p", { class: "request__context" }, r.relationship || "",
+      r.web_link ? el("a", { href: r.web_link, target: "_blank", rel: "noopener", text: "Open email" }) : null));
   const body = el("div", { class: "request__body" });
-  card.append(...head.filter(Boolean), body);
+  card.append(head, body);
 
   if (r.status === "booked") {
     card.classList.add("request--done");
-    body.append(el("span", { class: "stamp stamp--done", text: `✓ Booked${r.booked ? ` · ${r.booked.replace(" ET", "")}` : ""}` }));
+    body.append(el("span", { class: "stamp stamp--done", text: `\u2713 Booked${r.booked ? ` \u00b7 ${shortSlot(r.booked)}` : ""}` }));
     return card;
   }
   if (r.status === "waiting") {
     card.classList.add("request--waiting");
     body.append(
-      el("p", { class: "request__meta", text: `Times sent. Waiting for ${(r.from || "them").split(" ")[0]} to pick one:` }),
-      el("ul", { class: "request__offered" }, r.offered.map((t) => el("li", { text: t.replace(" ET", "") }))),
+      el("p", { class: "request__label", text: `Times sent, waiting for ${firstName(r.from) || "them"}` }),
+      el("ul", { class: "request__offered" }, r.offered.map((t) => el("li", { text: shortSlot(t) }))),
       el("p", { class: "card__note", text: "I'll book it as soon as they choose one of these." }));
     return card;
   }
-  if (r.answer) {
-    body.append(el("p", { class: "request__answer", text: `They replied: “${r.answer}”` }));
+  if (r.handler) {
+    body.append(el("p", { class: "request__handler" },
+      el("strong", { text: `${r.handler} is handling this.` }), " You\u2019re copied, so there\u2019s nothing to reply to."));
   }
-
+  if (r.answer) body.append(el("p", { class: "request__answer", text: `They replied: \u201c${r.answer}\u201d` }));
   if (r.action) {
     body.append(slip(r.action));
     return card;
   }
 
-  const chosen = new Set(r.slots.map((s) => s.start));
   const status = el("p", { class: "card__note" });
-  const busyButtons = [];
+  const buttons = [];
   const run = async (label, path, payload) => {
-    busyButtons.forEach((b) => { b.disabled = true; });
+    buttons.forEach((b) => { b.disabled = true; });
     status.textContent = label;
     try {
-      const action = await api(path, { method: "POST", body: JSON.stringify(payload) });
+      const action = await api(path, { method: "POST", body: payload ? JSON.stringify(payload) : undefined });
       body.replaceChildren(slip(action));
     } catch (err) {
-      busyButtons.forEach((b) => { b.disabled = false; });
+      buttons.forEach((b) => { b.disabled = false; });
       status.textContent = `Couldn't do that: ${err.message}`;
     }
   };
+  const busy = r.proposed && r.proposed.free === false;
 
+  // What they asked for, and whether Dave can make it.
   if (r.proposed) {
-    const book = el("button", { class: "btn btn--sign", type: "button", text: `Book ${r.proposed.label.replace(" ET", "")}`,
-      onclick: () => run("Checking your calendar\u2026", `/api/requests/${encodeURIComponent(r.id)}/book`, { start: r.proposed.start }) });
-    busyButtons.push(book);
-    body.append(el("p", { class: "request__meta", text: "They suggested a time:" }), book);
+    const length = r.minutes >= 60 ? `${r.minutes / 60} hr` : `${r.minutes} min`;
+    const format = { teams: "Teams", in_person: "In person", phone: "Phone" }[r.format] || "";
+    const verdict = r.proposed.free === true
+      ? el("p", { class: "avail avail--free", text: "\u2713 You\u2019re free" })
+      : r.proposed.free === false
+        ? el("p", { class: "avail avail--busy" }, el("strong", { text: "\u26a0 You\u2019re busy: " }), r.proposed.clashes.join("; "))
+        : el("p", { class: "avail", text: "Couldn\u2019t check your calendar" });
+    const ask = el("div", { class: "request__ask" },
+      el("p", { class: "request__label", text: "They asked for" }),
+      el("p", { class: "request__time", text: shortSlot(r.proposed.label) }),
+      el("p", { class: "request__meta", text: [format, length].filter(Boolean).join(" \u00b7 ") }),
+      verdict);
+    body.append(ask);
+
+    if (r.handler) {
+      if (r.held) {
+        ask.append(el("span", { class: "stamp stamp--done", text: "\u2713 Held on your calendar" }));
+      } else if (busy) {
+        ask.append(el("p", { class: "card__note", text: `Worth telling ${firstName(r.handler)} before the time is confirmed.` }));
+      } else {
+        const hold = el("button", { class: "btn", type: "button", text: "Hold it on my calendar",
+          onclick: () => run("Preparing the hold\u2026", `/api/requests/${encodeURIComponent(r.id)}/hold`) });
+        buttons.push(hold);
+        ask.append(hold, el("p", { class: "card__note", text: `Blocks the time while ${firstName(r.handler)} confirms. No invite goes out.` }));
+      }
+    } else {
+      const book = el("button", { class: busy ? "btn" : "btn btn--sign", type: "button", text: busy ? "Book anyway" : "Book it",
+        onclick: () => run("Checking your calendar\u2026", `/api/requests/${encodeURIComponent(r.id)}/book`, { start: r.proposed.start }) });
+      buttons.push(book);
+      ask.append(book);
+    }
   }
 
-  if (r.slots.length) {
-    const chips = el("div", { class: "slots" }, r.slots.map((s) => {
-      const chip = el("button", { class: "slot slot--pick", type: "button", "aria-pressed": "true" },
-        el("span", { class: "slot__start", text: s.label.replace(/ at /, " \u00b7 ").replace(" ET", "") }));
-      chip.addEventListener("click", () => {
-        chosen.has(s.start) ? chosen.delete(s.start) : chosen.add(s.start);
-        chip.setAttribute("aria-pressed", String(chosen.has(s.start)));
-        reply.disabled = !chosen.size;
-      });
-      return chip;
-    }));
-    const reply = el("button", { class: "btn " + (r.proposed ? "" : "btn--sign"), type: "button",
-      text: r.proposed ? "Reply with other times" : "Reply with these times",
+  // Times to offer instead: a checklist, every ticked time goes in one reply.
+  if (!r.handler && r.slots.length) {
+    const chosen = new Set(r.slots.map((s) => s.start));
+    const reply = el("button", { class: "btn " + (r.proposed && !busy ? "" : "btn--sign"), type: "button",
       onclick: () => run("Drafting your reply\u2026", `/api/requests/${encodeURIComponent(r.id)}/reply`,
                          { starts: r.slots.map((s) => s.start).filter((s) => chosen.has(s)) }) });
-    busyButtons.push(reply);
-    body.append(el("p", { class: "request__meta", text: r.proposed ? "Or offer other times:" : "Times that work for you:" }),
-      chips, el("div", { class: "slip__actions" }, reply));
-  } else if (!r.proposed) {
+    const label = () => {
+      reply.textContent = chosen.size ? `Reply with ${chosen.size === 1 ? "this time" : `these ${chosen.size} times`}` : "Tick a time to offer";
+      reply.disabled = !chosen.size;
+    };
+    const rows = r.slots.map((s) => {
+      const box = el("input", { type: "checkbox" });
+      box.checked = true;
+      box.addEventListener("change", () => { box.checked ? chosen.add(s.start) : chosen.delete(s.start); label(); });
+      return el("li", {}, el("label", { class: "offer" }, box, el("span", { text: shortSlot(s.label) })));
+    });
+    label();
+    buttons.push(reply);
+    const checked = r.team && r.team.length ? `Checked against ${r.team.map((n) => `${firstName(n)}\u2019s`).join(" and ")} calendar${r.team.length > 1 ? "s" : ""} too. ` : "";
+    body.append(el("div", { class: "request__offer" },
+      el("p", { class: "request__label", text: r.proposed ? "Or offer times you\u2019re free" : "Times you\u2019re free" }),
+      el("ul", { class: "offers" }, rows), reply,
+      el("p", { class: "card__note", text: `${checked}You\u2019ll see the email before it goes, sent to everyone on the thread.` })));
+  } else if (!r.handler && !r.proposed) {
     body.append(el("p", { class: "card__note", text: "No free time found in that range." }));
   }
 
@@ -509,7 +543,7 @@ function requestCard(r) {
       catch (err) { dismiss.disabled = false; status.textContent = err.message; }
       if (!$("#requests").children.length) $("#requests-block").hidden = true;
     } });
-  busyButtons.push(dismiss);
+  buttons.push(dismiss);
   body.append(status, el("div", { class: "request__foot" }, dismiss));
   return card;
 }
@@ -523,7 +557,7 @@ function renderSignoff(pending) {
 
 const KIND_LABELS = {
   create_event: "Calendar invite", book_meeting: "Calendar invite", create_rule: "Outlook rule",
-  move_to_junk: "Inbox clean-up", reply_email: "Email reply",
+  move_to_junk: "Inbox clean-up", reply_email: "Email reply", hold_time: "Calendar hold",
 };
 
 function slip(action) {

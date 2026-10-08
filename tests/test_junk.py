@@ -187,7 +187,9 @@ def test_a_followup_to_a_deleted_pitch_or_an_automated_sequence_moves_without_as
     vague = msg("vague", "hello@unknown.example", "Partnership?")
     graph_all = graph.get_all
     graph.get_all = lambda path, params=None, **kw: (
-        [{"id": "first", "parentFolderId": "deleted-id"}] if "conversationId eq 't1'" in (params or {}).get("$filter", "")
+        [{"id": "first", "parentFolderId": "deleted-id", "receivedDateTime": "2026-10-01T12:00:00Z",
+          "from": {"emailAddress": {"address": "rep@staffing.example"}}}]
+        if "conversationId eq 't1'" in (params or {}).get("$filter", "")
         else graph_all(path, params, **kw))
     result = triage(graph, llm, store, [followup, sequence, vague])
     assert [i["id"] for i in result["auto"]] == ["followup", "sequence"]

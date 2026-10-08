@@ -80,7 +80,8 @@ def _scan_correspondents(graph: Any, days: int) -> set[str]:
     known: set[str] = set()
     for m in graph.get_all(f"/users/{graph.mailbox}/mailFolders/sentitems/messages",
                            {"$select": "toRecipients,ccRecipients", "$filter": f"sentDateTime ge {since}",
-                            "$top": 250}, limit=2000):
+                            # Newest first: the cap must drop the oldest mail, not the most recent.
+                            "$orderby": "sentDateTime desc", "$top": 250}, limit=4000):
         for r in (m.get("toRecipients") or []) + (m.get("ccRecipients") or []):
             address = ((r.get("emailAddress") or {}).get("address") or "").lower()
             if address:
@@ -284,7 +285,7 @@ def triage(graph: Any, llm: Any, store: Any, messages: list[dict[str, Any]]) -> 
                             "bulk": bulk_markers(m.get("internetMessageHeaders")),
                             # Facts that make a pitch unmistakable: Dave already deleted an earlier
                             # message in this thread, or it's an automated sequence ("Reply STOP").
-                            "deleted_before": thread_deleted_before(graph, m),
+                            "deleted_before": thread_deleted_before(graph, m, internal_domain()),
                             "automated": automated(m.get("bodyPreview") or "")})
     unsure = []
     verdicts = classify(llm, unknown, store)

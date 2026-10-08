@@ -19,7 +19,7 @@ from agent.actions import public_action
 from agent.briefs import needs_brief
 from agent.filing import filed_today, undo_filing
 from agent.junk import moved_today, undo as undo_junk
-from agent.requests import open_requests_view, propose_booking, propose_reply
+from agent.requests import open_requests_view, propose_booking, propose_hold, propose_reply
 from agent.calendar import agenda_day, local_zone, meeting_place, parse_event
 from agent.people import internal_domain
 from connectors.graph import EVENT_FIELDS
@@ -299,6 +299,15 @@ def request_reply(message_id: str, body: SlotsIn, user: dict = Depends(require_a
 def request_book(message_id: str, body: SlotIn, user: dict = Depends(require_auth), svc=Depends(services)):
     try:
         return propose_booking(svc.graph, svc.store, svc.actions, message_id, body.start, getattr(svc, "memory", None))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/requests/{message_id}/hold")
+def request_hold(message_id: str, user: dict = Depends(require_auth), svc=Depends(services)):
+    """A colleague is answering: hold the time they asked for on Dave's calendar (a sign-off slip)."""
+    try:
+        return propose_hold(svc.graph, svc.store, svc.actions, message_id, getattr(svc, "memory", None))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 

@@ -657,8 +657,6 @@ button.cite:active { background: var(--rule-strong); }
 .request + .request { margin-top: var(--s3); }
 .request__who { margin: 0; font-size: 16px; }
 .request__meta { margin: var(--s1) 0 var(--s2); font-size: 13px; color: var(--ink-soft); }
-.request__subject { margin: 0 0 var(--s3); font-size: 13px; color: var(--ink-faint); }
-.request__subject a { color: var(--navy); font-weight: 600; text-decoration: none; margin-left: 4px; }
 .request__body .btn { width: 100%; }
 .request__body .slip__actions .btn { flex: 1; }
 .request__foot { display: flex; justify-content: flex-end; margin-top: var(--s1); }
@@ -704,5 +702,32 @@ button.cite:active { background: var(--rule-strong); }
 .tidy__sub { display: block; font-size: 13px; color: var(--ink-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tidy__undo { flex: none; white-space: nowrap; }
 .tidy__done { flex: none; font-size: 13px; color: var(--sage); white-space: nowrap; }
-.request__why { margin: 0 0 var(--s2); font-size: 13px; color: var(--ink-soft); }
-.request__why strong { font-weight: 600; color: var(--ink); }
+
+/* ── meeting request: who → what they asked → what to do ───────────────────── */
+
+.request__head { padding-bottom: var(--s3); border-bottom: 1px solid var(--rule-soft); }
+.request__purpose { color: var(--ink-soft); }
+.request__role { margin: 2px 0 0; font-size: 14px; color: var(--ink-soft); }
+.request__context { margin: var(--s1) 0 0; font-size: 13px; color: var(--ink-faint); }
+.request__context a { display: block; margin-top: 2px; color: var(--navy); font-weight: 600; text-decoration: none; }
+.request__body { padding-top: var(--s3); }
+.request__label { margin: 0 0 var(--s1); font-size: 11px; font-weight: 600; letter-spacing: 0.08em;
+                  text-transform: uppercase; color: var(--ink-faint); }
+.request__handler { margin: 0 0 var(--s3); padding: var(--s2) var(--s3); font-size: 14px; color: var(--ink-soft);
+                    background: var(--paper-inset); border-radius: var(--r-sm); }
+.request__handler strong { color: var(--ink); font-weight: 600; }
+.request__ask { margin-bottom: var(--s4); }
+.request__time { margin: 0; font-family: var(--serif); font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.request__ask .request__meta { margin: 2px 0 var(--s2); }
+.request__ask .btn { margin-top: var(--s2); }
+.avail { margin: 0; font-size: 14px; color: var(--ink-soft); }
+.avail--free { color: var(--sage); font-weight: 600; }
+.avail--busy { color: var(--pencil); }
+.avail--busy strong { font-weight: 600; }
+.request__offer { padding-top: var(--s3); border-top: 1px solid var(--rule-soft); }
+.offers { list-style: none; margin: 0 0 var(--s3); padding: 0; }
+.offer { display: flex; align-items: center; gap: var(--s3); padding: var(--s2) 0; font-size: 15px;
+         font-variant-numeric: tabular-nums; cursor: pointer; }
+.offers li + li .offer { border-top: 1px solid var(--rule-soft); }
+.offer input { width: 18px; height: 18px; margin: 0; accent-color: var(--navy); flex: none; }
+.request__context::first-letter { text-transform: uppercase; }
