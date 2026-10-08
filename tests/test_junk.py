@@ -2,6 +2,7 @@ import json
 
 import pytest
 
+from agent import relationship
 from agent.actions import Actions
 from agent.cards import build_cards
 from agent.junk import (
@@ -22,6 +23,7 @@ def env(monkeypatch):
     monkeypatch.setenv("GRAPH_MAILBOX", DAVE)
     junk._correspondents.clear()
     junk._owner.clear()
+    relationship._deleted_folder.clear()
 
 
 def msg(mid, address, subject="Hi", headers=(), name="", folder="inbox-id", received="2026-10-08T12:00:00Z"):
@@ -173,6 +175,24 @@ def test_triage_auto_ask_and_unsure_and_the_model_never_sees_known_senders():
     assert [i["id"] for i in result["unsure"]] == ["unsure"]
     sent_to_model = llm.calls[0]["content"]
     assert "garrett@" not in sent_to_model and "client@" not in sent_to_model and "spam@leads" not in sent_to_model
+
+
+def test_a_followup_to_a_deleted_pitch_or_an_automated_sequence_moves_without_asking():
+    graph, store, _, llm = setup(verdicts=[
+        {"n": 0, "verdict": "junk", "confidence": "medium", "reason": "staffing pitch follow-up"},
+        {"n": 1, "verdict": "junk", "confidence": "medium", "reason": "sales sequence"},
+        {"n": 2, "verdict": "junk", "confidence": "medium", "reason": "vague pitch"}])
+    followup = {**msg("followup", "rep@staffing.example", "Re: IT role"), "conversationId": "t1"}
+    sequence = {**msg("sequence", "sdr@saas.example", "Quick question"), "bodyPreview": "Reply STOP to opt out"}
+    vague = msg("vague", "hello@unknown.example", "Partnership?")
+    graph_all = graph.get_all
+    graph.get_all = lambda path, params=None, **kw: (
+        [{"id": "first", "parentFolderId": "deleted-id"}] if "conversationId eq 't1'" in (params or {}).get("$filter", "")
+        else graph_all(path, params, **kw))
+    result = triage(graph, llm, store, [followup, sequence, vague])
+    assert [i["id"] for i in result["auto"]] == ["followup", "sequence"]
+    assert [i["id"] for i in result["ask"]] == ["vague"]
+    assert "thread deleted: yes" in llm.calls[0]["content"]
 
 
 def test_auto_moves_now_and_ask_items_share_one_rolling_slip():

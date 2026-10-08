@@ -34,7 +34,9 @@ from agent.actions import ActionKind, Actions, public_action
 from agent.calendar import find_free_slots, local_zone, next_working_day
 from agent.events import create_event_kind, find_conflicts, summarize_event, validate_event
 from agent.people import internal_domain
+from agent.junk import known_correspondents
 from agent.mail import read_email
+from agent.relationship import automated, clean_preview, describe, thread_deleted_before
 from agent.scheduling import get_busy
 from llm.provider import ToolSpec
 
@@ -94,13 +96,15 @@ def candidates(graph: Any, seen: set[str], now: datetime | None = None) -> list[
 
 CLASSIFY = ToolSpec(
     name="record_requests",
-    description="Record, for every email, whether it asks Dave to meet.",
+    description="Record, for every email, whether it is a genuine request to meet Dave.",
     input_schema={"type": "object", "properties": {"emails": {"type": "array", "items": {
         "type": "object",
         "properties": {
             "n": {"type": "integer"},
-            "kind": {"type": "string", "enum": ["asks_for_times", "proposes_time", "not_a_request"]},
+            "kind": {"type": "string",
+                     "enum": ["asks_for_times", "proposes_time", "cold_outreach", "not_a_request"]},
             "purpose": {"type": "string", "description": "What the meeting is about, under 8 words"},
+            "why": {"type": "string", "description": "For a genuine request: who they are and why they want to meet, under 15 words"},
             "duration_minutes": {"type": "integer", "description": "Only if stated"},
             "earliest_date": {"type": "string", "description": "YYYY-MM-DD, from phrases like 'next week'"},
             "latest_date": {"type": "string", "description": "YYYY-MM-DD"},
@@ -112,24 +116,35 @@ CLASSIFY = ToolSpec(
     }}}, "required": ["emails"]},
 )
 
-CLASSIFY_PROMPT = """You triage Dave's inbox (CEO, TAG Solutions). For each email decide whether the sender is asking
-Dave for a meeting or call that still needs scheduling.
-- asks_for_times: they want to meet and need times ("can we find time next week?").
-- proposes_time: they suggest a specific day and time ("does Tuesday at 2 work?").
-- not_a_request: newsletters, marketing, webinar invites, automated mail, meetings already booked or
-  confirmed, someone just mentioning a meeting, or anything else.
-Resolve relative dates ("next week", "Thursday") against the date the email was received, in Dave's
-time zone (US Eastern). Leave fields empty when the email doesn't say."""
+CLASSIFY_PROMPT = """You triage Dave's inbox (CEO, TAG Solutions, an IT managed services provider). For each email
+decide whether it is a GENUINE request to meet Dave that still needs scheduling.
+- asks_for_times: someone with a real reason wants to meet and needs times.
+- proposes_time: they suggest a specific day and time.
+- cold_outreach: unsolicited sales, staffing, recruiting, lead-generation, marketing or vendor pitches
+  asking for "a quick call", including automated follow-ups ("following up on this", "reply STOP").
+  Be skeptical when the sender is a first contact, earlier messages in the thread were deleted, or it
+  has automated-sequence text.
+- not_a_request: newsletters, webinars, automated mail, meetings already booked or confirmed, someone
+  just mentioning a meeting, or anything else.
+A first contact CAN be genuine: a prospect or client asking TAG for IT help is a real request.
+Resolve relative dates ("next week", "Thursday") against the date received, in US Eastern time.
+Leave fields empty when the email doesn't say."""
 
 
-def classify(llm: Any, messages: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+def classify(llm: Any, messages: list[dict[str, Any]], facts: dict[str, dict[str, Any]] | None = None) -> dict[str, dict[str, Any]]:
     if not messages:
         return {}
-    listing = "\n\n".join(
-        f"#{i}\nReceived: {m.get('receivedDateTime', '')}\nFrom: "
-        f"{((m.get('from') or {}).get('emailAddress') or {}).get('name', '')}\n"
-        f"Subject: {m.get('subject', '')}\n{(m.get('bodyPreview') or '')[:400]}"
-        for i, m in enumerate(messages))
+    facts = facts or {}
+
+    def line(i: int, m: dict[str, Any]) -> str:
+        f = facts.get(m["id"], {})
+        context = (f"Sender is: {f.get('label', 'unknown')}. Earlier message in this thread deleted: "
+                   f"{'yes' if f.get('deleted_before') else 'no'}. Automated-sequence text: {'yes' if f.get('automated') else 'no'}.")
+        return (f"#{i}\nReceived: {m.get('receivedDateTime', '')}\nFrom: "
+                f"{((m.get('from') or {}).get('emailAddress') or {}).get('name', '')}\n{context}\n"
+                f"Subject: {m.get('subject', '')}\n{clean_preview(m.get('bodyPreview') or '')[:400]}")
+
+    listing = "\n\n".join(line(i, m) for i, m in enumerate(messages))
     response = llm.complete([{"role": "user", "content": listing}], system=CLASSIFY_PROMPT,
                             tools=[CLASSIFY], tool_choice=CLASSIFY.name, max_tokens=3000)
     out: dict[str, dict[str, Any]] = {}
@@ -141,6 +156,22 @@ def classify(llm: Any, messages: list[dict[str, Any]]) -> dict[str, dict[str, An
     return out
 
 
+def sender_facts(graph: Any, store: Any, messages: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Relationship, deleted-earlier and automation facts per message (code, no model)."""
+    correspondents = known_correspondents(graph)
+    domain = internal_domain()
+    facts = {}
+    for m in messages:
+        address = (((m.get("from") or {}).get("emailAddress") or {}).get("address") or "").lower()
+        info = describe(address, correspondents, store, domain)
+        if not info["known"]:
+            # Only worth the extra lookup for senders Dave doesn't already know.
+            info["deleted_before"] = thread_deleted_before(graph, m)
+        info["automated"] = automated(m.get("bodyPreview") or "")
+        facts[m["id"]] = info
+    return facts
+
+
 def scan(graph: Any, llm: Any, store: Any, now: datetime | None = None, actions: Any = None) -> int:
     """Find new meeting requests, follow up on threads waiting for a reply, and close
     requests the team already handled. Returns how many new requests were added."""
@@ -148,7 +179,12 @@ def scan(graph: Any, llm: Any, store: Any, now: datetime | None = None, actions:
     inbox = candidates(graph, set(), now)
     seen = store.seen_request_ids([m["id"] for m in inbox])
     fresh = [m for m in inbox if m["id"] not in seen and (m.get("conversationId") or m["id"]) not in waiting]
-    verdicts = classify(llm, fresh)
+    facts = sender_facts(graph, store, fresh)
+    # Senders Dave has junked are never meeting requests; no need to ask the model.
+    for m in [m for m in fresh if facts[m["id"]]["kind"] == "junk"]:
+        store.save_request(m["id"], m.get("conversationId") or m["id"], m["receivedDateTime"], "ignored")
+    fresh = [m for m in fresh if facts[m["id"]]["kind"] != "junk"]
+    verdicts = classify(llm, fresh, facts)
     added = 0
     for m in fresh:
         verdict = verdicts.get(m["id"], {"kind": "not_a_request"})
@@ -162,8 +198,9 @@ def scan(graph: Any, llm: Any, store: Any, now: datetime | None = None, actions:
             "from_name": sender.get("name") or sender.get("address"),
             "from_email": (sender.get("address") or "").lower(),
             "subject": m.get("subject") or "",
-            "preview": (m.get("bodyPreview") or "")[:300],
+            "preview": clean_preview(m.get("bodyPreview") or "")[:300],
             "web_link": m.get("webLink"),
+            "relationship": facts[m["id"]]["label"],
         }
         # A newer message in the same thread replaces any older open request for it.
         for old in store.open_requests():
@@ -501,6 +538,8 @@ def open_requests_view(graph: Any, store: Any, actions_store: Any, memory: Any =
             "from_email": request.get("from_email"),
             "subject": request.get("subject"),
             "purpose": request.get("purpose"),
+            "why": request.get("why"),
+            "relationship": request.get("relationship"),
             "kind": request.get("kind"),
             "duration_minutes": request.get("duration_minutes"),
             "format": request.get("format"),

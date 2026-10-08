@@ -33,6 +33,7 @@ from typing import Any
 from agent.actions import ActionKind, Actions, public_action
 from agent.filing import filing_folders
 from agent.people import internal_domain
+from agent.relationship import automated, clean_preview, thread_deleted_before
 from agent.research import FREEMAIL
 from agent.tools import Tool
 from llm.provider import ToolSpec
@@ -225,7 +226,9 @@ def classify(llm: Any, candidates: list[dict[str, Any]], store: Any = None) -> d
         return {}
     listing = "\n\n".join(
         f"#{i}\nFrom: {c['from_name']} <{c['from']}>\nSubject: {c['subject']}\n"
-        f"Bulk-mail headers: {', '.join(c['bulk']) or 'none'}\nPreview: {c['preview']}"
+        f"Bulk-mail headers: {', '.join(c['bulk']) or 'none'}. Earlier message in this thread deleted: "
+        f"{'yes' if c.get('deleted_before') else 'no'}. Automated-sequence text: {'yes' if c.get('automated') else 'no'}.\n"
+        f"Preview: {c['preview']}"
         for i, c in enumerate(candidates))
     system = CLASSIFY_PROMPT.format(examples=_examples_text(store) if store else "")
     response = llm.complete([{"role": "user", "content": listing}], system=system,
@@ -277,15 +280,19 @@ def triage(graph: Any, llm: Any, store: Any, messages: list[dict[str, Any]]) -> 
             ask.append({**item, "reason": why})
         elif verdict is None:
             unknown.append({**item, "from_name": name, "from": address, "display": name or address,
-                            "preview": (m.get("bodyPreview") or "")[:300],
-                            "bulk": bulk_markers(m.get("internetMessageHeaders"))})
+                            "preview": clean_preview(m.get("bodyPreview") or "")[:300],
+                            "bulk": bulk_markers(m.get("internetMessageHeaders")),
+                            # Facts that make a pitch unmistakable: Dave already deleted an earlier
+                            # message in this thread, or it's an automated sequence ("Reply STOP").
+                            "deleted_before": thread_deleted_before(graph, m),
+                            "automated": automated(m.get("bodyPreview") or "")})
     unsure = []
     verdicts = classify(llm, unknown, store)
     for c in unknown:
         v = verdicts.get(c["id"], {"verdict": "unsure", "confidence": "low", "reason": "no verdict"})
         item = {"id": c["id"], "from": c["display"], "address": c["from"], "subject": c["subject"],
                 "folder": c["folder"], "reason": v["reason"]}
-        if v["verdict"] == "junk" and (v["confidence"] == "high" or c["bulk"]):
+        if v["verdict"] == "junk" and (v["confidence"] == "high" or c["bulk"] or c["deleted_before"] or c["automated"]):
             auto.append(item)
         elif v["verdict"] == "junk":
             ask.append(item)

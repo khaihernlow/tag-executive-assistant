@@ -428,6 +428,8 @@ function requestCard(r) {
   const head = [
     el("p", { class: "request__who" }, el("strong", { text: r.from }), " wants to meet"),
     meta ? el("p", { class: "request__meta", text: meta }) : null,
+    r.why || r.relationship ? el("p", { class: "request__why" },
+      el("strong", { text: "Why it's here: " }), [r.why, r.relationship].filter(Boolean).join(" \u00b7 ")) : null,
     el("p", { class: "request__subject" }, `\u201c${r.subject}\u201d `,
       r.web_link ? el("a", { href: r.web_link, target: "_blank", rel: "noopener", text: "Open email" }) : null),
   ];

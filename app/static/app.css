@@ -704,3 +704,5 @@ button.cite:active { background: var(--rule-strong); }
 .tidy__sub { display: block; font-size: 13px; color: var(--ink-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tidy__undo { flex: none; white-space: nowrap; }
 .tidy__done { flex: none; font-size: 13px; color: var(--sage); white-space: nowrap; }
+.request__why { margin: 0 0 var(--s2); font-size: 13px; color: var(--ink-soft); }
+.request__why strong { font-weight: 600; color: var(--ink); }

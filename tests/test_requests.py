@@ -20,8 +20,12 @@ def env(monkeypatch):
 
     monkeypatch.setenv("GRAPH_MAILBOX", DAVE)
     monkeypatch.setenv("ASSISTANT_TIMEZONE", "America/New_York")
+    from agent import junk, relationship
+
     req._style_cache.clear()
     req._skip_folder_ids.clear()
+    junk._correspondents.clear()
+    relationship._deleted_folder.clear()
 
 
 def mail(mid, sender, subject, preview="", thread=None, received="2026-10-08T14:00:00Z", kind=None):
@@ -110,6 +114,42 @@ def test_scan_saves_requests_and_ignores_the_rest_without_reclassifying():
 
     scan(FakeGraph(), llm, store)
     assert len(llm.calls) == 1  # both already seen: no second model call
+
+
+def test_scan_tells_the_model_who_the_sender_is_and_ignores_cold_outreach():
+    pitch = mail("pitch", "rep@staffing.example", "Re: IT support role", "Following up. Let me know a good time "
+                 "to talk. Reply 'Stop' if you'd rather not hear from me.", thread="tp")
+    graph = FakeGraph(thread=[{"id": "first", "parentFolderId": "deleteditems"}])  # Dave deleted the first one
+    graph_all = graph.get_all
+    graph.get_all = lambda path, params=None, **kw: (
+        [pitch] if path == f"/users/{DAVE}/messages" and "conversationId" not in (params or {}).get("$filter", "")
+        else graph_all(path, params, **kw))
+    llm = FakeLLM("record_requests", {"emails": [{"n": 0, "kind": "cold_outreach"}]})
+    store = Store(":memory:")
+    assert scan(graph, llm, store) == 0
+    assert store.get_request("pitch")["status"] == "ignored"
+    sent = llm.calls[0]
+    assert "first contact" in sent and "thread deleted: yes" in sent and "Automated-sequence text: yes" in sent
+
+
+def test_scan_never_asks_about_senders_dave_junked():
+    store = Store(":memory:")
+    store.set_sender("mark@vendor.example", "junk", "dave")
+    llm = FakeLLM("record_requests", {"emails": [{"n": 0, "kind": "not_a_request"}]})
+    scan(FakeGraph(), llm, store)
+    assert store.get_request("req")["status"] == "ignored"
+    assert "mark@" not in llm.calls[0].lower() and "Mark" not in llm.calls[0]
+
+
+def test_each_request_says_why_it_is_there():
+    llm = FakeLLM("record_requests", {"emails": [
+        {"n": 0, "kind": "asks_for_times", "purpose": "AI audit", "why": "Vendor following up on the AI audit"},
+        {"n": 1, "kind": "not_a_request"}]})
+    store = Store(":memory:")
+    scan(FakeGraph(), llm, store)
+    [view] = [r for r in open_requests_view(FakeGraph(), store, None) if r["id"] == "req"]
+    assert view["why"] == "Vendor following up on the AI audit"
+    assert view["relationship"].startswith("first contact")
 
 
 def msg_from(address, mid="later"):
