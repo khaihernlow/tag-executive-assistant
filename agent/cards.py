@@ -74,7 +74,11 @@ def build_cards(trace: list[ToolTrace]) -> list[dict[str, Any]]:
             if data.get("unsure"):
                 cards.append({"type": "unsure", "items": data["unsure"]})
 
-        elif t.name in ("create_event", "move_event", "cancel_event", "respond_to_invite"):
+        elif t.name == "find_opportunities" and data.get("opportunities"):
+            cards.append({"type": "opportunities", "opportunities": data["opportunities"][:25]})
+
+        elif t.name in ("create_event", "move_event", "cancel_event", "respond_to_invite",
+                        "create_opportunity", "update_opportunity"):
             cards.append({"type": "action", **{k: data.get(k) for k in
                                                 ("action_id", "kind", "status", "summary", "result", "error")}})
 

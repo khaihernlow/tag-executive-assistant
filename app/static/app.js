@@ -624,6 +624,7 @@ const KIND_LABELS = {
   create_event: "Calendar invite", book_meeting: "Calendar invite", create_rule: "Outlook rule",
   move_to_junk: "Inbox clean-up", reply_email: "Email reply", hold_time: "Calendar hold", nudge_colleague: "Email to colleague",
   move_event: "Move meeting", cancel_event: "Cancel meeting", respond_invite: "Invite reply",
+  create_opportunity: "New opportunity", update_opportunity: "Opportunity update",
 };
 
 function slip(action) {
@@ -753,6 +754,19 @@ function emailsCard(card) {
           ? el("span", { class: "row__preview", text: `📎 ${m.attachments.join(", ")}` }) : null)))));
 }
 
+function opportunitiesCard(card) {
+  return el("div", { class: "card" },
+    el("p", { class: "card__label", text: "Opportunities" }),
+    el("ul", { class: "rows" }, card.opportunities.map((o) => el("li", {},
+      el("a", { class: "row row--tap", href: o.link, target: "_blank", rel: "noopener" },
+        el("span", { class: "row__top" },
+          el("span", { class: "row__title", text: o.title }),
+          el("span", { class: `row__when${o.overdue ? " overdue" : ""}`, text: o.close_date ? `closes ${o.close_date}` : "" })),
+        el("span", { class: "row__sub", text: [o.company, `${o.stage} (${o.probability}%)`, o.status !== "Active" ? o.status : ""]
+          .filter(Boolean).join(" \u00b7 ") }),
+        o.overdue ? el("span", { class: "row__preview overdue", text: "Past its close date" }) : null)))));
+}
+
 function emailCard(card) {
   return el("div", { class: "card" },
     el("p", { class: "card__label", text: "Email" }),
@@ -797,6 +811,7 @@ function renderCard(card) {
   switch (card.type) {
     case "slots": return slotsCard(card);
     case "emails": return emailsCard(card);
+    case "opportunities": return opportunitiesCard(card);
     case "email": return emailCard(card);
     case "people": return peopleCard(card);
     case "events": return eventsCard(card);

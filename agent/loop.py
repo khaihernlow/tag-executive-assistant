@@ -133,6 +133,13 @@ STEP_LABELS = {
     "sweep_junk": "Checking your inbox for junk",
     "remember": "Saving that",
     "forget": "Updating what I remember",
+    "move_event": "Checking the new time",
+    "cancel_event": "Preparing the cancellation",
+    "respond_to_invite": "Preparing your reply",
+    "find_company": "Looking up the company in Autotask",
+    "find_opportunities": "Checking Autotask opportunities",
+    "create_opportunity": "Preparing the opportunity",
+    "update_opportunity": "Preparing the update",
 }
 
 

@@ -46,7 +46,8 @@ def verify_addresses(reply: str, known: set[str]) -> tuple[str, list[str]]:
     return EMAIL.sub(check, reply), changes
 
 
-_LONG_DASH = re.compile(r"[ \t]*[\u2014\u2013][ \t]*")
+# Also " -- ", the double hyphen the model types when it can't use a real dash.
+_LONG_DASH = re.compile(r"[ \t]*[\u2014\u2013][ \t]*|[ \t]+--[ \t]+")
 _DASH_RANGE = re.compile(r"(\d)[ \t]*[\u2013\u2014][ \t]*(\d)")
 
 

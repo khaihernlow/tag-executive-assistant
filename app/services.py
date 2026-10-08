@@ -13,6 +13,8 @@ from agent.events import create_event_kind, create_event_tool
 from agent.filing import file_kind, rule_kind
 from agent.junk import junk_kind, junk_tools
 from agent.mail import mail_tools
+from agent.opportunities import Directory, opportunity_kinds, opportunity_tools
+from connectors.autotask import AutotaskClient
 from agent.requests import request_kinds
 from agent.memory import Memory, memory_tools
 from agent.people import people_tools
@@ -38,8 +40,11 @@ class Services:
 def build_services() -> Services:
     graph = GraphClient.from_env()
     store = Store()
+    # Autotask is optional: without credentials the assistant just has no CRM tools.
+    autotask = AutotaskClient.from_env() if os.environ.get("AUTOTASK_USERNAME") else None
     actions = Actions(store, [create_event_kind(graph), junk_kind(graph, store), *request_kinds(graph, store),
-                              file_kind(graph, store), rule_kind(graph, store), *change_kinds(graph)])
+                              file_kind(graph, store), rule_kind(graph, store), *change_kinds(graph),
+                              *(opportunity_kinds(autotask) if autotask else [])])
     memory = Memory(store)
     llm = HatzAIProvider()
     # Quick, high-volume judgments (junk triage) use a faster, cheaper model.
@@ -53,6 +58,7 @@ def build_services() -> Services:
         + junk_tools(graph, fast_llm, actions, store)
         + [create_event_tool(graph, actions)]
         + change_tools(graph, actions)
+        + (opportunity_tools(Directory(autotask), actions) if autotask else [])
     )
     assistant = Assistant(llm, registry, store, actions, memory)
     worker = Worker(graph, llm, store, searcher=llm, fast_llm=fast_llm, actions=actions)

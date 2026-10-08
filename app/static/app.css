@@ -747,3 +747,5 @@ p.request__stall { padding: var(--s2) var(--s3); background: var(--sage-wash); b
 .invite__actions { display: flex; gap: var(--s2); margin-top: var(--s3); }
 .invite__actions .btn { flex: 1; }
 .invite .stamp { margin-top: var(--s3); }
+.overdue { color: var(--pencil); }
+a.row { color: inherit; text-decoration: none; }

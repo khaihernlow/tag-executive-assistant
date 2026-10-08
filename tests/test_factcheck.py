@@ -26,3 +26,5 @@ def test_chat_replies_lose_long_dashes_but_keep_bullets_and_hyphens():
 
     text = "- **Oct 6, 3:00–3:30 PM** — You interviewed Jordan\n- Follow-up call"
     assert no_long_dashes(text) == "- **Oct 6, 3:00-3:30 PM**, You interviewed Jordan\n- Follow-up call"
+    assert no_long_dashes("she isn't in Autotask -- add her first") == "she isn't in Autotask, add her first"
+    assert no_long_dashes("--verbose flag") == "--verbose flag"  # not a dash between words
