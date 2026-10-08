@@ -764,3 +764,8 @@ a.row { color: inherit; text-decoration: none; }
   letter-spacing: 0.04em; color: var(--brass); background: var(--brass-wash); border-radius: var(--r-sm); }
 .slip__warnings { margin-top: var(--s3); }
 .slip__warnings .warn { margin: 0; color: var(--pencil); font-size: 14px; }
+.slip__fields dd:has(.slip__field-input) { display: flex; align-items: center; flex-wrap: wrap; gap: var(--s2); }
+.slip__field-input { font: inherit; font-size: 15px; color: var(--ink); padding: 6px var(--s2); max-width: 100%;
+  background: var(--paper-inset); border: 1px solid var(--rule-strong); border-radius: var(--r-sm); }
+.slip__fields { align-items: center; }
+select.slip__field-input { width: 100%; text-overflow: ellipsis; }

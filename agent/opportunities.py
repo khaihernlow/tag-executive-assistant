@@ -90,6 +90,17 @@ class Directory:
                 self._resources[r["id"]] = f"{r['firstName']} {r['lastName']}".strip()
         return self._resources.get(resource_id, str(resource_id))
 
+    def owner_choices(self) -> list[list[str]]:
+        """[[id, name]] of everyone who owns an open opportunity, Dave first."""
+        if not hasattr(self, "_owners"):
+            ids = {o["ownerResourceID"] for o in self.at.query(
+                "Opportunities", [{"op": "in", "field": "status", "value": list(OPEN_STATUSES)}], ["id", "ownerResourceID"])}
+            ids.add(dave_resource_id())
+            names = sorted((self.resource_name(i), i) for i in ids if i)
+            dave = dave_resource_id()
+            self._owners = [[str(dave), self.resource_name(dave)]] + [[str(i), n] for n, i in names if i != dave]
+        return self._owners
+
     def resource_by_name(self, name: str) -> int | None:
         self.resource_name(0)
         wanted = name.lower().strip()
@@ -257,11 +268,25 @@ def propose_create(directory: Directory, actions: Actions, args: dict[str, Any],
     summary += "".join(f" · ⚠ {w}" for w in warnings)
     contact_row = (contact["name"] if contact else
                    f"{args['contact_name'].strip()} \u00b7 {new_contact['emailAddress']}" if new_contact else "None")
-    rows = [["Company", company], ["Stage", f"{directory.stage_label(body['stage'])} \u00b7 {probability}%"],
-            ["Closes", close.strftime("%b %d, %Y").replace(" 0", " ")], ["Owner", directory.resource_name(owner)],
+    # A row's 4th item names the field Dave can change on the slip.
+    rows = [["Company", company], ["Stage", f"{directory.stage_label(body['stage'])} \u00b7 {probability}%", "", "stage"],
+            ["Closes", close.strftime("%b %d, %Y").replace(" 0", " "), "", "close_date"],
+            ["Owner", directory.resource_name(owner), "", "owner_id"],
             ["Contact", contact_row, "New contact" if new_contact else ""]]
-    payload: dict[str, Any] = {"body": body, "title": title, "description": body["description"],
-                               "display": {"rows": rows, "warnings": warnings, "details_label": "Description"}}
+    stages = directory.stage_ids()
+    edit_fields = {
+        "stage": {"options": [[k, f"{directory.stage_label(stages[k])} \u00b7 {STAGES[k][1]}%"]
+                              for k in STAGES if k in stages and k not in ("won", "lost")]},
+        "close_date": {"type": "date"},
+        "owner_id": {"options": directory.owner_choices()},
+    }
+    payload: dict[str, Any] = {
+        "body": body, "title": title, "description": body["description"],
+        "stage": stage_key, "close_date": close.isoformat(), "owner_id": str(owner),
+        # What each stage means in Autotask terms, so an edited stage saves correctly.
+        "stage_map": {k: [stages[k], STAGES[k][1], STAGES[k][2]] for k in STAGES if k in stages},
+        "display": {"rows": rows, "edit": edit_fields, "warnings": warnings, "details_label": "Description"},
+    }
     if new_contact:
         payload["new_contact"] = new_contact
     return public_action(actions.propose(CREATE_KIND, summary, payload))
@@ -304,11 +329,28 @@ def propose_update(directory: Directory, actions: Actions, args: dict[str, Any],
     return public_action(actions.propose(UPDATE_KIND, summary, {"patch": patch, "display": display}))
 
 
+def apply_slip_edits(payload: dict[str, Any]) -> dict[str, Any]:
+    """The record to save, with whatever Dave changed on the slip (title, description,
+    stage, close date, owner). Only values the slip offered are accepted."""
+    body = {**payload["body"], "title": (payload.get("title") or payload["body"]["title"]).strip(),
+            "description": payload.get("description", payload["body"]["description"])}
+    stage = (payload.get("stage_map") or {}).get(payload.get("stage"))
+    if stage:
+        body["stage"], body["probability"], body["status"] = stage
+    if payload.get("close_date"):
+        try:
+            body["projectedCloseDate"] = _at_date(date.fromisoformat(payload["close_date"][:10]))
+        except ValueError as e:
+            raise ValueError("The close date isn't a valid date.") from e
+    owners = {o[0] for o in ((payload.get("display") or {}).get("edit") or {}).get("owner_id", {}).get("options", [])}
+    if payload.get("owner_id") in owners:
+        body["ownerResourceID"] = int(payload["owner_id"])
+    return body
+
+
 def opportunity_kinds(at: Any) -> list[ActionKind]:
     def create(payload: dict[str, Any], action_id: str) -> dict[str, Any]:
-        # Dave may have edited the title or description on the slip.
-        body = {**payload["body"], "title": payload.get("title") or payload["body"]["title"],
-                "description": payload.get("description", payload["body"]["description"])}
+        body = apply_slip_edits(payload)
         result: dict[str, Any] = {}
         if payload.get("new_contact"):
             body["contactID"] = result["contact_id"] = at.create("Contacts", payload["new_contact"])
@@ -319,7 +361,8 @@ def opportunity_kinds(at: Any) -> list[ActionKind]:
         oid = at.update("Opportunities", payload["patch"])
         return {"opportunity_id": oid, "web_link": web_link("opportunity", oid)}
 
-    return [ActionKind(CREATE_KIND, create, editable=("title", "description")), ActionKind(UPDATE_KIND, update)]
+    return [ActionKind(CREATE_KIND, create, editable=("title", "description", "stage", "close_date", "owner_id")),
+            ActionKind(UPDATE_KIND, update)]
 
 
 # ── chat tools ───────────────────────────────────────────────────────────────

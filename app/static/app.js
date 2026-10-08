@@ -640,6 +640,7 @@ function fillSlip(node, action) {
   const parts = [el("p", { class: "slip__kind", text: KIND_LABELS[action.kind] || action.kind })];
   const pending = action.status === "pending";
   let emailBox = null, titleBox = null, detailsBox = null;
+  const fieldInputs = {};
   if (action.display) {
     // A record: its fields laid out, the editable ones as inputs.
     const d = action.display;
@@ -651,9 +652,22 @@ function fillSlip(node, action) {
     } else {
       parts.push(el("p", { class: "slip__heading", text: d.heading || "" }));
     }
-    parts.push(el("dl", { class: "slip__fields" }, ...d.rows.flatMap(([label, value, note]) => [
-      el("dt", { text: label }),
-      el("dd", {}, value, note ? el("span", { class: "slip__note", text: note }) : null)])));
+    const editSpec = d.edit || {}, values = d.values || {};
+    parts.push(el("dl", { class: "slip__fields" }, ...d.rows.flatMap(([label, value, note, field]) => {
+      let shown = value;
+      if (pending && field && editSpec[field]) {
+        // Native pickers: on an iPhone these are the wheel and the calendar.
+        const spec = editSpec[field];
+        const input = spec.options
+          ? el("select", { class: "slip__field-input", "aria-label": label },
+              ...spec.options.map(([v, text]) => el("option", { value: v, text })))
+          : el("input", { class: "slip__field-input", type: spec.type || "text", "aria-label": label });
+        input.value = values[field] ?? "";
+        fieldInputs[field] = input;
+        shown = input;
+      }
+      return [el("dt", { text: label }), el("dd", {}, shown, note ? el("span", { class: "slip__note", text: note }) : null)];
+    })));
     if ("description" in d) {
       parts.push(el("p", { class: "slip__email-meta", text: d.details_label || "Details" }));
       detailsBox = el("textarea", { class: "slip__email", rows: "7", "aria-label": d.details_label || "Details" });
@@ -700,8 +714,9 @@ function fillSlip(node, action) {
       approve.textContent = verb === "approve" ? "Working…" : approve.textContent;
       try {
         const edits = verb !== "approve" ? null
-          : action.display && (titleBox || detailsBox)
-            ? { ...(titleBox ? { title: titleBox.value } : {}), ...(detailsBox ? { description: detailsBox.value } : {}) }
+          : action.display && (titleBox || detailsBox || Object.keys(fieldInputs).length)
+            ? { ...(titleBox ? { title: titleBox.value } : {}), ...(detailsBox ? { description: detailsBox.value } : {}),
+                ...Object.fromEntries(Object.entries(fieldInputs).map(([k, input]) => [k, input.value])) }
           : emailBox ? { comment: emailBox.value }
           : keepIds.size ? { keep_ids: [...keepIds].join(",") } : null;
         const updated = await api(`/api/actions/${action.action_id}/${verb}`, {

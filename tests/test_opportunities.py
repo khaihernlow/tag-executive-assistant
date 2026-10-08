@@ -167,3 +167,18 @@ def test_the_slip_lays_out_the_record_and_dave_can_edit_title_and_description():
     actions.approve(slip["action_id"], decided_by="test", edits={"title": "Onsite assessment", "description": "Real scope"})
     body = at.created[0][1]
     assert body["title"] == "Onsite assessment" and body["description"] == "Real scope"
+
+
+def test_stage_close_date_and_owner_can_be_changed_on_the_slip():
+    at, directory, actions = setup()
+    slip = propose_create(directory, actions, {"company_id": 2, "title": "Phones", "stage": "identification"}, today=TODAY)
+    d = slip["display"]
+    assert d["values"]["stage"] == "identification" and d["values"]["owner_id"] == str(DAVE_ID)
+    assert [o[1] for o in d["edit"]["owner_id"]["options"]] == ["Dave Vener"]  # only owners of open opportunities
+    assert "won" not in [o[0] for o in d["edit"]["stage"]["options"]]           # a new one can't start closed
+    actions.approve(slip["action_id"], decided_by="test",
+                    edits={"stage": "proposal", "close_date": "2026-12-01", "owner_id": "501"})
+    body = at.created[0][1]
+    assert (body["stage"], body["probability"], body["status"]) == (14, 70, 1)
+    assert body["projectedCloseDate"] == "2026-12-01T00:00:00Z"
+    assert body["ownerResourceID"] == DAVE_ID  # 501 wasn't offered, so it's ignored
