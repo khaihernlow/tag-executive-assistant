@@ -255,7 +255,13 @@ def propose_create(directory: Directory, actions: Actions, args: dict[str, Any],
                f"({probability}%) · closes {close.strftime('%b %d, %Y').replace(' 0', ' ')} · owner "
                f"{directory.resource_name(owner)}" + who)
     summary += "".join(f" · ⚠ {w}" for w in warnings)
-    payload: dict[str, Any] = {"body": body}
+    contact_row = (contact["name"] if contact else
+                   f"{args['contact_name'].strip()} \u00b7 {new_contact['emailAddress']}" if new_contact else "None")
+    rows = [["Company", company], ["Stage", f"{directory.stage_label(body['stage'])} \u00b7 {probability}%"],
+            ["Closes", close.strftime("%b %d, %Y").replace(" 0", " ")], ["Owner", directory.resource_name(owner)],
+            ["Contact", contact_row, "New contact" if new_contact else ""]]
+    payload: dict[str, Any] = {"body": body, "title": title, "description": body["description"],
+                               "display": {"rows": rows, "warnings": warnings, "details_label": "Description"}}
     if new_contact:
         payload["new_contact"] = new_contact
     return public_action(actions.propose(CREATE_KIND, summary, payload))
@@ -269,35 +275,40 @@ def propose_update(directory: Directory, actions: Actions, args: dict[str, Any],
         raise ValueError("No such opportunity. Look it up with find_opportunities first.")
     current = rows[0]
     patch: dict[str, Any] = {"id": oid}
-    changes = []
+    rows: list[list[str]] = []
     if args.get("stage"):
         key = args["stage"]
         if key not in STAGES or key not in directory.stage_ids():
             raise ValueError(f"stage must be one of {', '.join(STAGES)}")
         _, probability, status = STAGES[key]
         patch.update({"stage": directory.stage_ids()[key], "probability": probability, "status": status})
-        changes.append(f"stage {directory.stage_label(current['stage'])} → {directory.stage_label(patch['stage'])} "
-                       f"({current.get('probability')}% → {probability}%)")
+        rows.append(["Stage", f"{directory.stage_label(current['stage'])} \u2192 {directory.stage_label(patch['stage'])}",
+                     f"{current.get('probability')}% \u2192 {probability}%"])
     if args.get("close_date"):
         close = _close_date(args["close_date"], today)
         patch["projectedCloseDate"] = _at_date(close)
-        changes.append(f"close date {_day(current.get('projectedCloseDate')) or 'none'} → "
-                       f"{close.strftime('%b %d, %Y').replace(' 0', ' ')}")
+        rows.append(["Closes", f"{_day(current.get('projectedCloseDate')) or 'none'} \u2192 "
+                               f"{close.strftime('%b %d, %Y').replace(' 0', ' ')}"])
     if args.get("title"):
         patch["title"] = args["title"].strip()
-        changes.append(f"title → “{patch['title']}”")
+        rows.append(["Title", f"\u2192 \u201c{patch['title']}\u201d"])
     if args.get("amount") is not None:
         patch["amount"] = float(args["amount"])
-        changes.append(f"amount {current.get('amount')} → {patch['amount']}")
-    if not changes:
+        rows.append(["Amount", f"{current.get('amount')} \u2192 {patch['amount']}"])
+    if not rows:
         raise ValueError("Nothing to change: give a stage, close_date, title or amount.")
-    summary = f"Update “{current['title']}” ({directory.company_name(current['companyID'])}): " + "; ".join(changes)
-    return public_action(actions.propose(UPDATE_KIND, summary, {"patch": patch}))
+    company = directory.company_name(current["companyID"])
+    summary = f"Update \u201c{current['title']}\u201d ({company}): " + "; ".join(
+        f"{r[0].lower()} {r[1]}" + (f" ({r[2]})" if len(r) > 2 else "") for r in rows)
+    display = {"heading": current["title"], "rows": [["Company", company], *rows], "warnings": []}
+    return public_action(actions.propose(UPDATE_KIND, summary, {"patch": patch, "display": display}))
 
 
 def opportunity_kinds(at: Any) -> list[ActionKind]:
     def create(payload: dict[str, Any], action_id: str) -> dict[str, Any]:
-        body = dict(payload["body"])
+        # Dave may have edited the title or description on the slip.
+        body = {**payload["body"], "title": payload.get("title") or payload["body"]["title"],
+                "description": payload.get("description", payload["body"]["description"])}
         result: dict[str, Any] = {}
         if payload.get("new_contact"):
             body["contactID"] = result["contact_id"] = at.create("Contacts", payload["new_contact"])
@@ -308,7 +319,7 @@ def opportunity_kinds(at: Any) -> list[ActionKind]:
         oid = at.update("Opportunities", payload["patch"])
         return {"opportunity_id": oid, "web_link": web_link("opportunity", oid)}
 
-    return [ActionKind(CREATE_KIND, create), ActionKind(UPDATE_KIND, update)]
+    return [ActionKind(CREATE_KIND, create, editable=("title", "description")), ActionKind(UPDATE_KIND, update)]
 
 
 # ── chat tools ───────────────────────────────────────────────────────────────

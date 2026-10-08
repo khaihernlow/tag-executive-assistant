@@ -103,6 +103,11 @@ def public_action(action: dict[str, Any]) -> dict[str, Any]:
     if "comment" in payload:
         # Emails: the slip shows (and lets Dave edit) the exact text that will be sent.
         out["email"] = {"to": payload.get("to"), "subject": payload.get("subject"), "comment": payload["comment"]}
+    if "display" in payload:
+        # Records (e.g. an Autotask opportunity): the slip lays out each field and
+        # lets Dave edit the ones the kind allows before approving.
+        kind_fields = {k: payload[k] for k in ("title", "description") if k in payload}
+        out["display"] = {**payload["display"], **kind_fields}
     items = payload.get("items")
     if items:
         # Batch actions (e.g. moving several emails): show each one on the slip.

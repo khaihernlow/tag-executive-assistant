@@ -637,8 +637,36 @@ function fillSlip(node, action) {
   const [main, ...warnings] = (action.summary || "").split(" · ⚠ ");
   const summary = el("p", { class: "slip__summary" }, main,
     ...warnings.map((w) => el("span", { class: "warn", text: `⚠ ${w}` })));
-  const parts = [el("p", { class: "slip__kind", text: KIND_LABELS[action.kind] || action.kind }), summary];
-  let emailBox = null;
+  const parts = [el("p", { class: "slip__kind", text: KIND_LABELS[action.kind] || action.kind })];
+  const pending = action.status === "pending";
+  let emailBox = null, titleBox = null, detailsBox = null;
+  if (action.display) {
+    // A record: its fields laid out, the editable ones as inputs.
+    const d = action.display;
+    if ("title" in d) {
+      titleBox = el("input", { class: "slip__title-input", type: "text", "aria-label": "Title" });
+      titleBox.value = d.title;
+      titleBox.readOnly = !pending;
+      parts.push(titleBox);
+    } else {
+      parts.push(el("p", { class: "slip__heading", text: d.heading || "" }));
+    }
+    parts.push(el("dl", { class: "slip__fields" }, ...d.rows.flatMap(([label, value, note]) => [
+      el("dt", { text: label }),
+      el("dd", {}, value, note ? el("span", { class: "slip__note", text: note }) : null)])));
+    if ("description" in d) {
+      parts.push(el("p", { class: "slip__email-meta", text: d.details_label || "Details" }));
+      detailsBox = el("textarea", { class: "slip__email", rows: "7", "aria-label": d.details_label || "Details" });
+      detailsBox.value = d.description || "";
+      detailsBox.readOnly = !pending;
+      parts.push(detailsBox);
+    }
+    if (d.warnings && d.warnings.length) {
+      parts.push(el("div", { class: "slip__warnings" }, ...d.warnings.map((w) => el("p", { class: "warn", text: `\u26a0 ${w}` }))));
+    }
+  } else {
+    parts.push(summary);
+  }
   if (action.email) {
     parts.push(el("p", { class: "slip__email-meta", text: `To ${action.email.to} \u00b7 ${action.email.subject}` }));
     emailBox = el("textarea", { class: "slip__email", rows: "7", "aria-label": "Email text" });
@@ -663,7 +691,8 @@ function fillSlip(node, action) {
   node.className = "slip";
 
   if (action.status === "pending") {
-    const approveLabel = action.kind === "reply_email" ? "Send" : "Approve";
+    const approveLabel = { reply_email: "Send", nudge_colleague: "Send", create_opportunity: "Save to Autotask",
+                           update_opportunity: "Save to Autotask" }[action.kind] || "Approve";
     const approve = el("button", { class: "btn btn--sign", type: "button", text: approveLabel });
     const decline = el("button", { class: "btn", type: "button", text: "Decline" });
     const decide = async (verb) => {
@@ -671,6 +700,8 @@ function fillSlip(node, action) {
       approve.textContent = verb === "approve" ? "Working…" : approve.textContent;
       try {
         const edits = verb !== "approve" ? null
+          : action.display && (titleBox || detailsBox)
+            ? { ...(titleBox ? { title: titleBox.value } : {}), ...(detailsBox ? { description: detailsBox.value } : {}) }
           : emailBox ? { comment: emailBox.value }
           : keepIds.size ? { keep_ids: [...keepIds].join(",") } : null;
         const updated = await api(`/api/actions/${action.action_id}/${verb}`, {
@@ -690,12 +721,17 @@ function fillSlip(node, action) {
   } else if (action.status === "executed") {
     node.classList.add("slip--done");
     const r = action.result || {};
-    const doneText = action.kind === "move_to_junk"
-      ? `✓ Moved ${r.moved ?? ""} to Junk${r.failed && r.failed.length ? ` · ${r.failed.length} failed` : ""}`
-      : action.kind === "reply_email" ? "✓ Sent" : "✓ Signed · booked";
+    const doneText = {
+      move_to_junk: `✓ Moved ${r.moved ?? ""} to Junk${r.failed && r.failed.length ? ` · ${r.failed.length} failed` : ""}`,
+      reply_email: "✓ Sent", nudge_colleague: "✓ Sent", respond_invite: "✓ Reply sent",
+      move_event: "✓ Moved", cancel_event: "✓ Done", hold_time: "✓ Held on your calendar",
+      create_opportunity: "✓ Saved in Autotask", update_opportunity: "✓ Updated in Autotask",
+      create_rule: "✓ Rule created",
+    }[action.kind] || "✓ Booked";
+    const isAutotask = action.kind.endsWith("_opportunity");
     parts.push(el("span", { class: "stamp stamp--done" }, doneText,
       r.join_url ? el("a", { href: r.join_url, target: "_blank", rel: "noopener", text: "Teams link" }) : null,
-      r.web_link ? el("a", { href: r.web_link, target: "_blank", rel: "noopener", text: "Outlook" }) : null));
+      r.web_link ? el("a", { href: r.web_link, target: "_blank", rel: "noopener", text: isAutotask ? "Open in Autotask" : "Outlook" }) : null));
   } else if (action.status === "rejected") {
     node.classList.add("slip--declined");
     parts.push(el("span", { class: "stamp stamp--declined", text: "Declined" }));

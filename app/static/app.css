@@ -749,3 +749,18 @@ p.request__stall { padding: var(--s2) var(--s3); background: var(--sage-wash); b
 .invite .stamp { margin-top: var(--s3); }
 .overdue { color: var(--pencil); }
 a.row { color: inherit; text-decoration: none; }
+
+/* ── record slips (e.g. an Autotask opportunity) ────────────────────────────── */
+
+.slip__title-input { width: 100%; box-sizing: border-box; margin: 0 0 var(--s3); padding: var(--s2) var(--s3);
+  font-family: var(--serif); font-size: 18px; font-weight: 600; color: var(--ink);
+  background: var(--paper-inset); border: 1px solid var(--rule-strong); border-radius: var(--r-sm); }
+.slip__title-input[readonly] { background: transparent; border-color: transparent; padding-left: 0; }
+.slip__heading { margin: 0 0 var(--s3); font-family: var(--serif); font-size: 18px; font-weight: 600; }
+.slip__fields { display: grid; grid-template-columns: max-content 1fr; gap: var(--s1) var(--s4); margin: 0; font-size: 14px; }
+.slip__fields dt { color: var(--ink-faint); }
+.slip__fields dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.slip__note { display: inline-block; margin-left: var(--s2); padding: 0 6px; font-size: 11px; font-weight: 600;
+  letter-spacing: 0.04em; color: var(--brass); background: var(--brass-wash); border-radius: var(--r-sm); }
+.slip__warnings { margin-top: var(--s3); }
+.slip__warnings .warn { margin: 0; color: var(--pencil); font-size: 14px; }

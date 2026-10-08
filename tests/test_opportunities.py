@@ -127,7 +127,7 @@ def test_update_moves_stage_with_its_probability_and_status():
     at, directory, actions = setup()
     slip = propose_update(directory, actions, {"opportunity_id": 100, "stage": "won", "close_date": "2026-10-08"}, today=TODAY)
     assert slip["summary"] == ("Update “Managed Services” (Northwind Savings Bank): stage Business Case Alignment "
-                               "→ Closed Won (30% → 100%); close date Jun 9, 2026 → Oct 8, 2026")
+                               "→ Closed Won (30% → 100%); closes Jun 9, 2026 → Oct 8, 2026")
     actions.approve(slip["action_id"], decided_by="test")
     assert at.updated == [("Opportunities", {"id": 100, "stage": 16, "probability": 100, "status": 3,
                                              "projectedCloseDate": "2026-10-08T00:00:00Z"})]
@@ -152,3 +152,18 @@ def test_a_contact_missing_from_autotask_is_added_and_linked():
     assert at.created[0] == ("Contacts", {"companyID": 2, "firstName": "Pat", "lastName": "Lee Quinn",
                                           "emailAddress": "pat@dental.example", "isActive": 1, "title": "Office Manager"})
     assert at.created[1][0] == "Opportunities" and at.created[1][1]["contactID"] == 777
+
+
+def test_the_slip_lays_out_the_record_and_dave_can_edit_title_and_description():
+    at, directory, actions = setup()
+    slip = propose_create(directory, actions, {
+        "company_id": 1, "title": "Draft title", "contact_email": "cmorgan@northwind.example",
+        "description": "Draft scope"}, today=TODAY)
+    d = slip["display"]
+    assert d["title"] == "Draft title" and d["description"] == "Draft scope"
+    assert [r[0] for r in d["rows"]] == ["Company", "Stage", "Closes", "Owner", "Contact"]
+    assert d["rows"][4][1] == "Casey Morgan"
+    assert d["warnings"] and d["warnings"][0].startswith("Northwind Savings Bank already has 1 open")
+    actions.approve(slip["action_id"], decided_by="test", edits={"title": "Onsite assessment", "description": "Real scope"})
+    body = at.created[0][1]
+    assert body["title"] == "Onsite assessment" and body["description"] == "Real scope"

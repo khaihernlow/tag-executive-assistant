@@ -79,8 +79,11 @@ def build_cards(trace: list[ToolTrace]) -> list[dict[str, Any]]:
 
         elif t.name in ("create_event", "move_event", "cancel_event", "respond_to_invite",
                         "create_opportunity", "update_opportunity"):
-            cards.append({"type": "action", **{k: data.get(k) for k in
-                                                ("action_id", "kind", "status", "summary", "result", "error")}})
+            card = {"type": "action", **{k: data.get(k) for k in ("action_id", "kind", "status", "summary", "result", "error")}}
+            for extra in ("display", "email"):  # the record's fields, or an editable note
+                if data.get(extra):
+                    card[extra] = data[extra]
+            cards.append(card)
 
     return _dedupe(cards)
 
