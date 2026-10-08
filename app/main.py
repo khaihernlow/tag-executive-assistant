@@ -15,7 +15,10 @@ from starlette.middleware.sessions import SessionMiddleware
 load_dotenv(override=True)
 
 from agent.actions import public_action
+from agent.briefs import needs_brief
 from agent.calendar import agenda_day, local_zone, meeting_place, parse_event
+from agent.people import internal_domain
+from connectors.graph import EVENT_FIELDS
 from app.auth import is_allowed, require_auth, user_email
 
 BASE_DIR = Path(__file__).parent
@@ -38,15 +41,26 @@ templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 _services_lock = threading.Lock()
 
 
-def services(request: Request):
+def get_services(application: FastAPI):
     """Real services are built on first use; tests put fakes on app.state first."""
-    if getattr(request.app.state, "services", None) is None:
+    if getattr(application.state, "services", None) is None:
         with _services_lock:
-            if getattr(request.app.state, "services", None) is None:
+            if getattr(application.state, "services", None) is None:
                 from app.services import build_services
 
-                request.app.state.services = build_services()
-    return request.app.state.services
+                application.state.services = build_services()
+    return application.state.services
+
+
+def services(request: Request):
+    return get_services(request.app)
+
+
+@app.on_event("startup")
+def start_worker() -> None:
+    # The background worker (briefs, later sweeps). Off with WORKER_ENABLED=False.
+    if os.environ.get("WORKER_ENABLED", "True").lower() == "true":
+        get_services(app).worker.start()
 
 
 @app.get("/health")
@@ -113,6 +127,7 @@ async def service_worker():
 class ChatIn(BaseModel):
     message: str
     conversation_id: str | None = None
+    brief_event_id: str | None = None  # start a conversation about this meeting's brief
 
 
 def _agenda_events(svc, day, now) -> list[dict]:
@@ -125,6 +140,8 @@ def _agenda_events(svc, day, now) -> list[dict]:
         e = parse_event(item, tz)
         place, join_url = meeting_place(e.location, e.join_url)
         events.append({
+            "id": e.id,
+            "briefable": needs_brief(e, svc.graph.mailbox, internal_domain()),
             "subject": e.subject,
             "start": "All day" if e.all_day else e.start.strftime("%I:%M %p").lstrip("0"),
             "end": e.end.strftime("%I:%M %p").lstrip("0"),
@@ -149,6 +166,9 @@ def today(user: dict = Depends(require_auth), svc=Depends(services)):
         title = "Tomorrow" if day == now.date() + timedelta(days=1) else day.strftime("%A")
         events, done_today = _agenda_events(svc, day, now), len(todays)
 
+    statuses = svc.store.brief_statuses([e["id"] for e in events if e["id"]])
+    for e in events:
+        e["brief"] = statuses.get(e["id"])
     pending = [public_action(a) for a in svc.store.list_actions(status="pending", limit=20)]
     return {
         "date": now.strftime("%A, %b %d").replace(" 0", " "),
@@ -165,7 +185,8 @@ def today(user: dict = Depends(require_auth), svc=Depends(services)):
 @app.post("/api/chat")
 def chat(body: ChatIn, user: dict = Depends(require_auth), svc=Depends(services)):
     try:
-        return svc.assistant.chat(body.message, body.conversation_id)
+        topic = {"brief": body.brief_event_id} if body.brief_event_id else None
+        return svc.assistant.chat(body.message, body.conversation_id, topic=topic)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -197,6 +218,29 @@ def reject(aid: str, user: dict = Depends(require_auth), svc=Depends(services)):
         return public_action(svc.actions.reject(aid, decided_by=user_email(user) or user.get("name", "")))
     except KeyError:
         raise HTTPException(status_code=404, detail="Action not found")
+
+
+@app.get("/api/briefs/{event_id}")
+def brief(event_id: str, user: dict = Depends(require_auth), svc=Depends(services)):
+    row = svc.store.get_brief(event_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="No brief for this meeting yet")
+    convo = svc.store.find_conversation({"brief": event_id})
+    return {
+        "event_id": event_id,
+        "status": row["status"],
+        "brief": row["brief"],
+        "error": row["error"],
+        "updated_at": row["updated_at"],
+        "conversation_id": convo["id"] if convo else None,
+    }
+
+
+@app.post("/api/briefs/{event_id}/prepare")
+def prepare(event_id: str, refresh: bool = False, user: dict = Depends(require_auth), svc=Depends(services)):
+    raw = svc.graph.get(f"/users/{svc.graph.mailbox}/events/{event_id}", {"$select": EVENT_FIELDS})
+    svc.worker.prepare_now(parse_event(raw, local_zone()), force=refresh)
+    return {"event_id": event_id, "status": "preparing"}
 
 
 @app.get("/api/memory")

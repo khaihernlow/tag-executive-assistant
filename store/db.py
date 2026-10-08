@@ -41,6 +41,17 @@ CREATE TABLE IF NOT EXISTS actions (
 );
 CREATE INDEX IF NOT EXISTS idx_actions_status ON actions(status, created_at);
 
+CREATE TABLE IF NOT EXISTS briefs (
+    event_id     TEXT PRIMARY KEY,
+    subject      TEXT NOT NULL,
+    starts_at    TEXT NOT NULL,          -- ISO, local time
+    fingerprint  TEXT NOT NULL,          -- changes when the invite changes -> regenerate
+    status       TEXT NOT NULL,          -- preparing | ready | failed
+    brief        TEXT,                   -- JSON
+    error        TEXT,
+    updated_at   TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS memory (
     key        TEXT PRIMARY KEY,   -- e.g. "alias:kai", "pref:day_start", "note:<id>"
     kind       TEXT NOT NULL,      -- alias | pref | note
@@ -49,7 +60,7 @@ CREATE TABLE IF NOT EXISTS memory (
 );
 """
 
-_JSON_FIELDS = {"llm_messages", "display", "payload", "result", "value"}
+_JSON_FIELDS = {"llm_messages", "display", "payload", "result", "value", "brief", "topic"}
 
 
 def now_iso() -> str:
@@ -70,6 +81,15 @@ class Store:
         self._lock = threading.Lock()
         with self._lock:
             self._conn.executescript(SCHEMA)
+            self._migrate()
+
+    def _migrate(self) -> None:
+        """Additive changes for databases created by earlier versions."""
+        columns = {row[1] for row in self._conn.execute("PRAGMA table_info(conversations)")}
+        if "topic" not in columns:
+            # What a conversation is about, e.g. {"brief": "<event id>"}
+            self._conn.execute("ALTER TABLE conversations ADD COLUMN topic TEXT")
+        self._conn.commit()
 
     # ── helpers ──────────────────────────────────────────────────────────────
 
@@ -90,12 +110,18 @@ class Store:
 
     # ── conversations ────────────────────────────────────────────────────────
 
-    def create_conversation(self, title: str = "") -> str:
+    def create_conversation(self, title: str = "", topic: dict | None = None) -> str:
         cid = uuid.uuid4().hex
         stamp = now_iso()
-        self._execute("INSERT INTO conversations (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)",
-                      (cid, title, stamp, stamp))
+        self._execute("INSERT INTO conversations (id, title, created_at, updated_at, topic) VALUES (?, ?, ?, ?, ?)",
+                      (cid, title, stamp, stamp, json.dumps(topic) if topic else None))
         return cid
+
+    def find_conversation(self, topic: dict) -> dict[str, Any] | None:
+        """The most recent conversation about this topic (e.g. one meeting's brief)."""
+        return self._row(self._execute(
+            "SELECT * FROM conversations WHERE topic = ? ORDER BY updated_at DESC LIMIT 1", (json.dumps(topic),)
+        ).fetchone())
 
     def get_conversation(self, cid: str) -> dict[str, Any] | None:
         return self._row(self._execute("SELECT * FROM conversations WHERE id = ?", (cid,)).fetchone())
@@ -165,3 +191,46 @@ class Store:
         else:
             rows = self._execute("SELECT * FROM memory ORDER BY kind, key").fetchall()
         return [self._row(r) for r in rows]
+
+    # ── briefs ───────────────────────────────────────────────────────────────
+
+    def get_brief(self, event_id: str) -> dict[str, Any] | None:
+        return self._row(self._execute("SELECT * FROM briefs WHERE event_id = ?", (event_id,)).fetchone())
+
+    def claim_brief(self, event_id: str, subject: str, starts_at: str, fingerprint: str,
+                    force: bool = False) -> bool:
+        """Mark a brief as being prepared. False if it's already being prepared,
+        or (unless forced) is ready for this exact version of the invite."""
+        with self._lock:
+            row = self._conn.execute("SELECT status, fingerprint FROM briefs WHERE event_id = ?", (event_id,)).fetchone()
+            if row and row["status"] == "preparing":
+                return False
+            if row and not force and row["status"] == "ready" and row["fingerprint"] == fingerprint:
+                return False
+            self._conn.execute(
+                "INSERT INTO briefs (event_id, subject, starts_at, fingerprint, status, updated_at) "
+                "VALUES (?, ?, ?, ?, 'preparing', ?) ON CONFLICT(event_id) DO UPDATE SET subject = excluded.subject, "
+                "starts_at = excluded.starts_at, fingerprint = excluded.fingerprint, status = 'preparing', "
+                "error = NULL, updated_at = excluded.updated_at",
+                (event_id, subject, starts_at, fingerprint, now_iso()),
+            )
+            self._conn.commit()
+            return True
+
+    def finish_brief(self, event_id: str, brief: dict | None = None, error: str | None = None) -> None:
+        self._execute(
+            "UPDATE briefs SET status = ?, brief = ?, error = ?, updated_at = ? WHERE event_id = ?",
+            ("ready" if brief is not None else "failed", json.dumps(brief) if brief is not None else None,
+             error, now_iso(), event_id),
+        )
+
+    def brief_statuses(self, event_ids: list[str]) -> dict[str, str]:
+        if not event_ids:
+            return {}
+        marks = ",".join("?" * len(event_ids))
+        rows = self._execute(f"SELECT event_id, status FROM briefs WHERE event_id IN ({marks})", tuple(event_ids)).fetchall()
+        return {r["event_id"]: r["status"] for r in rows}
+
+    def reset_stuck_briefs(self) -> None:
+        """A restart mid-generation leaves 'preparing' rows behind; let them be retried."""
+        self._execute("UPDATE briefs SET status = 'failed', error = 'interrupted' WHERE status = 'preparing'")

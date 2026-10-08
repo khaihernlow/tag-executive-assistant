@@ -41,6 +41,9 @@ class Event:
     join_url: str = ""
     description: str = ""
     attendee_emails: tuple[str, ...] = ()
+    id: str = ""
+    organizer_email: str = ""
+    response: str = ""  # Dave's response: accepted, tentativelyAccepted, declined, organizer, none
 
     @property
     def blocks_time(self) -> bool:
@@ -66,6 +69,9 @@ def parse_event(raw: dict[str, Any], tz: ZoneInfo) -> Event:
         attendee_emails=tuple(
             ((a.get("emailAddress") or {}).get("address") or "").lower() for a in raw.get("attendees") or []
         ),
+        id=raw.get("id") or "",
+        organizer_email=(((raw.get("organizer") or {}).get("emailAddress") or {}).get("address") or "").lower(),
+        response=((raw.get("responseStatus") or {}).get("response") or ""),
     )
 
 

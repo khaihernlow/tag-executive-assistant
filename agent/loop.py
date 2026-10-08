@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import contextvars
+import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
@@ -43,6 +46,7 @@ class ToolTrace:
     input: dict[str, Any]
     output: str
     is_error: bool
+    ms: int = 0
 
 
 @dataclass
@@ -51,6 +55,7 @@ class TurnResult:
     messages: list[dict[str, Any]]
     trace: list[ToolTrace] = field(default_factory=list)
     hit_step_limit: bool = False
+    llm_ms: list[int] = field(default_factory=list)  # one entry per model call
 
 
 def system_prompt(now: datetime, memory_section: str = "") -> str:
@@ -66,19 +71,26 @@ def run_turn(
     max_steps: int = 8,
     max_tokens: int = 2048,
 ) -> TurnResult:
-    """Run one user turn to completion. `messages` must end with the user's message."""
+    """Run one user turn to completion. `messages` must end with the user's message.
+
+    Tools the model asks for in the same step run in parallel; every model
+    call and tool is timed so slow steps are visible.
+    """
     history = list(messages)
     trace: list[ToolTrace] = []
+    llm_ms: list[int] = []
     for _ in range(max_steps):
+        started = time.perf_counter()
         response = llm.complete(history, system=system, tools=registry.specs(), max_tokens=max_tokens)
+        llm_ms.append(int((time.perf_counter() - started) * 1000))
         history.append(response.assistant_message())
         calls = response.tool_calls
         if not calls:
-            return TurnResult(text=response.text, messages=history, trace=trace)
+            return TurnResult(text=response.text, messages=history, trace=trace, llm_ms=llm_ms)
+        outcomes = _run_tools(registry, calls)
         results = []
-        for call in calls:
-            content, is_error = registry.run(call)
-            trace.append(ToolTrace(call.name, call.input, content, is_error))
+        for call, (content, is_error, ms) in zip(calls, outcomes):
+            trace.append(ToolTrace(call.name, call.input, content, is_error, ms))
             results.append(tool_result_block(call, content, is_error))
         history.append(tool_results_message(results))
 
@@ -87,4 +99,20 @@ def run_turn(
         messages=history,
         trace=trace,
         hit_step_limit=True,
+        llm_ms=llm_ms,
     )
+
+
+def _run_tools(registry: ToolRegistry, calls: list) -> list[tuple[str, bool, int]]:
+    def timed(call):
+        started = time.perf_counter()
+        content, is_error = registry.run(call)
+        return content, is_error, int((time.perf_counter() - started) * 1000)
+
+    if len(calls) == 1:
+        return [timed(calls[0])]
+    # Each worker gets a copy of the current context, so context variables
+    # (e.g. which conversation an approval belongs to) carry into the thread.
+    with ThreadPoolExecutor(max_workers=min(len(calls), 6)) as pool:
+        futures = [pool.submit(contextvars.copy_context().run, timed, call) for call in calls]
+        return [f.result() for f in futures]

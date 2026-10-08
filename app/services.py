@@ -17,6 +17,7 @@ from agent.scheduling import scheduling_tools
 from agent.tools import ToolRegistry
 from connectors.graph import GraphClient
 from llm.hatzai import HatzAIProvider
+from app.worker import Worker
 from store.db import Store
 
 
@@ -27,6 +28,7 @@ class Services:
     actions: Actions
     assistant: Assistant
     memory: Memory
+    worker: Worker
 
 
 def build_services() -> Services:
@@ -46,4 +48,5 @@ def build_services() -> Services:
         + junk_tools(graph, fast_llm, actions)
         + [create_event_tool(graph, actions)]
     )
-    return Services(graph, store, actions, Assistant(llm, registry, store, actions, memory), memory)
+    assistant = Assistant(llm, registry, store, actions, memory)
+    return Services(graph, store, actions, assistant, memory, Worker(graph, llm, store))

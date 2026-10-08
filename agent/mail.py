@@ -92,6 +92,7 @@ def search_mail(
     since_days: int = 30,
     limit: int = 10,
     now: datetime | None = None,
+    broaden: bool = True,
 ) -> list[dict[str, Any]]:
     """Newest first. Messages matching every word come first; if that finds
     few, messages matching some of the words follow (marked "some words"),
@@ -122,7 +123,7 @@ def search_mail(
 
     results = [summarize(m) | {"matched": "all words"} for m in run(query)]
     broader = build_search(sender, about, any_word=True)
-    if len(results) < limit and broader != query:
+    if broaden and len(results) < limit and broader != query:
         seen = {m["id"] for m in results}
         results += [summarize(m) | {"matched": "some words"} for m in run(broader) if m["id"] not in seen]
     return results[:limit]

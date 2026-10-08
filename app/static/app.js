@@ -3,7 +3,8 @@
 
 const $ = (sel) => document.querySelector(sel);
 const thread = $("#thread");
-const scroller = $("#scroll");
+const scroller = $("#view-chat");
+const sheet = document.querySelector(".sheet");
 const input = $("#input");
 const sendBtn = $("#send");
 
@@ -13,6 +14,8 @@ const ACTIVE_KEY = "ea.lastActive";
 // never has to manage chats; old ones stay under Recent.
 const FRESH_AFTER_MS = 2 * 60 * 60 * 1000;
 let busy = false;
+// A conversation started from a brief carries that meeting until its first message is sent.
+let pendingTopic = null; // { eventId, subject }
 
 function readStored(key = STORE_KEY) {
   try { return localStorage.getItem(key); } catch { return null; }
@@ -100,6 +103,28 @@ function renderMarkdown(source) {
   return out.join("");
 }
 
+// ── tabs ───────────────────────────────────────────────────────────────────────
+
+function showTab(name) {
+  sheet.dataset.tab = name;
+  $("#view-today").hidden = name !== "today";
+  $("#view-chat").hidden = name !== "chat";
+  document.querySelectorAll(".tab").forEach((t) =>
+    t.dataset.tab === name ? t.setAttribute("aria-current", "page") : t.removeAttribute("aria-current"));
+  if (name === "chat") scrollToEnd();
+}
+document.querySelectorAll(".tab").forEach((t) => t.addEventListener("click", () => showTab(t.dataset.tab)));
+
+function setTopic(subject) {
+  const topic = $("#topic");
+  topic.hidden = !subject;
+  topic.textContent = subject ? `About: ${subject}` : "";
+}
+
+function updateEmptyState() {
+  $("#thread-empty").hidden = thread.children.length > 0;
+}
+
 // ── today ──────────────────────────────────────────────────────────────────────
 
 async function loadToday() {
@@ -114,6 +139,9 @@ async function loadToday() {
     done.textContent = day.done_today === 1 ? "Today's meeting is done." : `Today's ${day.done_today} meetings are done.`;
     renderItinerary(day.events, isToday ? "today" : day.agenda_title.toLowerCase());
     renderSignoff(day.pending);
+    // While the worker is preparing briefs, check back so the "Brief" buttons appear.
+    clearTimeout(loadToday.timer);
+    if (day.events.some((e) => e.brief === "preparing")) loadToday.timer = setTimeout(loadToday, 5000);
   } catch (err) {
     $("#itinerary").replaceChildren(el("li", { class: "itinerary__empty", text: `Couldn't load your calendar: ${err.message}` }));
   }
@@ -131,15 +159,143 @@ function renderItinerary(events, when) {
     if (e.now) classes.push("stop--now");
     if (e.show_as === "tentative") classes.push("stop--tentative");
     const meta = [e.location, e.show_as === "tentative" ? "tentative" : ""].filter(Boolean).join(" · ");
+    const pill = e.brief === "ready" ? el("span", { class: "pill pill--brief", text: "Brief" })
+      : e.brief === "preparing" ? el("span", { class: "pill", text: "Preparing…" }) : null;
+    const join = e.join_url && !e.past
+      ? el("a", { class: "join", href: e.join_url, target: "_blank", rel: "noopener", text: "Join",
+                  onclick: (ev) => ev.stopPropagation() })
+      : null;
     return el("li", { class: classes.join(" ") },
-      el("span", { class: "stop__time", text: e.start }),
-      el("span", { class: "stop__what" },
-        el("span", { class: "stop__subject", text: e.subject }),
-        meta ? el("span", { class: "stop__meta", text: meta }) : null),
-      e.join_url && !e.past ? el("a", { class: "join", href: e.join_url, target: "_blank", rel: "noopener", text: "Join" }) : el("span"),
+      el("button", { class: "stop__open", type: "button", "aria-label": `${e.subject}, ${e.start}. Open brief`,
+                     onclick: () => openBrief(e) },
+        el("span", { class: "stop__time", text: e.start }),
+        el("span", { class: "stop__what" },
+          el("span", { class: "stop__subject", text: e.subject }),
+          meta || pill ? el("span", { class: "stop__meta" }, pill, meta) : null)),
+      join || el("span"),
     );
   }));
 }
+
+// ── meeting briefs ─────────────────────────────────────────────────────────────
+
+let openEvent = null;
+
+function cited(text) {
+  // "[Email 2]" style source labels become small markers instead of raw brackets.
+  const parts = String(text).split(/(\[(?:Invite|Email \d+|Attachment \d+)(?:,\s*(?:Invite|Email \d+|Attachment \d+))*\])/g);
+  return parts.filter(Boolean).map((p) => /^\[/.test(p) ? el("span", { class: "cite", text: p.slice(1, -1) }) : p);
+}
+
+function briefSection(title, items) {
+  if (!items || !items.length) return null;
+  return el("section", { class: "bsec" },
+    el("h3", { class: "bsec__title", text: title }),
+    el("ul", { class: "bsec__list" }, items.map((i) => el("li", {}, ...cited(i)))));
+}
+
+function renderBrief(data) {
+  const b = data.brief || {};
+  const m = b.material || {};
+  const content = [
+    el("p", { class: "bs-headline", text: b.headline || "" }),
+    b.who && b.who.length ? el("section", { class: "bsec" },
+      el("h3", { class: "bsec__title", text: "Who" }),
+      el("ul", { class: "bsec__list bsec__list--who" }, b.who.map((w) =>
+        el("li", {}, el("strong", { text: w.name }), w.role ? ` \u2014 ${w.role}` : "")))) : null,
+    briefSection("Context", b.context),
+    briefSection("Background", b.background),
+    briefSection("Prep", b.prep),
+    briefSection("Not covered", b.gaps),
+  ];
+  const sources = [...(m.emails || []).map((e) => `${e.label}: \u201c${e.subject}\u201d \u2014 ${e.from}, ${e.received}`),
+                   ...(m.attachments || []).map((a) => `${a.label}: ${a.name}`)];
+  if (sources.length) {
+    content.push(el("details", { class: "bsec bsources" },
+      el("summary", { text: `Sources (${sources.length})` }),
+      el("ul", { class: "bsec__list" }, sources.map((s) => el("li", { text: s })))));
+  }
+  content.push(el("p", { class: "card__note", text: `Prepared ${ago(data.updated_at)} from your calendar and email.` }));
+  $("#bs-content").replaceChildren(...content.filter(Boolean));
+}
+
+async function loadBrief(event) {
+  const target = $("#bs-content");
+  try {
+    const data = await api(`/api/briefs/${encodeURIComponent(event.id)}`);
+    if (openEvent !== event) return; // sheet moved on
+    $("#bs-refresh").hidden = data.status === "preparing";
+    if (data.status === "ready") {
+      renderBrief(data);
+      $("#bs-foot").hidden = false;
+      openEvent.conversationId = data.conversation_id;
+    } else if (data.status === "preparing") {
+      target.replaceChildren(el("p", { class: "thinking", text: "Preparing the brief from your calendar and email" }));
+      setTimeout(() => openEvent === event && loadBrief(event), 4000);
+    } else {
+      target.replaceChildren(el("p", { class: "error", text: `Couldn't prepare this brief (${data.error || "unknown error"}).` }),
+        prepareButton(event, "Try again"));
+    }
+  } catch (err) {
+    if (openEvent !== event) return;
+    $("#bs-refresh").hidden = true;
+    target.replaceChildren(
+      el("p", { class: "card__note", text: "No brief for this meeting yet." }),
+      prepareButton(event, "Prepare brief"));
+  }
+}
+
+function prepareButton(event, label, refresh = false) {
+  return el("button", { class: "btn btn--sign", type: "button", text: label, onclick: () => prepare(event, refresh) });
+}
+
+async function prepare(event, refresh = false) {
+  $("#bs-foot").hidden = true;
+  $("#bs-content").replaceChildren(el("p", { class: "thinking", text: "Preparing the brief from your calendar and email" }));
+  try {
+    await api(`/api/briefs/${encodeURIComponent(event.id)}/prepare${refresh ? "?refresh=true" : ""}`, { method: "POST" });
+    setTimeout(() => openEvent === event && loadBrief(event), 4000);
+    loadToday();
+  } catch (err) {
+    $("#bs-content").replaceChildren(el("p", { class: "error", text: `Couldn't start: ${err.message}` }));
+  }
+}
+
+function openBrief(event) {
+  openEvent = event;
+  $("#bs-title").textContent = event.subject;
+  $("#bs-when").textContent = [`${event.start}\u2013${event.end}`, event.location].filter(Boolean).join(" \u00b7 ");
+  $("#bs-foot").hidden = true;
+  $("#bs-refresh").hidden = true;
+  $("#bs-content").replaceChildren(el("p", { class: "thinking", text: "Loading" }));
+  $("#briefsheet").hidden = false;
+  loadBrief(event);
+}
+
+function closeBrief() {
+  openEvent = null;
+  $("#briefsheet").hidden = true;
+}
+
+$("#bs-close").addEventListener("click", closeBrief);
+$("#bs-refresh").addEventListener("click", () => openEvent && prepare(openEvent, true));
+$("#bs-ask").addEventListener("click", () => {
+  const event = openEvent;
+  closeBrief();
+  showTab("chat");
+  if (event.conversationId) {
+    openConversation(event.conversationId);
+  } else {
+    conversationId = null;
+    writeStored(null);
+    thread.replaceChildren();
+    pendingTopic = { eventId: event.id, subject: event.subject };
+    setTopic(event.subject);
+    updateEmptyState();
+  }
+  input.focus();
+});
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("#briefsheet").hidden) closeBrief(); });
 
 function renderSignoff(pending) {
   $("#signoff-block").hidden = !pending.length;
@@ -329,11 +485,14 @@ async function openConversation(id) {
   try {
     const convo = await api(`/api/conversations/${encodeURIComponent(id)}`);
     thread.replaceChildren();
+    pendingTopic = null;
+    setTopic((convo.title || "").startsWith("Brief: ") ? convo.title.slice(7) : "");
     for (const m of convo.messages) {
       if (m.role === "user") addNote(m.text); else addBrief(m.text, m.cards || []);
     }
     conversationId = id;
     writeStored(id);
+    updateEmptyState();
     scrollToEnd();
   } catch {
     conversationId = null;
@@ -438,15 +597,22 @@ async function send(text) {
   if (!text || busy) return;
   busy = true;
   sendBtn.disabled = true;
+  showTab("chat");
   addNote(text);
+  updateEmptyState();
   const thinking = el("p", { class: "thinking", text: "Working on it" });
   thread.append(thinking);
   scrollToEnd();
   try {
     const reply = await api("/api/chat", {
       method: "POST",
-      body: JSON.stringify({ message: text, conversation_id: conversationId }),
+      body: JSON.stringify({
+        message: text,
+        conversation_id: conversationId,
+        brief_event_id: !conversationId && pendingTopic ? pendingTopic.eventId : null,
+      }),
     });
+    pendingTopic = null;
     conversationId = reply.conversation_id;
     writeStored(conversationId);
     writeStored(String(Date.now()), ACTIVE_KEY);
@@ -494,8 +660,11 @@ document.querySelectorAll("#quick .chip").forEach((chip) =>
 
 $("#new-chat").addEventListener("click", () => {
   conversationId = null;
+  pendingTopic = null;
   writeStored(null);
   thread.replaceChildren();
+  setTopic("");
+  updateEmptyState();
   input.focus();
 });
 

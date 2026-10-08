@@ -58,20 +58,25 @@ class Assistant:
         self.store = store
         self.actions = actions
 
-    def chat(self, text: str, conversation_id: str | None = None) -> dict[str, Any]:
+    def chat(self, text: str, conversation_id: str | None = None, topic: dict | None = None) -> dict[str, Any]:
         text = text.strip()
         if not text:
             raise ValueError("Empty message")
         conversation = self.store.get_conversation(conversation_id) if conversation_id else None
         if conversation is None:
-            conversation_id = self.store.create_conversation(title=text[:80])
+            title = text[:80]
+            if topic and topic.get("brief"):
+                row = self.store.get_brief(topic["brief"])
+                title = f"Brief: {row['subject']}" if row else title
+            conversation_id = self.store.create_conversation(title=title, topic=topic)
             conversation = self.store.get_conversation(conversation_id)
 
         history = trim_history(conversation["llm_messages"]) + [{"role": "user", "content": text}]
         token = current_conversation.set(conversation_id)
         try:
-            memory = self.memory.prompt_section() if self.memory else ""
-            result = run_turn(self.llm, self.registry, history, system_prompt(datetime.now(local_zone()), memory))
+            extra = self.memory.prompt_section() if self.memory else ""
+            extra = "\n\n".join(filter(None, [extra, self._topic_section(conversation.get("topic"))]))
+            result = run_turn(self.llm, self.registry, history, system_prompt(datetime.now(local_zone()), extra))
         finally:
             current_conversation.reset(token)
 
@@ -86,6 +91,22 @@ class Assistant:
         ]
         self.store.save_conversation(conversation_id, result.messages, display)
         return {"conversation_id": conversation_id, "text": reply, "cards": cards}
+
+    def _topic_section(self, topic: dict | None) -> str:
+        """A conversation opened from a brief starts with that brief in view."""
+        if not topic or not topic.get("brief"):
+            return ""
+        row = self.store.get_brief(topic["brief"])
+        if not row or not row.get("brief"):
+            return ""
+        return ("This conversation is about one meeting. Its prepared brief (from the invite, emails and "
+                "attachments; labels like [Email 2] refer to them) is below. Answer from it first; use tools "
+                "for anything it doesn't cover.\n" + _brief_text(row["brief"]))
+
+
+def _brief_text(brief: dict[str, Any]) -> str:
+    return json.dumps({k: brief.get(k) for k in ("meeting", "headline", "who", "context", "background", "prep",
+                                                 "gaps", "material")}, ensure_ascii=False)
 
 
 def _ground_truth(messages: list[dict[str, Any]]) -> list[str]:

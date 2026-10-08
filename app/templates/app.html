@@ -17,7 +17,7 @@
   <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
-  <div class="sheet">
+  <div class="sheet" data-tab="today">
     <header class="masthead">
       <div>
         <p class="masthead__date" id="date">&nbsp;</p>
@@ -27,10 +27,10 @@
         <button class="icon-btn" id="memory-btn" type="button" aria-label="What I remember" title="What I remember" aria-expanded="false" aria-controls="memory">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v18l-6-4-6 4z"/></svg>
         </button>
-        <button class="icon-btn" id="recent-btn" type="button" aria-label="Recent conversations" title="Recent conversations" aria-expanded="false" aria-controls="recent">
+        <button class="icon-btn chat-only" id="recent-btn" type="button" aria-label="Recent conversations" title="Recent conversations" aria-expanded="false" aria-controls="recent">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 7v5l3 2"/><path d="M3.5 12a8.5 8.5 0 1 0 2.5-6"/><path d="M3 4v4h4"/></svg>
         </button>
-        <button class="icon-btn" id="new-chat" type="button" aria-label="New conversation" title="New conversation">
+        <button class="icon-btn chat-only" id="new-chat" type="button" aria-label="New conversation" title="New conversation">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
         </button>
       </div>
@@ -57,7 +57,8 @@
       </div>
     </div>
 
-    <main class="scroll" id="scroll">
+    <!-- Today: what Dave glances at between meetings -->
+    <main class="scroll view" id="view-today" aria-label="Today">
       <section class="block" aria-labelledby="signoff-title" id="signoff-block" hidden>
         <h2 class="block__title" id="signoff-title">Awaiting your sign-off</h2>
         <div id="signoff"></div>
@@ -73,21 +74,53 @@
 
       <div class="quick" id="quick">
         <button class="chip" type="button" data-say="Check my inbox for junk">Sweep junk</button>
-        <button class="chip" type="button" data-say="Brief me on my next external meeting">Brief my next meeting</button>
       </div>
+    </main>
 
+    <!-- Chat: conversations with the assistant -->
+    <main class="scroll view" id="view-chat" aria-label="Chat" hidden>
       <section class="block block--thread" aria-label="Conversation">
+        <p class="topic" id="topic" hidden></p>
         <div class="thread" id="thread" aria-live="polite"></div>
+        <p class="thread__empty" id="thread-empty">Ask about your calendar, email or a meeting.</p>
       </section>
     </main>
 
-    <form class="composer" id="composer" autocomplete="off">
+    <form class="composer chat-only" id="composer" autocomplete="off">
       <label class="visually-hidden" for="input">Ask your assistant</label>
       <textarea id="input" rows="1" placeholder="Ask your assistant…" enterkeyhint="send"></textarea>
       <button class="send" id="send" type="submit" aria-label="Send" disabled>
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6"/></svg>
       </button>
     </form>
+
+    <nav class="tabs" aria-label="Sections">
+      <button class="tab" type="button" data-tab="today" aria-current="page">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4"/></svg>
+        Today
+      </button>
+      <button class="tab" type="button" data-tab="chat">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 18l-1 3 4-2h9a3 3 0 0 0 3-3V8a3 3 0 0 0-3-3H7a3 3 0 0 0-3 3v8"/></svg>
+        Chat
+      </button>
+    </nav>
+
+    <!-- Meeting brief: opens over everything -->
+    <div class="briefsheet" id="briefsheet" hidden role="dialog" aria-modal="true" aria-labelledby="bs-title">
+      <div class="briefsheet__bar">
+        <button class="link-btn" id="bs-close" type="button">‹ Back</button>
+        <button class="link-btn" id="bs-refresh" type="button" hidden>Refresh</button>
+      </div>
+      <div class="briefsheet__body">
+        <p class="slip__kind">Meeting brief</p>
+        <h2 class="briefsheet__title" id="bs-title"></h2>
+        <p class="briefsheet__when" id="bs-when"></p>
+        <div id="bs-content"></div>
+      </div>
+      <div class="briefsheet__foot" id="bs-foot" hidden>
+        <button class="btn btn--sign" id="bs-ask" type="button">Ask about this meeting</button>
+      </div>
+    </div>
   </div>
 
   <script src="/static/app.js"></script>
