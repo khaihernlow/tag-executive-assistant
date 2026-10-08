@@ -19,3 +19,10 @@ def test_ambiguous_domain_picks_the_closest():
     known = known_addresses("gstone@tag.example jyoung@tag.example")
     text, _ = verify_addresses("gsmyth@tag.example", known)
     assert text == "gstone@tag.example"
+
+
+def test_chat_replies_lose_long_dashes_but_keep_bullets_and_hyphens():
+    from agent.factcheck import no_long_dashes
+
+    text = "- **Oct 6, 3:00–3:30 PM** — You interviewed Jordan\n- Follow-up call"
+    assert no_long_dashes(text) == "- **Oct 6, 3:00-3:30 PM**, You interviewed Jordan\n- Follow-up call"

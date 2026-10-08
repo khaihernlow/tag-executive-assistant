@@ -625,3 +625,19 @@ button.cite:active { background: var(--rule-strong); }
   overflow-wrap: anywhere;
 }
 .source__open { display: flex; align-items: center; justify-content: center; text-decoration: none; }
+
+/* ── live progress while the assistant works ─────────────────────────────────── */
+
+.steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.steps:empty { display: none; }
+.step { font-size: 13px; color: var(--ink-faint); padding-left: 18px; position: relative; }
+.step::before { content: ""; position: absolute; left: 3px; top: 7px; width: 6px; height: 6px; border-radius: 50%; background: var(--rule-strong); }
+.step--done { color: var(--ink-ghost); }
+.step--done::before { background: var(--sage); }
+.step--active { color: var(--ink-soft); }
+.step--active::before { background: var(--brass); animation: pulse 1s ease-in-out infinite alternate; }
+.step--active::after { content: "\2026"; }
+@keyframes pulse { from { opacity: 0.35; } to { opacity: 1; } }
+.brief__text--draft:empty { display: none; }
+.steps-done { margin: 0; font-size: 12px; color: var(--ink-ghost); }
+@media (prefers-reduced-motion: reduce) { .step--active::before { animation: none; } }

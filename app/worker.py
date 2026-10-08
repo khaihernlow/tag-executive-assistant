@@ -5,9 +5,10 @@ jobs only touch the store and Graph, so it can move to its own container
 later without changes.
 
 Jobs:
-  briefs   every BRIEF_INTERVAL: prepare briefs for the rest of today and the
-           next working day's external meetings and interviews, and refresh
-           any whose invite changed.
+  briefs   every BRIEF_INTERVAL (3 min): one calendar read; prepare briefs for
+           new qualifying meetings (rest of today + next working day), soonest
+           first, and refresh any whose invite changed. Unchanged meetings cost
+           nothing, so a meeting added during the day has a brief in ~3 min.
 """
 
 from __future__ import annotations
@@ -24,7 +25,7 @@ from agent.people import internal_domain
 
 log = logging.getLogger("assistant.worker")
 
-BRIEF_INTERVAL = int(os.environ.get("BRIEF_INTERVAL_SECONDS", str(15 * 60)))
+BRIEF_INTERVAL = int(os.environ.get("BRIEF_INTERVAL_SECONDS", str(3 * 60)))
 
 
 class Worker:
@@ -34,8 +35,11 @@ class Worker:
         self.interval = interval
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
-        # Briefs take ~15-30s each; two at a time keeps HatzAI and Graph comfortable.
+        # Briefs take ~20-45s each; two at a time keeps HatzAI and Graph comfortable.
         self._pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="brief")
+        # Meetings waiting in the pool, so a 3-minute cycle never queues one twice.
+        self._queued: set[str] = set()
+        self._queued_lock = threading.Lock()
 
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
@@ -61,13 +65,23 @@ class Worker:
         """Queue every upcoming meeting that should have a brief; returns how many qualified."""
         domain = internal_domain()
         due = [e for e in upcoming_meetings(self.graph) if needs_brief(e, self.graph.mailbox, domain)]
-        for event in due:
-            self._pool.submit(self._prepare, event, False)
+        # Soonest first: the pool works in submission order, so the 2:00 brief
+        # is written before tomorrow's 4:00.
+        for event in sorted(due, key=lambda e: e.start):
+            self._submit(event, force=False)
         return len(due)
 
     def prepare_now(self, event: Event, force: bool = False) -> None:
         """Dave tapped 'Prepare brief' (or 'Refresh'): do it in the background."""
+        self._submit(event, force=force)
+
+    def _submit(self, event: Event, force: bool) -> bool:
+        with self._queued_lock:
+            if event.id in self._queued:
+                return False
+            self._queued.add(event.id)
         self._pool.submit(self._prepare, event, force)
+        return True
 
     def _prepare(self, event: Event, force: bool) -> None:
         try:
@@ -75,3 +89,6 @@ class Worker:
                 log.info("brief done: %s", event.subject)
         except Exception:  # noqa: BLE001
             log.exception("brief failed: %s", event.subject)
+        finally:
+            with self._queued_lock:
+                self._queued.discard(event.id)

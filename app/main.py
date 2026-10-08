@@ -1,3 +1,4 @@
+import json
 import os
 import threading
 from datetime import datetime, time, timedelta
@@ -6,7 +7,7 @@ from pathlib import Path
 from authlib.integrations.starlette_client import OAuth, OAuthError
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
@@ -189,6 +190,25 @@ def chat(body: ChatIn, user: dict = Depends(require_auth), svc=Depends(services)
         return svc.assistant.chat(body.message, body.conversation_id, topic=topic)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/chat/stream")
+def chat_stream(body: ChatIn, user: dict = Depends(require_auth), svc=Depends(services)):
+    """Same as /api/chat, streamed as one JSON object per line: start, step, text,
+    discard_text, then done (or error)."""
+    if not body.message.strip():
+        raise HTTPException(status_code=400, detail="Empty message")
+    topic = {"brief": body.brief_event_id} if body.brief_event_id else None
+
+    def lines():
+        try:
+            for event in svc.assistant.chat_stream(body.message, body.conversation_id, topic=topic):
+                yield json.dumps(event, default=str) + "\n"
+        except Exception as e:  # noqa: BLE001 - the app shows this and offers a retry
+            yield json.dumps({"type": "error", "message": f"{type(e).__name__}: {e}"[:300]}) + "\n"
+
+    return StreamingResponse(lines(), media_type="application/x-ndjson",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 @app.get("/api/conversations")

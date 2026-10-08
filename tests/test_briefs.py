@@ -224,3 +224,24 @@ def test_excerpts_drop_tracking_links_and_signature_tags():
 
     body = "Mark, can you resend the quote? [signature_1206802121] www.tag.example<https://link.edgepilot.com/s/9ad?u=x> Thanks"
     assert _excerpt(body) == "Mark, can you resend the quote? www.tag.example Thanks"
+
+
+def test_worker_queues_soonest_first_and_never_twice(monkeypatch):
+    import app.worker as worker_mod
+    from app.worker import Worker
+
+    soon = event("Soon", id="soon", hour=9)
+    later = event("Later", id="later", hour=15)
+    monkeypatch.setattr(worker_mod, "upcoming_meetings", lambda graph: [later, soon])
+
+    w = Worker(SimpleNamespace(mailbox=DAVE), None, Store(":memory:"))
+    submitted = []
+    w._pool = SimpleNamespace(submit=lambda fn, ev, force: submitted.append(ev.id))
+
+    assert w.queue_briefs() == 2
+    assert submitted == ["soon", "later"]            # soonest first
+    w.queue_briefs()
+    assert submitted == ["soon", "later"]            # still queued: not added again
+    w._queued.discard("soon")
+    w.queue_briefs()
+    assert submitted == ["soon", "later", "soon"]    # finished: eligible on the next cycle

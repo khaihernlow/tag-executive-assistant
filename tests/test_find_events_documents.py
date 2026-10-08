@@ -42,10 +42,19 @@ SALES = raw_event("Sales meeting", "2026-10-06T12:30:00", "2026-10-06T13:15:00")
 
 def test_find_events_matches_attendee_email_and_all_words():
     events = [parse_event(r, NY) for r in (INTERVIEW, SALES)]
-    assert [e.subject for e in find_events(events, "jordan")] == ["Interview SDR Role"]
-    assert [e.subject for e in find_events(events, "interview gabe")] == ["Interview SDR Role"]
-    assert find_events(events, "interview bob") == []
-    assert find_events(events, "") == []
+    names = lambda found: [e.subject for e in found[0]]  # noqa: E731
+    assert names(find_events(events, "jordan")) == ["Interview SDR Role"]
+    assert find_events(events, "interview gabe")[1] is True
+    assert find_events(events, "interview bob") == ([], False)
+    assert find_events(events, "") == ([], True)
+
+
+def test_find_events_falls_back_to_distinctive_words():
+    # The model asked for "Chelsi second round interview"; the title is "Chelsi/Dave - round 2".
+    round_two = raw_event("Jordan/Dave - round 2", "2026-10-09T18:00:00", "2026-10-09T19:00:00")
+    events = [parse_event(r, NY) for r in (round_two, SALES)]
+    found, exact = find_events(events, "Jordan second round interview")
+    assert [e.subject for e in found] == ["Jordan/Dave - round 2"] and exact is False
 
 
 def test_find_events_tool_returns_detail_without_teams_boilerplate():

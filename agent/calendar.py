@@ -141,14 +141,26 @@ def day_range(start_date: str, end_date: str, tz: ZoneInfo) -> tuple[date, date,
     return first, last, start, end
 
 
-def find_events(events: list[Event], about: str) -> list[Event]:
-    """Events where every word of `about` appears somewhere in the event."""
+_FILLER = {"the", "and", "with", "for", "meeting", "call", "my", "our", "about", "interview", "second",
+           "first", "next", "round", "discussion", "sync", "review", "dave", "tag"}
+
+
+def find_events(events: list[Event], about: str) -> tuple[list[Event], bool]:
+    """(matches, exact). Events containing every word of `about`; if none, events
+    containing any distinctive word, best first. The model often adds words the
+    title doesn't use ("Chelsi second round interview" vs "Chelsi/Dave - round 2")."""
     words = [w for w in about.lower().split() if w]
 
     def text(e: Event) -> str:
         return " ".join([e.subject, e.location, e.organizer, e.description, *e.attendees, *e.attendee_emails]).lower()
 
-    return [e for e in events if words and all(w in text(e) for w in words)]
+    exact = [e for e in events if words and all(w in text(e) for w in words)]
+    if exact or not words:
+        return exact, True
+    key = [w for w in words if len(w) >= 3 and w not in _FILLER] or words
+    scored = [(sum(w in text(e) for w in key), e) for e in events]
+    partial = [e for score, e in sorted(scored, key=lambda pair: -pair[0]) if score]
+    return partial, False
 
 
 def event_detail(e: Event) -> dict[str, Any]:
@@ -201,7 +213,7 @@ def calendar_tools(source: CalendarSource, memory: Any = None) -> list[Tool]:
             args.get("end_date") or (today + timedelta(days=45)).isoformat(),
             tz,
         )
-        matches = find_events(
+        matches, exact = find_events(
             [parse_event(raw, tz) for raw in source.calendar_view(start, end) if not raw.get("isCancelled")],
             args["about"],
         )
@@ -212,6 +224,8 @@ def calendar_tools(source: CalendarSource, memory: Any = None) -> list[Tool]:
         }
         if not matches:
             result["note"] = "No matching events in that range."
+        elif not exact:
+            result["note"] = "No event matched every word; these match some of them, best first."
         return result
 
     def free_time(args: dict[str, Any]) -> dict[str, Any]:

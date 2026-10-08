@@ -37,7 +37,9 @@ Rules:
   remember something ("Kai is Khaihern", "no meetings before 8:30"), save it with remember.
 - "Clean up my inbox", "any junk?", "check my spam" -> sweep_junk. It only proposes; mention how many
   it found and anything it was unsure about.
-- Be brief and concrete, the way a sharp human assistant would write to a busy CEO, often on his phone."""
+- Be brief and concrete, the way a sharp human assistant would write to a busy CEO, often on his phone.
+- Write plain sentences. Do not use em dashes or en dashes.
+- Search with the most distinctive word (a name or company), not a long phrase."""
 
 
 @dataclass
@@ -116,3 +118,78 @@ def _run_tools(registry: ToolRegistry, calls: list) -> list[tuple[str, bool, int
     with ThreadPoolExecutor(max_workers=min(len(calls), 6)) as pool:
         futures = [pool.submit(contextvars.copy_context().run, timed, call) for call in calls]
         return [f.result() for f in futures]
+
+
+STEP_LABELS = {
+    "find_events": "Checking your calendar",
+    "list_calendar_events": "Looking at your calendar",
+    "find_free_time": "Finding free time",
+    "find_mutual_time": "Comparing calendars",
+    "search_mail": "Searching your email",
+    "read_email": "Reading an email",
+    "read_attachment": "Reading an attachment",
+    "find_person": "Looking up a person",
+    "create_event": "Preparing the invite",
+    "sweep_junk": "Checking your inbox for junk",
+    "remember": "Saving that",
+    "forget": "Updating what I remember",
+}
+
+
+def step_label(call: Any) -> str:
+    """What Dave sees while a tool runs, e.g. 'Searching your email for "Chelsi"'."""
+    base = STEP_LABELS.get(call.name, "Working")
+    detail = call.input.get("name") or call.input.get("about") or call.input.get("sender") or ""
+    if call.name == "read_attachment":
+        detail = call.input.get("attachment_id", "") if "." in call.input.get("attachment_id", "") else ""
+    return f"{base}: {detail}" if detail and len(str(detail)) <= 60 else base
+
+
+def run_turn_stream(
+    llm: Any,
+    registry: ToolRegistry,
+    messages: list[dict[str, Any]],
+    system: str,
+    run_tools: Any = None,
+    max_steps: int = 8,
+    max_tokens: int = 2048,
+):
+    """Like run_turn, but yields events while it works:
+      {"type": "text", "delta": ...}   the model writing
+      {"type": "step", "label": ...}   a tool about to run
+      {"type": "discard_text"}         text so far was a preamble before tools, not the answer
+      {"type": "result", "result": TurnResult}   last event
+    `run_tools(calls)` lets the caller wrap tool execution (e.g. set context)."""
+    run_tools = run_tools or (lambda calls: _run_tools(registry, calls))
+    history = list(messages)
+    trace: list[ToolTrace] = []
+    llm_ms: list[int] = []
+    for _ in range(max_steps):
+        started = time.perf_counter()
+        response = None
+        streamed = False
+        for kind, value in llm.stream(history, system=system, tools=registry.specs(), max_tokens=max_tokens):
+            if kind == "text":
+                streamed = True
+                yield {"type": "text", "delta": value}
+            else:
+                response = value
+        llm_ms.append(int((time.perf_counter() - started) * 1000))
+        history.append(response.assistant_message())
+        calls = response.tool_calls
+        if not calls:
+            yield {"type": "result", "result": TurnResult(text=response.text, messages=history, trace=trace, llm_ms=llm_ms)}
+            return
+        if streamed:
+            yield {"type": "discard_text"}
+        for call in calls:
+            yield {"type": "step", "label": step_label(call)}
+        outcomes = run_tools(calls)
+        results = []
+        for call, (content, is_error, ms) in zip(calls, outcomes):
+            trace.append(ToolTrace(call.name, call.input, content, is_error, ms))
+            results.append(tool_result_block(call, content, is_error))
+        history.append(tool_results_message(results))
+    yield {"type": "result", "result": TurnResult(
+        text="I stopped after too many steps without finishing. Try narrowing the request.",
+        messages=history, trace=trace, hit_step_limit=True, llm_ms=llm_ms)}

@@ -10,8 +10,8 @@ from typing import Any
 from agent.actions import Actions, current_conversation
 from agent.calendar import local_zone
 from agent.cards import build_cards
-from agent.factcheck import known_addresses, verify_addresses
-from agent.loop import run_turn, system_prompt
+from agent.factcheck import known_addresses, no_long_dashes, verify_addresses
+from agent.loop import _run_tools, run_turn, run_turn_stream, system_prompt
 from agent.tools import ToolRegistry
 from llm.provider import LLMProvider
 from store.db import Store
@@ -58,7 +58,7 @@ class Assistant:
         self.store = store
         self.actions = actions
 
-    def chat(self, text: str, conversation_id: str | None = None, topic: dict | None = None) -> dict[str, Any]:
+    def _begin(self, text: str, conversation_id: str | None, topic: dict | None):
         text = text.strip()
         if not text:
             raise ValueError("Empty message")
@@ -70,27 +70,57 @@ class Assistant:
                 title = f"Brief: {row['subject']}" if row else title
             conversation_id = self.store.create_conversation(title=title, topic=topic)
             conversation = self.store.get_conversation(conversation_id)
-
         history = trim_history(conversation["llm_messages"]) + [{"role": "user", "content": text}]
-        token = current_conversation.set(conversation_id)
-        try:
-            extra = self.memory.prompt_section() if self.memory else ""
-            extra = "\n\n".join(filter(None, [extra, self._topic_section(conversation.get("topic"))]))
-            result = run_turn(self.llm, self.registry, history, system_prompt(datetime.now(local_zone()), extra))
-        finally:
-            current_conversation.reset(token)
+        extra = self.memory.prompt_section() if self.memory else ""
+        extra = "\n\n".join(filter(None, [extra, self._topic_section(conversation.get("topic"))]))
+        return text, conversation, history, system_prompt(datetime.now(local_zone()), extra)
 
+    def _finish(self, text: str, conversation: dict[str, Any], result: Any) -> dict[str, Any]:
         reply, fixes = verify_addresses(result.text, known_addresses(*_ground_truth(result.messages)))
+        reply = no_long_dashes(reply)
         if fixes:
-            print(f"factcheck corrected reply in {conversation_id}: {fixes}")
-
+            print(f"factcheck corrected reply in {conversation['id']}: {fixes}")
         cards = build_cards(result.trace)
         display = conversation["display"] + [
             {"role": "user", "text": text},
             {"role": "assistant", "text": reply, "cards": cards},
         ]
-        self.store.save_conversation(conversation_id, result.messages, display)
-        return {"conversation_id": conversation_id, "text": reply, "cards": cards}
+        self.store.save_conversation(conversation["id"], result.messages, display)
+        return {"conversation_id": conversation["id"], "text": reply, "cards": cards}
+
+    def chat(self, text: str, conversation_id: str | None = None, topic: dict | None = None) -> dict[str, Any]:
+        text, conversation, history, system = self._begin(text, conversation_id, topic)
+        token = current_conversation.set(conversation["id"])
+        try:
+            result = run_turn(self.llm, self.registry, history, system)
+        finally:
+            current_conversation.reset(token)
+        return self._finish(text, conversation, result)
+
+    def chat_stream(self, text: str, conversation_id: str | None = None, topic: dict | None = None):
+        """Events for the app while the turn runs; the last is {"type": "done", ...}.
+
+        The streamed text is a preview: the final text in "done" is the
+        fact-checked version and replaces it."""
+        text, conversation, history, system = self._begin(text, conversation_id, topic)
+        yield {"type": "start", "conversation_id": conversation["id"]}
+
+        def run_tools(calls):
+            # Set the conversation around the tools themselves: a streaming response
+            # may resume the generator on a different thread between events.
+            token = current_conversation.set(conversation["id"])
+            try:
+                return _run_tools(self.registry, calls)
+            finally:
+                current_conversation.reset(token)
+
+        result = None
+        for event in run_turn_stream(self.llm, self.registry, history, system, run_tools=run_tools):
+            if event["type"] == "result":
+                result = event["result"]
+            else:
+                yield event
+        yield {"type": "done", **self._finish(text, conversation, result)}
 
     def _topic_section(self, topic: dict | None) -> str:
         """A conversation opened from a brief starts with that brief in view."""

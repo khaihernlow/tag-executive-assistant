@@ -537,10 +537,12 @@ function addNote(text) {
   thread.append(el("div", { class: "note", text }));
 }
 
-function addBrief(text, cards = []) {
+function addBrief(text, cards = [], did = []) {
   const textNode = el("div", { class: "brief__text" });
   textNode.innerHTML = renderMarkdown(text); // escaped inside renderMarkdown
-  thread.append(el("div", { class: "brief" }, text ? textNode : null, ...cards.map(renderCard)));
+  // What it did to get here, collapsed to one quiet line.
+  const trail = did.length ? el("p", { class: "steps-done", text: `\u2713 ${did.join(" \u00b7 ")}` }) : null;
+  thread.append(el("div", { class: "brief" }, trail, text ? textNode : null, ...cards.map(renderCard)));
 }
 
 async function openConversation(id) {
@@ -655,6 +657,37 @@ $("#recent-close").addEventListener("click", closeRecent);
 $("#recent").addEventListener("click", (e) => { if (e.target.id === "recent") closeRecent(); });
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeRecent(); });
 
+// Read a streamed response: one JSON event per line.
+async function* streamEvents(path, payload) {
+  const res = await fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "same-origin",
+    body: JSON.stringify(payload),
+  });
+  if (res.status === 401) { location.href = "/auth/login"; throw new Error("Signed out"); }
+  if (!res.ok || !res.body) {
+    let detail = res.statusText;
+    try { detail = (await res.json()).detail || detail; } catch { /* not json */ }
+    throw new Error(detail);
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let newline;
+    while ((newline = buffer.indexOf("\n")) >= 0) {
+      const line = buffer.slice(0, newline).trim();
+      buffer = buffer.slice(newline + 1);
+      if (line) yield JSON.parse(line);
+    }
+  }
+  if (buffer.trim()) yield JSON.parse(buffer.trim());
+}
+
 async function send(text) {
   text = (text || "").trim();
   if (!text || busy) return;
@@ -663,27 +696,68 @@ async function send(text) {
   showTab("chat");
   addNote(text);
   updateEmptyState();
-  const thinking = el("p", { class: "thinking", text: "Working on it" });
-  thread.append(thinking);
+
+  // Live area: what the assistant is doing, then its answer as it's written.
+  const steps = el("ul", { class: "steps" });
+  const draft = el("div", { class: "brief__text brief__text--draft" });
+  const live = el("div", { class: "brief" }, steps, draft);
+  const waiting = el("li", { class: "step step--active", text: "Thinking" });
+  steps.append(waiting);
+  thread.append(live);
   scrollToEnd();
-  try {
-    const reply = await api("/api/chat", {
-      method: "POST",
-      body: JSON.stringify({
-        message: text,
-        conversation_id: conversationId,
-        brief_event_id: !conversationId && pendingTopic ? pendingTopic.eventId : null,
-      }),
+
+  const labels = [];
+  let draftText = "";
+  let painting = false;
+  const paint = () => {
+    if (painting) return;
+    painting = true;
+    requestAnimationFrame(() => {
+      draft.innerHTML = renderMarkdown(draftText); // escaped inside renderMarkdown
+      painting = false;
+      scrollToEnd();
     });
-    pendingTopic = null;
-    conversationId = reply.conversation_id;
-    writeStored(conversationId);
+  };
+
+  try {
+    let finished = null;
+    for await (const event of streamEvents("/api/chat/stream", {
+      message: text,
+      conversation_id: conversationId,
+      brief_event_id: !conversationId && pendingTopic ? pendingTopic.eventId : null,
+    })) {
+      if (event.type === "start") {
+        conversationId = event.conversation_id;
+        writeStored(conversationId);
+        pendingTopic = null;
+      } else if (event.type === "step") {
+        waiting.remove();
+        steps.querySelectorAll(".step--active").forEach((s) => s.classList.replace("step--active", "step--done"));
+        steps.append(el("li", { class: "step step--active", text: event.label }));
+        labels.push(event.label.split(":")[0]);
+        scrollToEnd();
+      } else if (event.type === "text") {
+        waiting.remove();
+        steps.querySelectorAll(".step--active").forEach((s) => s.classList.replace("step--active", "step--done"));
+        draftText += event.delta;
+        paint();
+      } else if (event.type === "discard_text") {
+        draftText = "";
+        paint();
+      } else if (event.type === "done") {
+        finished = event;
+      } else if (event.type === "error") {
+        throw new Error(event.message);
+      }
+    }
+    if (!finished) throw new Error("The connection closed before the answer finished.");
     writeStored(String(Date.now()), ACTIVE_KEY);
-    thinking.remove();
-    addBrief(reply.text, reply.cards);
-    if (reply.cards.some((c) => c.type === "action")) loadToday();
+    live.remove();
+    // The final text is the fact-checked version; the streamed draft was a preview.
+    addBrief(finished.text, finished.cards, [...new Set(labels)]);
+    if (finished.cards.some((c) => c.type === "action")) loadToday();
   } catch (err) {
-    thinking.remove();
+    live.remove();
     const retry = el("button", { class: "btn", type: "button", text: "Try again", onclick: () => { errorNode.remove(); thread.lastChild?.remove(); busy = false; send(text); } });
     const errorNode = el("div", { class: "error" }, `Something went wrong: ${err.message}`, retry);
     thread.append(errorNode);

@@ -44,3 +44,14 @@ def verify_addresses(reply: str, known: set[str]) -> tuple[str, list[str]]:
         return f"{address} (unverified)"
 
     return EMAIL.sub(check, reply), changes
+
+
+_LONG_DASH = re.compile(r"[ \t]*[\u2014\u2013][ \t]*")
+_DASH_RANGE = re.compile(r"(\d)[ \t]*[\u2013\u2014][ \t]*(\d)")
+
+
+def no_long_dashes(text: str) -> str:
+    """Em/en dashes become commas (ranges like 3:00–3:30 become 3:00-3:30).
+    Only long dashes: markdown bullets and hyphenated words are left alone."""
+    text = _DASH_RANGE.sub(r"\1-\2", text)
+    return _LONG_DASH.sub(", ", text)
