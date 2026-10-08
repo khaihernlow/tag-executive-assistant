@@ -40,6 +40,9 @@ def test_query_paginates_and_respects_max_records():
     assert [i["id"] for i in at.query("Companies", [], max_records=2)] == [1, 2]
     assert session.requests[0][:2] == ("POST", f"{ZONE}/Companies/query")
     assert session.requests[0][2]["MaxRecords"] == 2
+    # Later pages are POSTed with the same search: Autotask answers GET with 405.
+    assert session.requests[1][:2] == ("POST", f"{ZONE}/Companies/query/next?x=1")
+    assert session.requests[1][2] == session.requests[0][2]
 
 
 def test_create_and_update_return_item_id():

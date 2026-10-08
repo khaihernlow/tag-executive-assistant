@@ -126,7 +126,8 @@ class AutotaskClient:
             next_url = (payload.get("pageDetails") or {}).get("nextPageUrl")
             if not next_url or (max_records and len(items) >= max_records):
                 break
-            payload = self._request_json("GET", urljoin(url, next_url))
+            # The next page of a query is POSTed with the same search (GET answers 405).
+            payload = self._request_json("POST", urljoin(url, next_url), json=search)
         return items[:max_records] if max_records else items
 
     def get(self, entity: str, record_id: int) -> dict | None:
