@@ -424,6 +424,12 @@ function renderRequests(requests) {
 // "Thursday, Oct 22 at 11:00 AM ET" -> "Thu, Oct 22 · 11:00 AM"
 const shortSlot = (label) => label.replace(" ET", "").replace(/^(\w{3})\w*/, "$1").replace(" at ", " \u00b7 ");
 const firstName = (name) => (name || "").split(" ")[0];
+// "Thursday" within the last week, otherwise "Oct 2".
+const relDay = (iso) => {
+  const d = new Date(iso);
+  return Date.now() - d < 6 * 864e5 ? d.toLocaleDateString(undefined, { weekday: "long" })
+    : d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+};
 
 function requestCard(r) {
   const card = el("div", { class: "card request" });
@@ -493,9 +499,9 @@ function requestCard(r) {
     if (r.handler) {
       if (r.held) {
         ask.append(el("span", { class: "stamp stamp--done", text: "\u2713 Held on your calendar" }));
-      } else if (busy) {
+      } else if (busy && !r.stalled) {
         ask.append(el("p", { class: "card__note", text: `Worth telling ${firstName(r.handler)} before the time is confirmed.` }));
-      } else {
+      } else if (!busy) {
         const hold = el("button", { class: "btn", type: "button", text: "Hold it on my calendar",
           onclick: () => run("Preparing the hold\u2026", `/api/requests/${encodeURIComponent(r.id)}/hold`) });
         buttons.push(hold);
@@ -506,6 +512,21 @@ function requestCard(r) {
         onclick: () => run("Checking your calendar\u2026", `/api/requests/${encodeURIComponent(r.id)}/book`, { start: r.proposed.start }) });
       buttons.push(book);
       ask.append(book);
+    }
+  }
+
+  // The colleague hasn't answered after a working day: the one point Dave steps in.
+  if (r.handler && r.stalled) {
+    const who = firstName(r.handler);
+    if (r.nudged) {
+      body.append(el("p", { class: "request__stall", text: `You nudged ${who} ${r.nudged}. I'll clear this once they reply.` }));
+    } else {
+      const nudge = el("button", { class: "btn btn--sign", type: "button", text: `Nudge ${who}`,
+        onclick: () => run("Drafting a note\u2026", `/api/requests/${encodeURIComponent(r.id)}/nudge`) });
+      buttons.push(nudge);
+      body.append(el("div", { class: "request__stall" },
+        el("p", {}, el("strong", { text: `${who} hasn\u2019t replied yet.` }), ` ${firstName(r.from)} asked ${relDay(r.received)}.`),
+        nudge, el("p", { class: "card__note", text: `A short email to ${who}. You\u2019ll see it before it goes.` })));
     }
   }
 
@@ -557,7 +578,7 @@ function renderSignoff(pending) {
 
 const KIND_LABELS = {
   create_event: "Calendar invite", book_meeting: "Calendar invite", create_rule: "Outlook rule",
-  move_to_junk: "Inbox clean-up", reply_email: "Email reply", hold_time: "Calendar hold",
+  move_to_junk: "Inbox clean-up", reply_email: "Email reply", hold_time: "Calendar hold", nudge_colleague: "Email to colleague",
 };
 
 function slip(action) {

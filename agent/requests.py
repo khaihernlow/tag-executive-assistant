@@ -43,6 +43,8 @@ from llm.provider import ToolSpec
 REPLY_KIND = "reply_email"
 BOOK_KIND = "book_meeting"
 HOLD_KIND = "hold_time"
+NUDGE_KIND = "nudge_colleague"
+EXPIRE_DAYS = 14  # an open-ended request nobody acted on
 SCAN_DAYS = 3
 MEETING_WORDS = re.compile(
     r"\b(meet|meeting|call|chat|catch up|catch-up|connect|sync|availability|available|free (?:time|for)|"
@@ -288,6 +290,7 @@ def scan(graph: Any, llm: Any, store: Any, now: datetime | None = None, actions:
         store.save_request(m["id"], thread, m["receivedDateTime"], "new", request)
         added += 1
     retire_handled(graph, store)
+    expire_stale(store, now)
     if actions is not None:
         follow_up(graph, llm, store, actions)
     return added
@@ -326,6 +329,76 @@ def retire_handled(graph: Any, store: Any) -> None:
         if requester and any(requester in {((a.get("emailAddress") or {}).get("address") or "").lower()
                                            for a in e.get("attendees") or []} for e in upcoming):
             store.update_request(row["message_id"], status="handled")
+
+
+def expire_stale(store: Any, now: datetime | None = None) -> None:
+    """Requests nobody acted on drop off Today once they can't matter any more: the
+    time they asked for (or every time Dave offered) has passed, or an open-ended ask
+    is over two weeks old. Kept as 'expired', not deleted."""
+    now = now or datetime.now(local_zone())
+    for row in store.requests_in(("new", "waiting")):
+        request = row["request"] or {}
+        offered = [datetime.fromisoformat(x) for x in request.get("offered") or []]
+        proposed = _parse_time(request.get("proposed_start")) if request.get("kind") == "proposes_time" else None
+        if row["status"] == "waiting" and offered:
+            gone = max(offered) < now
+        elif proposed:
+            gone = proposed < now
+        else:
+            received = datetime.fromisoformat(row["received_at"].replace("Z", "+00:00"))
+            gone = received + timedelta(days=EXPIRE_DAYS) < now
+        if gone:
+            store.update_request(row["message_id"], status="expired")
+
+
+def stalled(row: dict[str, Any], now: datetime | None = None) -> bool:
+    """A colleague was asked and a full working day has gone by without their reply
+    reaching Dave's mailbox (a reply would have retired the request)."""
+    request = row["request"] or {}
+    if row["status"] != "new" or not request.get("handler"):
+        return False
+    tz = local_zone()
+    received = datetime.fromisoformat(row["received_at"].replace("Z", "+00:00")).astimezone(tz)
+    due = datetime.combine(next_working_day(received.date()), received.time(), tz)
+    return (now or datetime.now(tz)) >= due
+
+
+def _when(moment: datetime, now: datetime) -> str:
+    """'Thursday' within the last week, otherwise 'Oct 2'."""
+    return moment.strftime("%A") if (now - moment).days < 6 else moment.strftime("%b %d").replace(" 0", " ")
+
+
+def propose_nudge(graph: Any, store: Any, actions: Actions, message_id: str, memory: Any = None,
+                  now: datetime | None = None) -> dict[str, Any]:
+    """A short internal email from Dave asking the colleague handling it to get back to them."""
+    row = store.get_request(message_id)
+    if row is None or row["status"] != "new" or not (row["request"] or {}).get("handler"):
+        raise ValueError("This request is no longer open.")
+    request = row["request"]
+    tz = local_zone()
+    now = now or datetime.now(tz)
+    handler = request["handler"]
+    asked = datetime.fromisoformat(row["received_at"].replace("Z", "+00:00")).astimezone(tz)
+    what = request.get("purpose") or "a meeting"
+    start = _parse_time(request.get("proposed_start")) if request.get("kind") == "proposes_time" else None
+    ask = f"asked to schedule the {what[0].lower() + what[1:]}" + (f" for {slot_label(start).replace(' ET', '')}" if start else "")
+    lines = [f"Hi {handler['name'].split(' ')[0]},", "",
+             f"{request['from_name']} {ask} (their email {_when(asked, now)}). Have you had a chance to get back to them?"]
+    if start:
+        try:
+            check = check_time(graph, start, meeting_minutes(request, memory))
+            if check["clashes"]:
+                lines.append(f"Heads up, I'm busy then: {'; '.join(check['clashes'])}.")
+        except Exception:  # noqa: BLE001 - the nudge still makes sense without it
+            pass
+    lines += ["", "Dave"]
+    comment = "\n".join(lines)
+    action = actions.propose(NUDGE_KIND, f"Ask {handler['name'].split(' ')[0]} to get back to {request['from_name']}", {
+        "message_id": message_id, "to": handler["email"], "subject": f"{request['from_name']}: {request.get('subject') or what}",
+        "comment": comment,
+    })
+    store.update_request(message_id, action_id=action["id"])
+    return public_action(action)
 
 
 # ── following up after Dave sent times ───────────────────────────────────────
@@ -552,6 +625,17 @@ def request_kinds(graph: Any, store: Any) -> list[ActionKind]:
         request = {**(row["request"] or {}), "booked_start": payload.get("start")}
         store.update_request(payload["message_id"], status="booked", request=request)
 
+    def send_nudge(payload: dict[str, Any], action_id: str) -> dict[str, Any]:
+        graph.post(f"/users/{graph.mailbox}/sendMail", {"message": {
+            "subject": payload["subject"], "body": {"contentType": "Text", "content": payload["comment"]},
+            "toRecipients": [{"emailAddress": {"address": payload["to"]}}]}, "saveToSentItems": True})
+        return {"sent": True}
+
+    def nudged(payload: dict[str, Any], result: dict[str, Any]) -> None:
+        row = store.get_request(payload["message_id"])
+        store.update_request(payload["message_id"], request={
+            **(row["request"] or {}), "nudged_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")})
+
     def held(payload: dict[str, Any], result: dict[str, Any]) -> None:
         row = store.get_request(payload["message_id"])
         store.update_request(payload["message_id"], request={**(row["request"] or {}), "held": True})
@@ -561,6 +645,7 @@ def request_kinds(graph: Any, store: Any) -> list[ActionKind]:
         ActionKind(REPLY_KIND, send_reply, editable=("comment",), on_done=sent),
         ActionKind(BOOK_KIND, book.execute, on_done=booked),
         ActionKind(HOLD_KIND, book.execute, on_done=held),
+        ActionKind(NUDGE_KIND, send_nudge, editable=("comment",), on_done=nudged),
     ]
 
 
@@ -630,7 +715,8 @@ def propose_hold(graph: Any, store: Any, actions: Actions, message_id: str, memo
     return public_action(action)
 
 
-def open_requests_view(graph: Any, store: Any, actions_store: Any, memory: Any = None) -> list[dict[str, Any]]:
+def open_requests_view(graph: Any, store: Any, actions_store: Any, memory: Any = None,
+                       now: datetime | None = None) -> list[dict[str, Any]]:
     """What the Today screen shows for each open request, with fresh suggested times."""
     out = []
     recent = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat(timespec="seconds")
@@ -669,6 +755,9 @@ def open_requests_view(graph: Any, store: Any, actions_store: Any, memory: Any =
             "relationship": request.get("relationship"),
             "handler": (request.get("handler") or {}).get("name"),
             "held": bool(request.get("held")),
+            "stalled": stalled(row, now),
+            "nudged": _when(datetime.fromisoformat(request["nudged_at"].replace("Z", "+00:00")).astimezone(local_zone()),
+                            now or datetime.now(local_zone())) if request.get("nudged_at") else None,
             "team": [t["name"] for t in request.get("team") or []],
             "minutes": meeting_minutes(request, memory),
             "kind": request.get("kind"),

@@ -5,7 +5,8 @@ import pytest
 
 from agent.actions import Actions
 from agent.requests import (
-    addressing, candidates, check_time, draft_reply, open_requests_view, propose_booking, propose_hold, propose_reply,
+    addressing, candidates, check_time, draft_reply, open_requests_view, propose_booking, propose_hold, propose_nudge,
+    propose_reply,
     request_kinds, scan, suggest_slots,
 )
 from llm.provider import LLMResponse
@@ -373,3 +374,57 @@ def test_no_answer_yet_changes_nothing():
     llm = FakeLLM("record_answer", {})
     follow_up(graph, llm, store, actions)
     assert store.get_request("req")["status"] == "waiting" and llm.calls == []
+
+
+# ── going stale ──────────────────────────────────────────────────────────────
+
+def test_requests_expire_once_they_cannot_matter():
+    from agent.requests import expire_stale
+
+    store = Store(":memory:")
+    store.save_request("past", "t1", "2026-10-01T14:00:00Z", "new", {"kind": "proposes_time", "proposed_start": "2026-10-07T11:00"})
+    store.save_request("soon", "t2", "2026-10-01T14:00:00Z", "new", {"kind": "proposes_time", "proposed_start": "2026-10-22T11:00"})
+    store.save_request("old", "t3", "2026-09-20T14:00:00Z", "new", {"kind": "asks_for_times"})
+    store.save_request("recent", "t4", "2026-10-05T14:00:00Z", "new", {"kind": "asks_for_times"})
+    store.save_request("offered", "t5", "2026-10-01T14:00:00Z", "waiting", {"offered": ["2026-10-06T10:00:00-04:00"]})
+    expire_stale(store, now=datetime(2026, 10, 8, 16, 0, tzinfo=NY))
+    status = {k: store.get_request(k)["status"] for k in ("past", "soon", "old", "recent", "offered")}
+    assert status == {"past": "expired", "soon": "new", "old": "expired", "recent": "new", "offered": "expired"}
+
+
+def colleague_request(store, received="2026-10-08T18:00:00Z"):  # Thursday 2pm
+    store.save_request("req", "t1", received, "new", {
+        "from_name": "Casey Morgan", "from_email": "cfo@bank.example", "kind": "proposes_time", "purpose": "Onsite meeting",
+        "subject": "RE: follow-up", "proposed_start": "2026-10-22T11:00",
+        "handler": {"email": "rj@tag.example", "name": "Riley Jones"}})
+
+
+@pytest.mark.parametrize("now, expected", [
+    (datetime(2026, 10, 9, 13, 0, tzinfo=NY), False),   # Friday before 2pm: give Riley the day
+    (datetime(2026, 10, 9, 14, 30, tzinfo=NY), True),   # a full working day later
+])
+def test_a_colleague_request_stalls_after_a_working_day(now, expected):
+    store = Store(":memory:")
+    colleague_request(store)
+    [view] = open_requests_view(FakeGraph(), store, store, now=now)
+    assert view["stalled"] is expected and view["nudged"] is None
+
+
+def test_nudge_is_a_short_internal_email_and_is_remembered():
+    store = Store(":memory:")
+    colleague_request(store)
+    graph = FakeGraph(calendar=[{"subject": "Project review", "showAs": "busy",
+                                 "start": {"dateTime": "2026-10-22T14:30:00", "timeZone": "UTC"},
+                                 "end": {"dateTime": "2026-10-22T15:30:00", "timeZone": "UTC"}}])
+    actions = Actions(store, request_kinds(graph, store), auto=set())
+    now = datetime(2026, 10, 9, 15, 0, tzinfo=NY)
+    slip = propose_nudge(graph, store, actions, "req", now=now)
+    text = slip["email"]["comment"]
+    assert slip["email"]["to"] == "rj@tag.example" and text.startswith("Hi Riley,")
+    assert "Casey Morgan asked to schedule the onsite meeting for Thursday, Oct 22 at 11:00 AM (their email Thursday)" in text
+    assert "I'm busy then: Project review, 10:30 AM to 11:30 AM" in text
+    actions.approve(slip["action_id"], decided_by="test")
+    path, body = [p for p in graph.posts if p[0].endswith("/sendMail")][0]
+    assert body["message"]["toRecipients"] == [{"emailAddress": {"address": "rj@tag.example"}}]
+    [view] = open_requests_view(graph, store, store, now=now)
+    assert view["nudged"]  # remembered, so the card says when instead of offering it again

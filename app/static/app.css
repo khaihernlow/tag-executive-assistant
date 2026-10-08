@@ -731,3 +731,8 @@ button.cite:active { background: var(--rule-strong); }
 .offers li + li .offer { border-top: 1px solid var(--rule-soft); }
 .offer input { width: 18px; height: 18px; margin: 0; accent-color: var(--navy); flex: none; }
 .request__context::first-letter { text-transform: uppercase; }
+.request__stall { margin: 0 0 var(--s4); font-size: 14px; color: var(--ink-soft); }
+.request__stall p { margin: 0; }
+.request__stall strong { color: var(--ink); font-weight: 600; }
+.request__stall .btn { margin-top: var(--s2); width: 100%; }
+p.request__stall { padding: var(--s2) var(--s3); background: var(--sage-wash); border-radius: var(--r-sm); }
