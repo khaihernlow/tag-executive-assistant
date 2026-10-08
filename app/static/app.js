@@ -948,8 +948,6 @@ $("#composer").addEventListener("submit", (e) => {
   autosize();
   send(text);
 });
-document.querySelectorAll("#quick .chip").forEach((chip) =>
-  chip.addEventListener("click", () => send(chip.dataset.say)));
 
 $("#new-chat").addEventListener("click", () => {
   conversationId = null;
