@@ -36,7 +36,7 @@ class Services:
 def build_services() -> Services:
     graph = GraphClient.from_env()
     store = Store()
-    actions = Actions(store, [create_event_kind(graph), junk_kind(graph), *request_kinds(graph, store)])
+    actions = Actions(store, [create_event_kind(graph), junk_kind(graph, store), *request_kinds(graph, store)])
     memory = Memory(store)
     llm = HatzAIProvider()
     # Quick, high-volume judgments (junk triage) use a faster, cheaper model.
@@ -47,7 +47,7 @@ def build_services() -> Services:
         + mail_tools(graph)
         + scheduling_tools(graph, memory)
         + memory_tools(memory)
-        + junk_tools(graph, fast_llm, actions)
+        + junk_tools(graph, fast_llm, actions, store)
         + [create_event_tool(graph, actions)]
     )
     assistant = Assistant(llm, registry, store, actions, memory)

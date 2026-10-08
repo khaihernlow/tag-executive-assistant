@@ -140,6 +140,7 @@ async function loadToday() {
     renderItinerary(day.events, isToday ? "today" : day.agenda_title.toLowerCase());
     renderSignoff(day.pending.filter((a) => !["reply_email", "book_meeting"].includes(a.kind)));
     renderRequests(day.requests || []);
+    renderJunk(day.junk_moved || []);
     // While the worker is preparing briefs, check back so the "Brief" buttons appear.
     clearTimeout(loadToday.timer);
     if (day.events.some((e) => e.brief === "preparing")) loadToday.timer = setTimeout(loadToday, 5000);
@@ -361,6 +362,36 @@ $("#bs-ask").addEventListener("click", () => {
 });
 document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("#briefsheet").hidden) closeBrief(); });
 
+// ── inbox clean-up ─────────────────────────────────────────────────────────────
+
+function renderJunk(moved) {
+  const live = moved.filter((m) => !m.undone);
+  $("#junk-block").hidden = !moved.length;
+  if (!moved.length) return;
+  const rows = moved.map((m) => {
+    const sub = el("span", { class: "row__sub", text: [m.from, m.reason].filter(Boolean).join(" \u00b7 ") });
+    const action = m.undone
+      ? el("span", { class: "junk__undone", text: "Put back" })
+      : el("button", { class: "link-btn", type: "button", text: "Undo", onclick: async (ev) => {
+          const btn = ev.currentTarget;
+          btn.disabled = true;
+          try {
+            await api(`/api/junk/${encodeURIComponent(m.action_id)}/undo/${encodeURIComponent(m.id)}`, { method: "POST" });
+            btn.replaceWith(el("span", { class: "junk__undone", text: "Put back" }));
+          } catch (err) {
+            btn.disabled = false;
+            sub.textContent = `Couldn't undo: ${err.message}`;
+          }
+        } });
+    return el("li", { class: "row junk__row" },
+      el("span", { class: "junk__text" }, el("span", { class: "row__title", text: m.subject }), sub), action);
+  });
+  const list = el("ul", { class: "rows" }, rows);
+  const summary = el("summary", { text: `Moved ${live.length} to Junk in the last day` });
+  $("#junk").replaceChildren(el("details", { class: "card junk" }, summary, list,
+    el("p", { class: "card__note", text: "Undo puts it back and I'll leave that sender alone from now on." })));
+}
+
 // ── meeting requests ───────────────────────────────────────────────────────────
 
 function renderRequests(requests) {
@@ -490,10 +521,19 @@ function fillSlip(node, action) {
     emailBox.readOnly = action.status !== "pending";
     parts.push(emailBox);
   }
+  const keepIds = new Set();
   if (action.items && action.items.length) {
-    parts.push(el("ul", { class: "slip__items" }, action.items.map((i) => el("li", {},
-      el("span", { class: "slip__item-title", text: i.subject }),
-      el("span", { class: "slip__item-sub", text: [i.from, i.reason].filter(Boolean).join(" \u00b7 ") })))));
+    const pickable = action.kind === "move_to_junk" && action.status === "pending";
+    parts.push(el("ul", { class: "slip__items" }, action.items.map((i) => {
+      const text = [el("span", { class: "slip__item-title", text: i.subject }),
+                    el("span", { class: "slip__item-sub", text: [i.from, i.reason].filter(Boolean).join(" \u00b7 ") })];
+      if (!pickable) return el("li", {}, ...text);
+      const box = el("input", { type: "checkbox", "aria-label": `Move \u201c${i.subject}\u201d to Junk` });
+      box.checked = true;
+      box.addEventListener("change", () => { box.checked ? keepIds.delete(i.id) : keepIds.add(i.id); });
+      return el("li", {}, el("label", { class: "slip__pick" }, box, el("span", {}, ...text)));
+    })));
+    if (pickable) parts.push(el("p", { class: "card__note", text: "Untick anything you want to keep." }));
   }
   node.className = "slip";
 
@@ -505,7 +545,9 @@ function fillSlip(node, action) {
       approve.disabled = decline.disabled = true;
       approve.textContent = verb === "approve" ? "Working…" : approve.textContent;
       try {
-        const edits = verb === "approve" && emailBox ? { comment: emailBox.value } : null;
+        const edits = verb !== "approve" ? null
+          : emailBox ? { comment: emailBox.value }
+          : keepIds.size ? { keep_ids: [...keepIds].join(",") } : null;
         const updated = await api(`/api/actions/${action.action_id}/${verb}`, {
           method: "POST", body: JSON.stringify(edits ? { edits } : {}),
         });

@@ -5,6 +5,9 @@ jobs only touch the store and Graph, so it can move to its own container
 later without changes.
 
 Jobs (each cycle):
+  junk     inbox mail since the last check: known junk and clear junk moved to
+           Junk at once (Undo on Today), less certain junk added to one rolling
+           slip. Learns from Dave's Junk folder and filed mail once a day.
   requests one inbox read; new mail that looks like "can we meet?" is classified
            by the fast model and shown on Today with suggested times.
   briefs   every BRIEF_INTERVAL (3 min): one calendar read; prepare briefs for
@@ -24,6 +27,7 @@ from typing import Any
 from agent.briefs import needs_brief, prepare_brief, upcoming_meetings
 from agent.calendar import Event
 from agent.people import internal_domain
+from agent.junk import history_is_stale, learn_history, sweep_new
 from agent.requests import scan as scan_requests
 
 log = logging.getLogger("assistant.worker")
@@ -65,6 +69,15 @@ class Worker:
                 self.queue_briefs()
             except Exception:  # noqa: BLE001 - a bad cycle must not kill the worker
                 log.exception("brief cycle failed")
+            if self.fast_llm is not None and self.actions is not None:
+                try:
+                    if history_is_stale(self.store):
+                        log.info("learned junk history: %s", learn_history(self.graph, self.store))
+                    outcome = sweep_new(self.graph, self.fast_llm, self.store, self.actions)
+                    if outcome["moved"] or outcome["asked"]:
+                        log.info("junk sweep: moved %s, asked about %s", outcome["moved"], outcome["asked"])
+                except Exception:  # noqa: BLE001
+                    log.exception("junk sweep failed")
             if self.fast_llm is not None:
                 try:
                     added = scan_requests(self.graph, self.fast_llm, self.store, actions=self.actions)

@@ -360,6 +360,15 @@ button { font: inherit; color: inherit; }
 .choice__sub { font-size: 12px; color: var(--ink-faint); }
 .tag { font-size: 11px; font-weight: 600; padding: 2px 6px; border-radius: 4px; background: var(--brass-wash); color: var(--brass); }
 
+.junk summary { cursor: pointer; font-weight: 600; font-size: 15px; }
+.junk .rows { margin-top: var(--s3); }
+.row.junk__row { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--s3); }
+.junk__text { min-width: 0; flex: 1; }
+.junk__undone { font-size: 13px; color: var(--sage); white-space: nowrap; }
+.slip__pick { display: flex; gap: var(--s2); align-items: flex-start; cursor: pointer; }
+.slip__pick input { margin-top: 3px; width: 18px; height: 18px; accent-color: var(--navy); flex: none; }
+.slip__pick span { min-width: 0; }
+
 .memory-note { margin: 0; font-size: 13px; color: var(--sage); }
 
 .quick { display: flex; gap: var(--s2); flex-wrap: wrap; padding-top: var(--s5); }

@@ -17,6 +17,7 @@ load_dotenv(override=True)
 
 from agent.actions import public_action
 from agent.briefs import needs_brief
+from agent.junk import moved_today, undo as undo_junk
 from agent.requests import open_requests_view, propose_booking, propose_reply
 from agent.calendar import agenda_day, local_zone, meeting_place, parse_event
 from agent.people import internal_domain
@@ -186,6 +187,7 @@ def today(user: dict = Depends(require_auth), svc=Depends(services)):
         "events": events,
         "pending": pending,
         "requests": requests_view,
+        "junk_moved": moved_today(svc.store) if hasattr(svc.store, "actions_since") else [],
     }
 
 
@@ -305,6 +307,15 @@ def request_dismiss(message_id: str, user: dict = Depends(require_auth), svc=Dep
         raise HTTPException(status_code=404, detail="Not found")
     svc.store.update_request(message_id, status="dismissed")
     return {"dismissed": message_id}
+
+
+@app.post("/api/junk/{action_id}/undo/{message_id:path}")
+def junk_undo(action_id: str, message_id: str, user: dict = Depends(require_auth), svc=Depends(services)):
+    """Put one email back where it was, and keep that sender from now on."""
+    try:
+        return undo_junk(svc.graph, svc.store, action_id, message_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @app.get("/api/memory")

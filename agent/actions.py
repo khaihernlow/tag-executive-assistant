@@ -26,6 +26,7 @@ class ActionKind:
     execute: Callable[[dict[str, Any], str], dict[str, Any]]  # (payload, action_id) -> result
     editable: tuple[str, ...] = ()  # payload fields Dave may change on the slip (e.g. an email's text)
     on_done: Callable[[dict[str, Any], dict[str, Any]], None] | None = None  # (payload, result) after success
+    on_rejected: Callable[[dict[str, Any]], None] | None = None  # (payload) when Dave declines
 
 
 def auto_kinds() -> set[str]:
@@ -75,10 +76,16 @@ class Actions:
         return self.store.get_action(aid)
 
     def reject(self, aid: str, decided_by: str) -> dict[str, Any]:
-        self.store.transition_action(aid, "pending", "rejected", decided_at=now_iso(), decided_by=decided_by)
+        changed = self.store.transition_action(aid, "pending", "rejected", decided_at=now_iso(), decided_by=decided_by)
         action = self.store.get_action(aid)
         if action is None:
             raise KeyError(aid)
+        kind = self.kinds.get(action["kind"])
+        if changed and kind and kind.on_rejected:
+            try:
+                kind.on_rejected(action["payload"])
+            except Exception:  # noqa: BLE001 - bookkeeping must not break declining
+                pass
         return action
 
 
@@ -99,5 +106,5 @@ def public_action(action: dict[str, Any]) -> dict[str, Any]:
     items = payload.get("items")
     if items:
         # Batch actions (e.g. moving several emails): show each one on the slip.
-        out["items"] = [{k: i.get(k) for k in ("from", "subject", "reason")} for i in items]
+        out["items"] = [{k: i.get(k) for k in ("id", "from", "subject", "reason")} for i in items]
     return out

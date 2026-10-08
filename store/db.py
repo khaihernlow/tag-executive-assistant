@@ -63,6 +63,20 @@ CREATE TABLE IF NOT EXISTS meeting_requests (
 );
 CREATE INDEX IF NOT EXISTS idx_requests_status ON meeting_requests(status, received_at);
 
+CREATE TABLE IF NOT EXISTS senders (
+    address     TEXT PRIMARY KEY,
+    domain      TEXT NOT NULL,
+    verdict     TEXT NOT NULL,          -- junk | keep
+    source      TEXT NOT NULL,          -- junk_folder | filed | dave | undo
+    updated_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_senders_domain ON senders(domain, verdict);
+
+CREATE TABLE IF NOT EXISTS state (
+    key         TEXT PRIMARY KEY,       -- small bits of worker state, e.g. the junk sweep checkpoint
+    value       TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS memory (
     key        TEXT PRIMARY KEY,   -- e.g. "alias:kai", "pref:day_start", "note:<id>"
     kind       TEXT NOT NULL,      -- alias | pref | note
@@ -286,3 +300,65 @@ class Store:
             params += (since,)
         rows = self._execute(sql + " ORDER BY received_at DESC", params).fetchall()
         return [self._row(r) for r in rows]
+
+    # ── sender reputation (junk learning) ────────────────────────────────────
+
+    # Dave's own decisions outrank what was learned from folders.
+    _SOURCE_RANK = {"auto": 0, "junk_folder": 0, "filed": 1, "dave": 2, "undo": 2}
+
+    def set_sender(self, address: str, verdict: str, source: str) -> None:
+        address = address.strip().lower()
+        if "@" not in address:
+            return
+        with self._lock:
+            row = self._conn.execute("SELECT source FROM senders WHERE address = ?", (address,)).fetchone()
+            if row and self._SOURCE_RANK.get(row["source"], 0) > self._SOURCE_RANK.get(source, 0):
+                return  # a learned guess never overrides what Dave decided
+            self._conn.execute(
+                "INSERT INTO senders (address, domain, verdict, source, updated_at) VALUES (?, ?, ?, ?, ?) "
+                "ON CONFLICT(address) DO UPDATE SET verdict = excluded.verdict, source = excluded.source, "
+                "updated_at = excluded.updated_at",
+                (address, address.split("@", 1)[1], verdict, source, now_iso()),
+            )
+            self._conn.commit()
+
+    def sender_verdicts(self, addresses: list[str]) -> dict[str, str]:
+        if not addresses:
+            return {}
+        marks = ",".join("?" * len(addresses))
+        rows = self._execute(f"SELECT address, verdict FROM senders WHERE address IN ({marks})",
+                             tuple(a.lower() for a in addresses)).fetchall()
+        return {r["address"]: r["verdict"] for r in rows}
+
+    def domain_counts(self, domain: str) -> dict[str, int]:
+        rows = self._execute("SELECT verdict, COUNT(*) AS n FROM senders WHERE domain = ? GROUP BY verdict",
+                             (domain.lower(),)).fetchall()
+        return {r["verdict"]: r["n"] for r in rows}
+
+    def sender_count(self) -> int:
+        return self._execute("SELECT COUNT(*) FROM senders").fetchone()[0]
+
+    # ── small worker state ───────────────────────────────────────────────────
+
+    def get_state(self, key: str) -> str | None:
+        row = self._execute("SELECT value FROM state WHERE key = ?", (key,)).fetchone()
+        return row["value"] if row else None
+
+    def set_state(self, key: str, value: str) -> None:
+        self._execute("INSERT INTO state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                      (key, value))
+
+    # ── pending actions that grow (one rolling clean-up slip) ────────────────
+
+    def extend_pending_action(self, aid: str, summary: str, payload: dict) -> bool:
+        cursor = self._execute("UPDATE actions SET summary = ?, payload = ? WHERE id = ? AND status = 'pending'",
+                               (summary, json.dumps(payload), aid))
+        return cursor.rowcount == 1
+
+    def actions_since(self, kind: str, since: str) -> list[dict[str, Any]]:
+        rows = self._execute("SELECT * FROM actions WHERE kind = ? AND created_at >= ? ORDER BY created_at DESC",
+                             (kind, since)).fetchall()
+        return [self._row(r) for r in rows]
+
+    def update_action_result(self, aid: str, result: dict) -> None:
+        self._execute("UPDATE actions SET result = ? WHERE id = ?", (json.dumps(result), aid))
