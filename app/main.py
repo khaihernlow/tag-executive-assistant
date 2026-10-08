@@ -17,6 +17,7 @@ load_dotenv(override=True)
 
 from agent.actions import public_action
 from agent.briefs import needs_brief
+from agent.filing import filed_today, undo_filing
 from agent.junk import moved_today, undo as undo_junk
 from agent.requests import open_requests_view, propose_booking, propose_reply
 from agent.calendar import agenda_day, local_zone, meeting_place, parse_event
@@ -188,6 +189,7 @@ def today(user: dict = Depends(require_auth), svc=Depends(services)):
         "pending": pending,
         "requests": requests_view,
         "junk_moved": moved_today(svc.store) if hasattr(svc.store, "actions_since") else [],
+        "filed": filed_today(svc.store) if hasattr(svc.store, "actions_since") else [],
     }
 
 
@@ -314,6 +316,15 @@ def junk_undo(action_id: str, message_id: str, user: dict = Depends(require_auth
     """Put one email back where it was, and keep that sender from now on."""
     try:
         return undo_junk(svc.graph, svc.store, action_id, message_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/filing/{action_id}/undo/{message_id:path}")
+def filing_undo(action_id: str, message_id: str, user: dict = Depends(require_auth), svc=Depends(services)):
+    """Back to the Inbox; that sender won't be filed automatically again."""
+    try:
+        return undo_filing(svc.graph, svc.store, action_id, message_id)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 

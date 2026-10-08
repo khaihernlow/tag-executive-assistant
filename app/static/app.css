@@ -361,6 +361,7 @@ button { font: inherit; color: inherit; }
 .tag { font-size: 11px; font-weight: 600; padding: 2px 6px; border-radius: 4px; background: var(--brass-wash); color: var(--brass); }
 
 .junk summary { cursor: pointer; font-weight: 600; font-size: 15px; }
+.junk__group { margin: var(--s3) 0 0; font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-faint); }
 .junk .rows { margin-top: var(--s3); }
 .row.junk__row { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--s3); }
 .junk__text { min-width: 0; flex: 1; }

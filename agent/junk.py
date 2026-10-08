@@ -31,6 +31,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from agent.actions import ActionKind, Actions, public_action
+from agent.filing import filing_folders
 from agent.people import internal_domain
 from agent.research import FREEMAIL
 from agent.tools import Tool
@@ -113,21 +114,6 @@ def folder_ids(graph: Any) -> dict[str, str]:
     return ids
 
 
-def filed_folders(graph: Any, skip: set[str], limit: int = 150) -> list[str]:
-    """Dave's own folders (two levels deep), not the Inbox, Junk, Deleted, Sent etc."""
-    found: list[str] = []
-    top = graph.get_all(f"/users/{graph.mailbox}/mailFolders", {"$select": "id,childFolderCount", "$top": 100}, limit=limit)
-    for folder in top:
-        if folder["id"] in skip:
-            continue
-        found.append(folder["id"])
-        if folder.get("childFolderCount"):
-            children = graph.get_all(f"/users/{graph.mailbox}/mailFolders/{folder['id']}/childFolders",
-                                     {"$select": "id", "$top": 100}, limit=limit)
-            found += [c["id"] for c in children if c["id"] not in skip]
-    return found[:limit]
-
-
 def learn_history(graph: Any, store: Any, days: int = HISTORY_DAYS) -> dict[str, int]:
     """Learn Dave's idea of junk from his own mailbox: senders in the Junk folder are
     junk; senders whose mail was filed into one of his folders are keep. Each is read
@@ -151,7 +137,7 @@ def learn_history(graph: Any, store: Any, days: int = HISTORY_DAYS) -> dict[str,
     query = {"$select": "from,subject", "$filter": f"receivedDateTime ge {since}", "$top": 500}
     if ids.get("junkemail"):
         count(graph.get_all(f"/users/{graph.mailbox}/mailFolders/junkemail/messages", query, limit=2000), "junk")
-    for folder in filed_folders(graph, set(ids.values())):
+    for folder in filing_folders(graph):
         count(graph.get_all(f"/users/{graph.mailbox}/mailFolders/{folder}/messages",
                             {**query, "$top": 200}, limit=200), "keep")
     for address, counts in tally.items():

@@ -140,7 +140,7 @@ async function loadToday() {
     renderItinerary(day.events, isToday ? "today" : day.agenda_title.toLowerCase());
     renderSignoff(day.pending.filter((a) => !["reply_email", "book_meeting"].includes(a.kind)));
     renderRequests(day.requests || []);
-    renderJunk(day.junk_moved || []);
+    renderJunk(day.junk_moved || [], day.filed || []);
     // While the worker is preparing briefs, check back so the "Brief" buttons appear.
     clearTimeout(loadToday.timer);
     if (day.events.some((e) => e.brief === "preparing")) loadToday.timer = setTimeout(loadToday, 5000);
@@ -364,32 +364,48 @@ document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("#bri
 
 // ── inbox clean-up ─────────────────────────────────────────────────────────────
 
-function renderJunk(moved) {
-  const live = moved.filter((m) => !m.undone);
-  $("#junk-block").hidden = !moved.length;
-  if (!moved.length) return;
-  const rows = moved.map((m) => {
-    const sub = el("span", { class: "row__sub", text: [m.from, m.reason].filter(Boolean).join(" \u00b7 ") });
-    const action = m.undone
-      ? el("span", { class: "junk__undone", text: "Put back" })
-      : el("button", { class: "link-btn", type: "button", text: "Undo", onclick: async (ev) => {
-          const btn = ev.currentTarget;
-          btn.disabled = true;
-          try {
-            await api(`/api/junk/${encodeURIComponent(m.action_id)}/undo/${encodeURIComponent(m.id)}`, { method: "POST" });
-            btn.replaceWith(el("span", { class: "junk__undone", text: "Put back" }));
-          } catch (err) {
-            btn.disabled = false;
-            sub.textContent = `Couldn't undo: ${err.message}`;
-          }
-        } });
-    return el("li", { class: "row junk__row" },
-      el("span", { class: "junk__text" }, el("span", { class: "row__title", text: m.subject }), sub), action);
-  });
-  const list = el("ul", { class: "rows" }, rows);
-  const summary = el("summary", { text: `Moved ${live.length} to Junk in the last day` });
-  $("#junk").replaceChildren(el("details", { class: "card junk" }, summary, list,
-    el("p", { class: "card__note", text: "Undo puts it back and I'll leave that sender alone from now on." })));
+function undoRow(m, path, doneText) {
+  const sub = el("span", { class: "row__sub", text: m.detail });
+  const action = m.undone
+    ? el("span", { class: "junk__undone", text: doneText })
+    : el("button", { class: "link-btn", type: "button", text: "Undo", onclick: async (ev) => {
+        const btn = ev.currentTarget;
+        btn.disabled = true;
+        try {
+          await api(path, { method: "POST" });
+          btn.replaceWith(el("span", { class: "junk__undone", text: doneText }));
+        } catch (err) {
+          btn.disabled = false;
+          sub.textContent = `Couldn't undo: ${err.message}`;
+        }
+      } });
+  return el("li", { class: "row junk__row" },
+    el("span", { class: "junk__text" }, el("span", { class: "row__title", text: m.subject }), sub), action);
+}
+
+function renderJunk(moved, filed) {
+  $("#junk-block").hidden = !moved.length && !filed.length;
+  if (!moved.length && !filed.length) return;
+  const junkLive = moved.filter((m) => !m.undone).length;
+  const filedLive = filed.filter((m) => !m.undone).length;
+  const parts = [junkLive ? `${junkLive} to Junk` : "", filedLive ? `${filedLive} filed` : ""].filter(Boolean);
+  const groups = [];
+  if (filed.length) {
+    groups.push(el("p", { class: "junk__group", text: "Filed (read mail)" }),
+      el("ul", { class: "rows" }, filed.map((m) => undoRow(
+        { ...m, detail: `${m.from} \u2192 ${m.folder}` },
+        `/api/filing/${encodeURIComponent(m.action_id)}/undo/${encodeURIComponent(m.id)}`, "Back in Inbox"))));
+  }
+  if (moved.length) {
+    groups.push(el("p", { class: "junk__group", text: "Moved to Junk" }),
+      el("ul", { class: "rows" }, moved.map((m) => undoRow(
+        { ...m, detail: [m.from, m.reason].filter(Boolean).join(" \u00b7 ") },
+        `/api/junk/${encodeURIComponent(m.action_id)}/undo/${encodeURIComponent(m.id)}`, "Put back"))));
+  }
+  $("#junk").replaceChildren(el("details", { class: "card junk" },
+    el("summary", { text: parts.length ? `Last day: ${parts.join(", ")}` : "Last day: all undone" }),
+    ...groups,
+    el("p", { class: "card__note", text: "Undo puts it back. I'll stop filing or junking that sender." })));
 }
 
 // ── meeting requests ───────────────────────────────────────────────────────────
@@ -498,7 +514,7 @@ function renderSignoff(pending) {
 // ── cards ──────────────────────────────────────────────────────────────────────
 
 const KIND_LABELS = {
-  create_event: "Calendar invite", book_meeting: "Calendar invite",
+  create_event: "Calendar invite", book_meeting: "Calendar invite", create_rule: "Outlook rule",
   move_to_junk: "Inbox clean-up", reply_email: "Email reply",
 };
 

@@ -72,6 +72,17 @@ CREATE TABLE IF NOT EXISTS senders (
 );
 CREATE INDEX IF NOT EXISTS idx_senders_domain ON senders(domain, verdict);
 
+CREATE TABLE IF NOT EXISTS filing (
+    address      TEXT PRIMARY KEY,      -- sender
+    folder_id    TEXT NOT NULL,
+    folder_path  TEXT NOT NULL,         -- e.g. "Inbox/Receipts/Financial"
+    filed_count  INTEGER NOT NULL,      -- emails from them found in that folder
+    share        REAL NOT NULL,         -- fraction of their filed mail that went there
+    unread_share REAL NOT NULL DEFAULT 0,
+    disabled     INTEGER NOT NULL DEFAULT 0,   -- Dave undid a filing: stop filing this sender
+    updated_at   TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS state (
     key         TEXT PRIMARY KEY,       -- small bits of worker state, e.g. the junk sweep checkpoint
     value       TEXT NOT NULL
@@ -362,3 +373,35 @@ class Store:
 
     def update_action_result(self, aid: str, result: dict) -> None:
         self._execute("UPDATE actions SET result = ? WHERE id = ?", (json.dumps(result), aid))
+
+    # ── filing (sender -> folder, learned from Dave's folders) ───────────────
+
+    def set_filing(self, address: str, folder_id: str, folder_path: str, filed_count: int, share: float,
+                   unread_share: float) -> None:
+        self._execute(
+            "INSERT INTO filing (address, folder_id, folder_path, filed_count, share, unread_share, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(address) DO UPDATE SET folder_id = excluded.folder_id, "
+            "folder_path = excluded.folder_path, filed_count = excluded.filed_count, share = excluded.share, "
+            "unread_share = excluded.unread_share, updated_at = excluded.updated_at",
+            (address.lower(), folder_id, folder_path, filed_count, share, unread_share, now_iso()),
+        )
+
+    def filing_for(self, addresses: list[str]) -> dict[str, dict[str, Any]]:
+        if not addresses:
+            return {}
+        marks = ",".join("?" * len(addresses))
+        rows = self._execute(f"SELECT * FROM filing WHERE disabled = 0 AND address IN ({marks})",
+                             tuple(a.lower() for a in addresses)).fetchall()
+        return {r["address"]: dict(r) for r in rows}
+
+    def disable_filing(self, address: str) -> None:
+        self._execute("UPDATE filing SET disabled = 1 WHERE address = ?", (address.lower(),))
+
+    def filing_rules(self, min_count: int = 0) -> list[dict[str, Any]]:
+        rows = self._execute("SELECT * FROM filing WHERE disabled = 0 AND filed_count >= ? ORDER BY filed_count DESC",
+                             (min_count,)).fetchall()
+        return [dict(r) for r in rows]
+
+    def clear_learned_filing(self) -> None:
+        """Before relearning: drop learned patterns, but keep the ones Dave switched off."""
+        self._execute("DELETE FROM filing WHERE disabled = 0")

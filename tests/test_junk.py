@@ -44,7 +44,10 @@ class FakeGraph:
     def get(self, path, params=None, headers=None):
         if path == "/me":
             return {"displayName": "Dave Vener"}
-        return {"id": FOLDERS[path.rsplit("/", 1)[-1]]}
+        name = path.rsplit("/", 1)[-1]
+        if name not in FOLDERS:
+            raise RuntimeError("404 no such folder")
+        return {"id": FOLDERS[name]}
 
     def get_all(self, path, params=None, limit=500, headers=None):
         if path.endswith("/sentitems/messages"):
@@ -57,7 +60,9 @@ class FakeGraph:
         if path.endswith("/junkemail/messages"):
             return [m for m in self.history if m["parentFolderId"] == "junk-id"]
         if path == f"/users/{DAVE}/mailFolders":
-            return [{"id": fid, "childFolderCount": 0} for fid in ("inbox-id", "junk-id", "filed-id", "finance-folder-id")]
+            return [{"id": fid, "displayName": n, "childFolderCount": 0} for fid, n in (
+                ("inbox-id", "Inbox"), ("junk-id", "Junk Email"), ("filed-id", "Clients"),
+                ("finance-folder-id", "Receipts"))]
         if path.startswith(f"/users/{DAVE}/mailFolders/") and path.endswith("/messages"):
             folder = path.split("/mailFolders/")[1].split("/")[0]
             return [m for m in self.history if m["parentFolderId"] == folder]

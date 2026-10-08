@@ -9,6 +9,7 @@ from agent.actions import Actions
 from agent.assistant import Assistant
 from agent.calendar import calendar_tools
 from agent.events import create_event_kind, create_event_tool
+from agent.filing import file_kind, rule_kind
 from agent.junk import junk_kind, junk_tools
 from agent.mail import mail_tools
 from agent.requests import request_kinds
@@ -36,7 +37,8 @@ class Services:
 def build_services() -> Services:
     graph = GraphClient.from_env()
     store = Store()
-    actions = Actions(store, [create_event_kind(graph), junk_kind(graph, store), *request_kinds(graph, store)])
+    actions = Actions(store, [create_event_kind(graph), junk_kind(graph, store), *request_kinds(graph, store),
+                              file_kind(graph, store), rule_kind(graph, store)])
     memory = Memory(store)
     llm = HatzAIProvider()
     # Quick, high-volume judgments (junk triage) use a faster, cheaper model.

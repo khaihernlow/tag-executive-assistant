@@ -5,6 +5,9 @@ jobs only touch the store and Graph, so it can move to its own container
 later without changes.
 
 Jobs (each cycle):
+  filing   Inbox mail Dave has read (1h+ old) from a sender with a learned folder
+           is filed there (Undo on Today). Daily: relearn sender -> folder from
+           his folders and suggest Outlook rules for unread automated senders.
   junk     inbox mail since the last check: known junk and clear junk moved to
            Junk at once (Undo on Today), less certain junk added to one rolling
            slip. Learns from Dave's Junk folder and filed mail once a day.
@@ -27,6 +30,7 @@ from typing import Any
 from agent.briefs import needs_brief, prepare_brief, upcoming_meetings
 from agent.calendar import Event
 from agent.people import internal_domain
+from agent.filing import file_read_mail, learn_filing, learning_is_stale, suggest_rules
 from agent.junk import history_is_stale, learn_history, sweep_new
 from agent.requests import scan as scan_requests
 
@@ -78,6 +82,16 @@ class Worker:
                         log.info("junk sweep: moved %s, asked about %s", outcome["moved"], outcome["asked"])
                 except Exception:  # noqa: BLE001
                     log.exception("junk sweep failed")
+            if self.actions is not None:
+                try:
+                    if learning_is_stale(self.store):
+                        log.info("learned filing: %s", learn_filing(self.graph, self.store))
+                        suggest_rules(self.graph, self.store, self.actions)
+                    filed = file_read_mail(self.graph, self.store, self.actions)
+                    if filed:
+                        log.info("filed %s read emails", filed)
+                except Exception:  # noqa: BLE001
+                    log.exception("filing failed")
             if self.fast_llm is not None:
                 try:
                     added = scan_requests(self.graph, self.fast_llm, self.store, actions=self.actions)
