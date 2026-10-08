@@ -32,17 +32,27 @@ def client(responses):
     return AutotaskClient("user", "secret", "code", zone_url=ZONE, session=session), session
 
 
-def test_query_paginates_and_respects_max_records():
+def test_query_pages_by_id_until_a_short_page(monkeypatch):
+    monkeypatch.setattr("connectors.autotask.PAGE_SIZE", 2)
     at, session = client([
-        Resp(200, {"items": [{"id": 1}], "pageDetails": {"nextPageUrl": f"{ZONE}/Companies/query/next?x=1"}}),
-        Resp(200, {"items": [{"id": 2}, {"id": 3}], "pageDetails": {}}),
+        Resp(200, {"items": [{"id": 1}, {"id": 5}]}),
+        Resp(200, {"items": [{"id": 7}, {"id": 9}]}),
+        Resp(200, {"items": [{"id": 12}]}),
     ])
-    assert [i["id"] for i in at.query("Companies", [], max_records=2)] == [1, 2]
-    assert session.requests[0][:2] == ("POST", f"{ZONE}/Companies/query")
-    assert session.requests[0][2]["MaxRecords"] == 2
-    # Later pages are POSTed with the same search: Autotask answers GET with 405.
-    assert session.requests[1][:2] == ("POST", f"{ZONE}/Companies/query/next?x=1")
-    assert session.requests[1][2] == session.requests[0][2]
+    rows = at.query("Companies", [{"op": "eq", "field": "isActive", "value": True}], ["companyName"])
+    assert [r["id"] for r in rows] == [1, 5, 7, 9, 12]
+    first, second, third = (r[2] for r in session.requests)
+    assert all(r[:2] == ("POST", f"{ZONE}/Companies/query") for r in session.requests)
+    assert first["filter"] == [{"op": "eq", "field": "isActive", "value": True}] and first["MaxRecords"] == 2
+    assert first["IncludeFields"] == ["id", "companyName"]  # id is needed to page
+    assert second["filter"][-1] == {"op": "gt", "field": "id", "value": 5}
+    assert third["filter"][-1] == {"op": "gt", "field": "id", "value": 9}
+
+
+def test_query_stops_at_max_records():
+    at, session = client([Resp(200, {"items": [{"id": 1}, {"id": 2}]})])
+    assert [r["id"] for r in at.query("Companies", [], max_records=2)] == [1, 2]
+    assert len(session.requests) == 1 and session.requests[0][2]["MaxRecords"] == 2
 
 
 def test_create_and_update_return_item_id():

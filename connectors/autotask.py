@@ -10,9 +10,10 @@ from __future__ import annotations
 
 import os
 from typing import Any
-from urllib.parse import urljoin
 
 import requests
+
+PAGE_SIZE = 500  # Autotask's maximum per query
 
 
 class AutotaskAPIError(RuntimeError):
@@ -111,23 +112,29 @@ class AutotaskClient:
         include_fields: list[str] | None = None,
         max_records: int | None = None,
     ) -> list[dict]:
-        """Query and fully paginate an entity collection."""
-        search: dict[str, object] = {"filter": filters}
-        if include_fields:
-            search["IncludeFields"] = include_fields
-        if max_records:
-            search["MaxRecords"] = max_records
+        """Query and fully paginate an entity collection.
 
+        Pages by id (results come back in id order): ask for 500, then for ids
+        above the last one seen. Autotask's own nextPageUrl can't be trusted: GET
+        on it answers 405, and POSTing the search to it pages forward for a while
+        and then loops on garbage ids indefinitely on large result sets.
+        """
+        if include_fields and "id" not in include_fields:
+            include_fields = ["id", *include_fields]
         url = self._api_url(f"{entity}/query")
-        payload = self._request_json("POST", url, json=search)
         items: list[dict] = []
+        last_id = None
         while True:
-            items.extend(payload.get("items") or [])
-            next_url = (payload.get("pageDetails") or {}).get("nextPageUrl")
-            if not next_url or (max_records and len(items) >= max_records):
+            want = PAGE_SIZE if not max_records else min(PAGE_SIZE, max_records - len(items))
+            page_filters = filters + ([{"op": "gt", "field": "id", "value": last_id}] if last_id is not None else [])
+            search: dict[str, object] = {"filter": page_filters, "MaxRecords": want}
+            if include_fields:
+                search["IncludeFields"] = include_fields
+            batch = self._request_json("POST", url, json=search).get("items") or []
+            items.extend(batch)
+            if len(batch) < want or (max_records and len(items) >= max_records):
                 break
-            # The next page of a query is POSTed with the same search (GET answers 405).
-            payload = self._request_json("POST", urljoin(url, next_url), json=search)
+            last_id = max(item["id"] for item in batch)
         return items[:max_records] if max_records else items
 
     def get(self, entity: str, record_id: int) -> dict | None:
