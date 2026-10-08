@@ -246,3 +246,23 @@ def test_undoing_a_content_filing_keeps_the_sender_rule_and_the_email_stays_put(
     undo_filing(graph, store, filed["action_id"], "fin-mail")
     assert store.filing_seen_ids(["new-fin-mail"]) == {"new-fin-mail"}   # won't be refiled
     assert [r["address"] for r in store.filing_rules()] == ["other@cpa.example"]
+
+
+def test_mail_addressed_to_dave_waits_until_he_replies():
+    asked = {**mail("kelly@tag.example", mid="ask"), "conversationId": "t-ask",
+             "toRecipients": [{"emailAddress": {"address": DAVE}}]}
+    copied = {**mail("joe@cpa.example", mid="cc"), "toRecipients": [{"emailAddress": {"address": "ap@cpa.example"}}]}
+    graph = FakeGraph(inbox=[asked, copied])
+    store = Store(":memory:")
+    store.set_state(PROFILES, json.dumps(PROFILE_LIST))
+    actions = Actions(store, [file_kind(graph, store)], auto=set())
+    llm = ChooseLLM([{"n": 0, "folder": 1, "confidence": "high"}])
+
+    file_read_mail(graph, store, actions, llm=llm)
+    assert "kelly@tag.example" not in llm.calls[0]["content"]        # held back: Dave hasn't answered
+    assert store.filing_seen_ids(["ask"]) == set()                   # and not written off
+
+    graph.folder_mail["sentitems"] = [{"id": "reply", "sentDateTime": "2026-10-08T11:00:00Z"}]
+    llm2 = ChooseLLM([{"n": 0, "folder": 2, "confidence": "high"}])
+    file_read_mail(graph, store, actions, llm=llm2)
+    assert "kelly@tag.example" in llm2.calls[0]["content"]           # replied: now it can be filed

@@ -12,7 +12,9 @@ all read: mail is filed after Dave has seen it, not on arrival.
   file    each worker cycle, Inbox mail Dave has READ (1h+ old, not flagged,
           not part of a meeting request still in progress):
             - from a learned sender: that folder (free, no model);
-            - otherwise the fast model reads it, like Maria does, and picks one
+            - otherwise (unless it's addressed to Dave and he hasn't replied yet,
+              which means it may still need him) the fast model reads it, like
+              Maria does, and picks one
               of Dave's folders using each folder's recent example subjects,
               or leaves it. Filed only when the model is sure AND that sender
               (or their company) was filed there before: on emails Maria had
@@ -178,7 +180,7 @@ def read_inbox(graph: Any, store: Any, now: datetime | None = None) -> list[dict
     """Inbox mail Dave has read, 1h+ old, minus flagged mail and meeting requests still in progress."""
     cutoff = _iso((now or datetime.now(timezone.utc)) - READ_FOR)
     inbox = graph.get_all(f"/users/{graph.mailbox}/mailFolders/inbox/messages", {
-        "$select": "id,subject,from,receivedDateTime,isRead,bodyPreview,flag,conversationId",
+        "$select": "id,subject,from,receivedDateTime,isRead,bodyPreview,flag,conversationId,toRecipients",
         "$filter": f"isRead eq true and receivedDateTime le {cutoff}", "$top": 100}, limit=300)
     active = {r["thread_id"] for r in store.requests_in(("new", "waiting"))} if hasattr(store, "requests_in") else set()
     return [m for m in inbox
@@ -253,6 +255,20 @@ def choose_folders(llm: Any, profiles: list[dict[str, Any]], messages: list[dict
     return out
 
 
+def awaiting_dave(graph: Any, message: dict[str, Any]) -> bool:
+    """Addressed TO Dave (not just copied) and he hasn't replied in the thread since: it
+    may still need him, so it stays in the Inbox. ("Attached are my targets. Let's
+    discuss Monday" was filed by content alone; Maria would have left it.)"""
+    to = {((r.get("emailAddress") or {}).get("address") or "").lower() for r in message.get("toRecipients") or []}
+    if graph.mailbox.lower() not in to:
+        return False
+    replies = graph.get_all(f"/users/{graph.mailbox}/mailFolders/sentitems/messages", {
+        "$select": "id,sentDateTime",
+        "$filter": f"conversationId eq '{message.get('conversationId')}' and sentDateTime gt {message['receivedDateTime']}",
+        "$top": 5}, limit=5)
+    return not replies
+
+
 def has_history(folder: dict[str, Any], address: str) -> bool:
     """Has this sender, or someone at their company (not a free-mail domain), been filed in this folder?"""
     known = set(folder.get("senders") or [])
@@ -265,7 +281,9 @@ def content_to_file(graph: Any, store: Any, llm: Any, inbox: list[dict[str, Any]
     """Ask the model about read mail no sender rule covered; each email is judged once."""
     profiles = json.loads(store.get_state(PROFILES) or "[]")
     pending = [m for m in inbox if m["id"] not in skip]
-    pending = [m for m in pending if m["id"] not in store.filing_seen_ids([p["id"] for p in pending])][:BATCH]
+    pending = [m for m in pending if m["id"] not in store.filing_seen_ids([p["id"] for p in pending])]
+    # Not marked as judged: once Dave replies, it becomes eligible again.
+    pending = [m for m in pending if not awaiting_dave(graph, m)][:BATCH]
     if not pending or not profiles:
         return []
     verdicts = choose_folders(llm, profiles, pending)

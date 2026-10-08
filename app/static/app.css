@@ -687,3 +687,20 @@ button.cite:active { background: var(--rule-strong); }
   border-left: 2px solid var(--brass);
   font-size: 14px; color: var(--ink-soft);
 }
+
+/* ── tidied up (FYI log, collapsed) ─────────────────────────────────────────── */
+
+.tidy summary { cursor: pointer; font-weight: 600; font-size: 15px; color: var(--ink-soft); list-style: none; }
+.tidy summary::-webkit-details-marker { display: none; }
+.tidy summary::after { content: " \203A"; color: var(--ink-faint); }
+.tidy[open] summary::after { content: ""; }
+.tidy__group { margin: var(--s4) 0 var(--s1); font-size: 11px; font-weight: 600; letter-spacing: 0.08em;
+               text-transform: uppercase; color: var(--ink-faint); }
+.tidy__list { list-style: none; margin: 0; padding: 0; }
+.tidy__row { display: flex; align-items: center; gap: var(--s3); padding: var(--s2) 0; border-top: 1px solid var(--rule-soft); }
+.tidy__row:first-child { border-top: 0; }
+.tidy__text { flex: 1; min-width: 0; }
+.tidy__title { display: block; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tidy__sub { display: block; font-size: 13px; color: var(--ink-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tidy__undo { flex: none; white-space: nowrap; }
+.tidy__done { flex: none; font-size: 13px; color: var(--sage); white-space: nowrap; }

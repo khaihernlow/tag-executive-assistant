@@ -364,48 +364,54 @@ document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("#bri
 
 // ── inbox clean-up ─────────────────────────────────────────────────────────────
 
-function undoRow(m, path, doneText) {
-  const sub = el("span", { class: "row__sub", text: m.detail });
+function undoRow(m, path) {
+  const sub = el("span", { class: "tidy__sub", text: m.detail });
   const action = m.undone
-    ? el("span", { class: "junk__undone", text: doneText })
-    : el("button", { class: "link-btn", type: "button", text: "Undo", onclick: async (ev) => {
+    ? el("span", { class: "tidy__done", text: "Moved back" })
+    : el("button", { class: "link-btn tidy__undo", type: "button", text: "Move back", onclick: async (ev) => {
         const btn = ev.currentTarget;
         btn.disabled = true;
         try {
           await api(path, { method: "POST" });
-          btn.replaceWith(el("span", { class: "junk__undone", text: doneText }));
+          btn.replaceWith(el("span", { class: "tidy__done", text: "Moved back" }));
         } catch (err) {
           btn.disabled = false;
-          sub.textContent = `Couldn't undo: ${err.message}`;
+          sub.textContent = `Couldn't move it back: ${err.message}`;
         }
       } });
-  return el("li", { class: "row junk__row" },
-    el("span", { class: "junk__text" }, el("span", { class: "row__title", text: m.subject }), sub), action);
+  return el("li", { class: "tidy__row" },
+    el("div", { class: "tidy__text" }, el("span", { class: "tidy__title", text: m.subject }), sub), action);
 }
 
 function renderJunk(moved, filed) {
   $("#junk-block").hidden = !moved.length && !filed.length;
   if (!moved.length && !filed.length) return;
-  const junkLive = moved.filter((m) => !m.undone).length;
   const filedLive = filed.filter((m) => !m.undone).length;
-  const parts = [junkLive ? `${junkLive} to Junk` : "", filedLive ? `${filedLive} filed` : ""].filter(Boolean);
+  const junkLive = moved.filter((m) => !m.undone).length;
+  const parts = [
+    filedLive ? `${filedLive} email${filedLive === 1 ? "" : "s"} filed` : "",
+    junkLive ? `${junkLive} moved to Junk` : "",
+  ].filter(Boolean);
   const groups = [];
   if (filed.length) {
-    groups.push(el("p", { class: "junk__group", text: "Filed (read mail)" }),
-      el("ul", { class: "rows" }, filed.map((m) => undoRow(
-        { ...m, detail: `${m.from} \u2192 ${m.folder}` },
-        `/api/filing/${encodeURIComponent(m.action_id)}/undo/${encodeURIComponent(m.id)}`, "Back in Inbox"))));
+    groups.push(el("p", { class: "tidy__group", text: "Filed after you read them" }),
+      el("ul", { class: "tidy__list" }, filed.map((m) => undoRow(
+        { ...m, detail: `${m.from} \u00b7 moved to ${m.folder.replace(/^Inbox\//, "")}` },
+        `/api/filing/${encodeURIComponent(m.action_id)}/undo/${encodeURIComponent(m.id)}`))));
   }
   if (moved.length) {
-    groups.push(el("p", { class: "junk__group", text: "Moved to Junk" }),
-      el("ul", { class: "rows" }, moved.map((m) => undoRow(
+    groups.push(el("p", { class: "tidy__group", text: "Moved to Junk" }),
+      el("ul", { class: "tidy__list" }, moved.map((m) => undoRow(
         { ...m, detail: [m.from, m.reason].filter(Boolean).join(" \u00b7 ") },
-        `/api/junk/${encodeURIComponent(m.action_id)}/undo/${encodeURIComponent(m.id)}`, "Put back"))));
+        `/api/junk/${encodeURIComponent(m.action_id)}/undo/${encodeURIComponent(m.id)}`))));
   }
-  $("#junk").replaceChildren(el("details", { class: "card junk" },
-    el("summary", { text: parts.length ? `Last day: ${parts.join(", ")}` : "Last day: all undone" }),
+  const wasOpen = $("#junk details")?.open;
+  const details = el("details", { class: "card tidy" },
+    el("summary", { text: parts.length ? `In the last day: ${parts.join(", ")}` : "In the last day: everything moved back" }),
     ...groups,
-    el("p", { class: "card__note", text: "Undo puts it back. I'll stop filing or junking that sender." })));
+    el("p", { class: "card__note", text: "Move back returns an email to your Inbox." }));
+  details.open = Boolean(wasOpen);
+  $("#junk").replaceChildren(details);
 }
 
 // ── meeting requests ───────────────────────────────────────────────────────────
