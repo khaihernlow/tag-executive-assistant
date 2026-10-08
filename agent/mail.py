@@ -65,7 +65,9 @@ def _address(field: dict[str, Any] | None) -> dict[str, str]:
 
 def _local(stamp: str) -> str:
     when = datetime.fromisoformat(stamp.replace("Z", "+00:00")).astimezone(local_zone())
-    return when.strftime("%a %b %d %I:%M %p").replace(" 0", " ")
+    # Without the year a model reading "Jan 12" will guess one; show it unless it's this year.
+    fmt = "%a %b %d %I:%M %p" if when.year == datetime.now(local_zone()).year else "%a %b %d %Y %I:%M %p"
+    return when.strftime(fmt).replace(" 0", " ")
 
 
 def summarize(raw: dict[str, Any]) -> dict[str, Any]:
@@ -139,6 +141,7 @@ def read_email(graph: GraphSource, message_id: str) -> dict[str, Any]:
         "cc": [_address(r) for r in raw.get("ccRecipients") or []],
         "body": body[:MAX_BODY_CHARS] + ("\n[...truncated]" if truncated else ""),
         "conversation_id": raw.get("conversationId"),
+        "web_link": raw.get("webLink"),
     }
     result.pop("preview", None)
     if raw.get("hasAttachments"):

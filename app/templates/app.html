@@ -120,6 +120,20 @@
       <div class="briefsheet__foot" id="bs-foot" hidden>
         <button class="btn btn--sign" id="bs-ask" type="button">Ask about this meeting</button>
       </div>
+
+      <!-- A cited source, opened from a citation or the Sources list -->
+      <div class="source" id="source" hidden>
+        <div class="source__panel" role="dialog" aria-labelledby="src-title">
+          <div class="recent__head">
+            <p class="slip__kind" id="src-kind"></p>
+            <button class="link-btn" id="src-close" type="button">Close</button>
+          </div>
+          <h3 class="source__title" id="src-title"></h3>
+          <p class="source__meta" id="src-meta"></p>
+          <p class="source__excerpt" id="src-excerpt"></p>
+          <a class="btn btn--sign source__open" id="src-open" target="_blank" rel="noopener" hidden></a>
+        </div>
+      </div>
     </div>
   </div>
 

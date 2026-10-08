@@ -93,7 +93,10 @@ def test_prepare_brief_gathers_mail_and_attachments_and_fact_checks():
     row = store.get_brief("evt1")
     assert row["status"] == "ready"
     assert "Scope: managed IT for 40 seats" in llm.material          # attachment text reached the writer
-    assert row["brief"]["material"]["attachments"] == [{"label": "Attachment 1", "name": "Proposal.docx"}]
+    [att] = row["brief"]["material"]["attachments"]
+    assert (att["label"], att["name"], att["from_email"]) == ("Attachment 1", "Proposal.docx", "Email 1")
+    assert att["excerpt"] == "Scope: managed IT for 40 seats"
+    assert row["brief"]["material"]["emails"][0]["message_id"] == "m1"     # citations can open the email
     assert "owner@client.example" in row["brief"]["headline"]         # mistyped address corrected
     assert prepare_brief(FakeGraph(), llm, store, event()) is False   # unchanged invite: nothing to do
     assert prepare_brief(FakeGraph(), llm, store, event(description="moved")) is True  # changed: refresh
@@ -156,3 +159,68 @@ def test_brief_endpoints_and_topic_conversation(monkeypatch):
         assert http.get(f"/api/conversations/{reply['conversation_id']}").json()["title"] == "Brief: Intro call"
     finally:
         app.state.services = None
+
+
+# ── style, research ──────────────────────────────────────────────────────────
+
+from agent.briefs import plain_style, write_brief
+from agent.research import parse_findings, research_targets, web_research
+
+
+def test_plain_style_removes_dashes_but_keeps_ranges():
+    assert plain_style("Mark Greco — HubSpot rep") == "Mark Greco, HubSpot rep"
+    assert plain_style("Interview—in person") == "Interview, in person"
+    assert plain_style("11:00–12:00 PM") == "11:00-12:00 PM"
+    assert plain_style("Q4 - planning") == "Q4, planning"
+    assert plain_style("Agreed twice [Emails 3, 4 and 2]") == "Agreed twice [Email 3, Email 4, Email 2]"
+    assert plain_style("Partner [Web 1]") == "Partner [Web 1]"
+
+
+def test_write_brief_drops_empty_bullets_and_cleans_every_field():
+    class LLM(BriefLLM):
+        def complete(self, *a, **k):
+            return LLMResponse(content=[{"type": "tool_use", "id": "b", "name": "write_brief", "input": {
+                "headline": "Audit call — HubSpot", "who": [{"name": "Mark", "organization": "HubSpot"}],
+                "context": ["", "Pitch on Sep 23 [Email 5]"], "background": [], "prep": [], "gaps": []}}],
+                stop_reason="tool_use")
+
+    brief = write_brief(LLM(), {"emails": []})
+    assert brief["headline"] == "Audit call, HubSpot"
+    assert brief["context"] == ["Pitch on Sep 23 [Email 5]"]
+    assert brief["background"] == []
+
+
+def test_research_targets_skip_staff_and_only_use_company_domains_that_mean_something():
+    targets = research_targets([
+        {"name": "Mark Greco", "email": "mgreco@hubspot.com"},
+        {"name": "Chris", "email": "chris@airopsagency.com"},
+        {"name": "Jordan Rivera", "email": "candidate@gmail.com"},
+        {"name": "Garrett Stone", "email": "gstone@tag.example"},
+    ], "tag.example")
+    assert targets == ["- The company at hubspot.com", "- Mark Greco (email domain hubspot.com)",
+                       "- The company at airopsagency.com", "- Jordan Rivera"]
+
+
+def test_findings_without_urls_are_dropped_and_failures_mean_no_research():
+    text = 'Here you go: [{"about": "AirOps", "fact": "HubSpot partner in Boston", "url": "https://airops.example"},'            ' {"about": "x", "fact": "no source"}]'
+    assert parse_findings(text) == [{"about": "AirOps", "fact": "HubSpot partner in Boston", "url": "https://airops.example"}]
+    assert parse_findings("no json here") == []
+
+    class Searcher:
+        def web_answer(self, prompt):
+            return text
+
+    class Down:
+        def web_answer(self, prompt):
+            raise RuntimeError("timeout")
+
+    assert web_research(Searcher(), "Audit", ["- The company at airops.example"])[0]["label"] == "Web 1"
+    assert web_research(Down(), "Audit", ["- x"]) == []
+    assert web_research(Searcher(), "Audit", []) == []
+
+
+def test_excerpts_drop_tracking_links_and_signature_tags():
+    from agent.briefs import _excerpt
+
+    body = "Mark, can you resend the quote? [signature_1206802121] www.tag.example<https://link.edgepilot.com/s/9ad?u=x> Thanks"
+    assert _excerpt(body) == "Mark, can you resend the quote? www.tag.example Thanks"

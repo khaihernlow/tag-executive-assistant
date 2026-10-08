@@ -28,8 +28,9 @@ BRIEF_INTERVAL = int(os.environ.get("BRIEF_INTERVAL_SECONDS", str(15 * 60)))
 
 
 class Worker:
-    def __init__(self, graph: Any, llm: Any, store: Any, interval: int = BRIEF_INTERVAL) -> None:
+    def __init__(self, graph: Any, llm: Any, store: Any, interval: int = BRIEF_INTERVAL, searcher: Any = None) -> None:
         self.graph, self.llm, self.store = graph, llm, store
+        self.searcher = searcher  # web research for briefs; None skips it
         self.interval = interval
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
@@ -70,7 +71,7 @@ class Worker:
 
     def _prepare(self, event: Event, force: bool) -> None:
         try:
-            if prepare_brief(self.graph, self.llm, self.store, event, force=force):
+            if prepare_brief(self.graph, self.llm, self.store, event, force=force, searcher=self.searcher):
                 log.info("brief done: %s", event.subject)
         except Exception:  # noqa: BLE001
             log.exception("brief failed: %s", event.subject)

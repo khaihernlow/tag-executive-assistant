@@ -1,9 +1,11 @@
 """Meeting briefs: prepared ahead of time, opened from the itinerary.
 
-Code decides which meetings get a brief and gathers the material (invite,
-emails with the outside attendees and about the topic, relevant
-attachments such as resumes). One model call writes the brief in a fixed
-structure from that material only, then addresses are fact-checked.
+Code decides which meetings get a brief and gathers the material: the
+invite, emails with the outside attendees and about the topic, relevant
+attachments (resumes, proposals) and web research on the outside people and
+companies. One model call writes the brief in a fixed structure from that
+material only. Code then cleans the style and fact-checks addresses, and keeps
+a record of every source so citations in the app open the real thing.
 """
 
 from __future__ import annotations
@@ -18,6 +20,7 @@ from agent.calendar import Event, event_detail, fmt_local, local_zone, parse_eve
 from agent.factcheck import known_addresses, verify_addresses
 from agent.mail import LIST_FIELDS, read_attachment, read_email, search_mail
 from agent.people import internal_domain
+from agent.research import research_targets, web_research
 from llm.provider import ToolSpec
 
 INTERVIEW = re.compile(r"\b(interview|candidate|applicant)\b", re.I)
@@ -31,6 +34,7 @@ STOPWORDS = {
 WORK_HOURS = (7, 18)  # briefs are for business meetings, not evening plans
 MAX_EMAILS = 6
 EMAIL_CHARS = 2500
+EXCERPT_CHARS = 600
 MAX_ATTACHMENTS = 2
 
 
@@ -67,9 +71,19 @@ def _participant_mail(graph: Any, address: str) -> list[dict[str, Any]]:
                          {"$search": f'"participants:{address}"', "$select": LIST_FIELDS, "$top": 10}, limit=10)
 
 
-def gather(graph: Any, event: Event) -> dict[str, Any]:
-    externals = external_attendees(event, graph.mailbox, internal_domain())
-    found: dict[str, str] = {}  # message id -> received, newest first after sort
+_LINK_NOISE = re.compile(r"<https?://[^>\s]*>?|https?://\S+|\[(?:signature|cid|image)[^\]]*\]", re.I)
+
+
+def _excerpt(text: str, limit: int = EXCERPT_CHARS) -> str:
+    """A readable preview: no tracking links or signature-image tags, whitespace collapsed."""
+    text = " ".join(_LINK_NOISE.sub(" ", text or "").split())
+    return text if len(text) <= limit else text[:limit].rsplit(" ", 1)[0] + "…"
+
+
+def gather(graph: Any, event: Event, searcher: Any = None) -> dict[str, Any]:
+    domain = internal_domain()
+    externals = external_attendees(event, graph.mailbox, domain)
+    found: dict[str, str] = {}  # message id -> received
     for address in externals[:4]:
         for m in _participant_mail(graph, address):
             found.setdefault(m["id"], m.get("receivedDateTime", ""))
@@ -91,10 +105,8 @@ def gather(graph: Any, event: Event) -> dict[str, Any]:
             continue
         label = f"Email {len(emails) + 1}"
         emails.append({
-            "label": label,
-            "from": email["from"],
-            "subject": email["subject"],
-            "received": email["received"],
+            "label": label, "message_id": mid, "web_link": email.get("web_link"),
+            "from": email["from"], "subject": email["subject"], "received": email["received"],
             "body": email["body"][:EMAIL_CHARS],
         })
         for att in email.get("attachments", []):
@@ -103,83 +115,142 @@ def gather(graph: Any, event: Event) -> dict[str, Any]:
                 try:
                     doc = read_attachment(graph, mid, att["id"])
                     attachments.append({"label": f"Attachment {len(attachments) + 1}", "name": doc["name"],
-                                        "from_email": label, "text": doc["text"][:6000]})
+                                        "from_email": label, "message_id": mid, "web_link": email.get("web_link"),
+                                        "text": doc["text"][:6000]})
                 except Exception:  # noqa: BLE001 - unreadable files are skipped, not guessed
                     pass
-    return {"event": event_detail(event), "external": externals, "emails": emails, "attachments": attachments}
+
+    detail = event_detail(event)
+    outside = [a for a in detail["attendees"] if a["email"] in externals]
+    web = web_research(searcher, event.subject, research_targets(outside, domain)) if searcher else []
+    return {"event": detail, "external": externals, "emails": emails, "attachments": attachments, "web": web}
 
 
 # ── writing ──────────────────────────────────────────────────────────────────
 
 WRITE_BRIEF = ToolSpec(
     name="write_brief",
-    description="Record the meeting brief.",
+    description="Record the meeting brief. Leave any list empty rather than pad it.",
     input_schema={
         "type": "object",
         "properties": {
-            "headline": {"type": "string", "description": "One line: what this meeting is"},
+            "headline": {"type": "string", "description": "One plain sentence: what this meeting is and why it matters"},
             "who": {"type": "array", "items": {"type": "object", "properties": {
-                "name": {"type": "string"}, "role": {"type": "string", "description": "role / company / relation"},
-            }, "required": ["name", "role"]}},
+                "name": {"type": "string"},
+                "role": {"type": "string", "description": "Their role or title, if known"},
+                "organization": {"type": "string", "description": "Their company, if known"},
+                "note": {"type": "string", "description": "Optional: one short relevant fact about them"},
+            }, "required": ["name"]}},
             "context": {"type": "array", "items": {"type": "string"},
-                        "description": "Why the meeting is happening and the history so far"},
+                        "description": "Why this meeting is happening and the history so far"},
             "background": {"type": "array", "items": {"type": "string"},
-                           "description": "Facts about the person or company (e.g. from a resume)"},
+                           "description": "Facts about the OUTSIDE people and companies only"},
             "prep": {"type": "array", "items": {"type": "string"},
-                     "description": "2-4 suggested talking points or questions for Dave"},
+                     "description": "2-4 specific talking points or questions for Dave"},
             "gaps": {"type": "array", "items": {"type": "string"},
-                     "description": "What the material didn't answer"},
-            "sources": {"type": "array", "items": {"type": "string"},
-                        "description": "Labels used, e.g. 'Email 2', 'Attachment 1'"},
+                     "description": "Important things the material didn't answer (max 3)"},
         },
-        "required": ["headline", "who", "context", "background", "prep", "gaps", "sources"],
+        "required": ["headline", "who", "context", "background", "prep", "gaps"],
     },
 )
 
-BRIEF_PROMPT = """You prepare short meeting briefs for Dave, CEO of TAG Solutions (an IT managed services provider).
-Use ONLY the material provided: the invite, the emails and the attachments. Never invent facts,
-titles, companies or history. When a fact comes from an email or attachment, end the bullet with
-its label in brackets, e.g. "[Email 2]". If the material is thin, say so in gaps rather than padding.
-Keep every bullet short; Dave reads this on his phone minutes before the meeting."""
+BRIEF_PROMPT = """You prepare short meeting briefs for Dave, CEO of TAG Solutions (an IT managed services provider
+in Albany, NY). He reads them on his phone minutes before the meeting.
+
+Content
+- Use ONLY the material: the invite, emails, attachments and web findings. Never invent facts.
+- End each bullet with its source label(s) in brackets, e.g. "[Email 2]", "[Web 1]", "[Invite]".
+- Never tell Dave what he already knows: what TAG Solutions is or does, his own title, his own
+  staff's roles, that he accepted the invite, which vendors TAG already uses. Background is ONLY about
+  the outside people and companies, and only what matters for THIS meeting: skip generic facts about
+  well-known companies (revenue, headcount, stock ticker, headquarters).
+- Gaps are things worth finding out before or during the meeting, never questions about TAG itself.
+- An empty section is better than a weak one. Do not pad.
+- Prep must be specific to this meeting and these people, never generic interview or sales advice.
+- Who: one entry per person attending (Dave's own staff only if they are part of the topic).
+  Put title and company in their fields; no email addresses or phone numbers.
+
+Style
+- Plain sentences, at most 20 words per bullet; prep items are one question or point each. Lead with the fact.
+- Dates: use the dates in the material exactly; never infer a year that isn't shown.
+- Do not use em dashes or en dashes. Use commas, colons or a new sentence.
+- No hedging filler ("it appears that", "it is worth noting"), no marketing adjectives."""
+
+_DASH = re.compile(r"\s*[—–]\s*|\s+-\s+")
+_RANGE = re.compile(r"(\d)\s*[–—]\s*(\d)")
+
+
+_GROUPED_CITE = re.compile(r"\[(Emails?|Attachments?|Web)\s+([\d,\s&and]+)\]")
+_CITE_KIND = {"emails": "Email", "email": "Email", "attachments": "Attachment", "attachment": "Attachment", "web": "Web"}
+
+
+def _expand_citation(match: re.Match) -> str:
+    kind = _CITE_KIND[match.group(1).lower()]
+    return "[" + ", ".join(f"{kind} {n}" for n in re.findall(r"\d+", match.group(2))) + "]"
+
+
+def plain_style(text: str) -> str:
+    """Remove em/en dashes the model still writes (keeping numeric ranges like 9–10 AM)
+    and normalize grouped citations ("[Emails 3, 4]" -> "[Email 3, Email 4]") so each
+    becomes a tappable source in the app."""
+    text = _GROUPED_CITE.sub(_expand_citation, text)
+    text = _RANGE.sub(r"\1-\2", text)
+    text = _DASH.sub(", ", text)
+    return re.sub(r",\s*,", ",", text).strip(" ,")
 
 
 def write_brief(llm: Any, gathered: dict[str, Any]) -> dict[str, Any]:
     material = json.dumps(gathered, ensure_ascii=False, default=str)
-    response = llm.complete([{"role": "user", "content": f"Material for the brief:\n{material}"}],
+    today = datetime.now(local_zone()).strftime("%A %B %d %Y")
+    response = llm.complete([{"role": "user", "content": f"Today is {today}.\nMaterial for the brief:\n{material}"}],
                             system=BRIEF_PROMPT, tools=[WRITE_BRIEF], tool_choice=WRITE_BRIEF.name, max_tokens=2500)
     calls = response.tool_calls
     if not calls:
         raise RuntimeError("The model did not return a brief.")
     brief = calls[0].input
 
-    # Same rule as chat replies: every address must come from the material.
     known = known_addresses(material)
-    def check(value: Any) -> Any:
+
+    def clean(value: Any) -> Any:
         if isinstance(value, str):
-            return verify_addresses(value, known)[0]
+            # Same rule as chat replies: every address must come from the material.
+            return plain_style(verify_addresses(value, known)[0])
         if isinstance(value, list):
-            return [check(v) for v in value]
+            return [c for c in (clean(v) for v in value) if c not in ("", None, {})]
         if isinstance(value, dict):
-            return {k: check(v) for k, v in value.items()}
+            return {k: clean(v) for k, v in value.items()}
         return value
-    return check(brief)
+    return clean(brief)
 
 
-def prepare_brief(graph: Any, llm: Any, store: Any, event: Event, force: bool = False) -> bool:
+def material_record(event: Event, gathered: dict[str, Any]) -> dict[str, Any]:
+    """What the app needs to open each cited source."""
+    return {
+        "invite": {"label": "Invite", "excerpt": _excerpt(event.description), "web_link": None},
+        "emails": [{
+            "label": e["label"], "subject": e["subject"], "received": e["received"],
+            "from": e["from"].get("name") or e["from"].get("email"),
+            "message_id": e["message_id"], "web_link": e["web_link"], "excerpt": _excerpt(e["body"]),
+        } for e in gathered["emails"]],
+        "attachments": [{
+            "label": a["label"], "name": a["name"], "from_email": a["from_email"],
+            "web_link": a["web_link"], "excerpt": _excerpt(a["text"], 400),
+        } for a in gathered["attachments"]],
+        "web": [{"label": w["label"], "about": w["about"], "fact": w["fact"], "url": w["url"]} for w in gathered["web"]],
+    }
+
+
+def prepare_brief(graph: Any, llm: Any, store: Any, event: Event, force: bool = False, searcher: Any = None) -> bool:
     """Generate (or refresh) one brief. False if someone else is on it or it's current."""
     if not store.claim_brief(event.id, event.subject, event.start.isoformat(), fingerprint(event), force=force):
         return False
     try:
-        gathered = gather(graph, event)
+        gathered = gather(graph, event, searcher)
         brief = write_brief(llm, gathered)
         brief["meeting"] = {"subject": event.subject, "when": fmt_local(event.start),
                             "ends": event.end.strftime("%I:%M %p").lstrip("0"), "location": event.location,
                             "join_url": event.join_url}
-        brief["material"] = {
-            "emails": [{k: e[k] for k in ("label", "subject", "received")} | {"from": e["from"].get("name") or e["from"].get("email")}
-                       for e in gathered["emails"]],
-            "attachments": [{k: a[k] for k in ("label", "name")} for a in gathered["attachments"]],
-        }
+        brief["material"] = material_record(event, gathered)
         store.finish_brief(event.id, brief=brief)
     except Exception as e:  # noqa: BLE001 - recorded on the brief, retried next cycle
         store.finish_brief(event.id, error=f"{type(e).__name__}: {e}"[:500])

@@ -88,6 +88,21 @@ class HatzAIProvider:
         return parse_response(self.post_raw(
             self.build_payload(messages, system, tools, max_tokens, temperature, tool_choice)))
 
+    def web_answer(self, prompt: str, tool: str = "firecrawl_search", max_tokens: int = 1500) -> str:
+        """Ask with one of HatzAI's server-side tools (e.g. web search) enabled.
+
+        These tools only run on the Hatz-native /chat/completions endpoint; HatzAI
+        executes them itself and returns the final text."""
+        payload = {"model": self.model, "messages": [{"role": "user", "content": prompt}],
+                   "tools_to_use": [tool], "max_tokens": max_tokens}
+        resp = self._session.post(f"{BASE_URL}/chat/completions", json=payload, timeout=self.timeout * 2)
+        if not resp.ok:
+            raise HatzAIError(f"HatzAI web search error {resp.status_code}: {resp.text[:300]}")
+        try:
+            return resp.json()["choices"][0]["message"]["content"] or ""
+        except (KeyError, IndexError, TypeError, ValueError) as e:
+            raise HatzAIError(f"Unexpected web search response: {resp.text[:300]}") from e
+
     def post_raw(self, payload: dict[str, Any]) -> dict[str, Any]:
         last_error: Exception = HatzAIError("Unknown error")
         for attempt in range(self.max_retries):

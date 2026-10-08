@@ -49,4 +49,4 @@ def build_services() -> Services:
         + [create_event_tool(graph, actions)]
     )
     assistant = Assistant(llm, registry, store, actions, memory)
-    return Services(graph, store, actions, assistant, memory, Worker(graph, llm, store))
+    return Services(graph, store, actions, assistant, memory, Worker(graph, llm, store, searcher=llm))

@@ -181,10 +181,58 @@ function renderItinerary(events, when) {
 
 let openEvent = null;
 
+// Sources of the open brief, by label ("Email 2", "Web 1", "Invite").
+let briefSources = new Map();
+
+function sourceIndex(material) {
+  const index = new Map();
+  const m = material || {};
+  if (m.invite) index.set("Invite", { kind: "Calendar invite", title: "Invite", excerpt: m.invite.excerpt || "No description in the invite." });
+  for (const e of m.emails || []) {
+    index.set(e.label, { kind: e.label, title: e.subject, meta: `${e.from} \u00b7 ${e.received}`, excerpt: e.excerpt,
+                         link: e.web_link, linkText: "Open in Outlook" });
+  }
+  for (const a of m.attachments || []) {
+    index.set(a.label, { kind: a.label, title: a.name, meta: `Attached to ${a.from_email}`, excerpt: a.excerpt,
+                         link: a.web_link, linkText: "Open the email in Outlook" });
+  }
+  for (const w of m.web || []) {
+    let host = w.url;
+    try { host = new URL(w.url).hostname.replace(/^www\./, ""); } catch { /* keep raw */ }
+    index.set(w.label, { kind: w.label, title: w.about || host, meta: host, excerpt: w.fact, link: w.url, linkText: `Open ${host}` });
+  }
+  return index;
+}
+
+function showSource(label) {
+  const src = briefSources.get(label);
+  if (!src) return;
+  $("#src-kind").textContent = src.kind;
+  $("#src-title").textContent = src.title || "";
+  $("#src-meta").textContent = src.meta || "";
+  $("#src-excerpt").textContent = src.excerpt || "";
+  const open = $("#src-open");
+  open.hidden = !src.link;
+  if (src.link) { open.href = src.link; open.textContent = src.linkText; }
+  $("#source").hidden = false;
+}
+
+$("#src-close").addEventListener("click", () => { $("#source").hidden = true; });
+$("#source").addEventListener("click", (e) => { if (e.target.id === "source") $("#source").hidden = true; });
+
 function cited(text) {
-  // "[Email 2]" style source labels become small markers instead of raw brackets.
-  const parts = String(text).split(/(\[(?:Invite|Email \d+|Attachment \d+)(?:,\s*(?:Invite|Email \d+|Attachment \d+))*\])/g);
-  return parts.filter(Boolean).map((p) => /^\[/.test(p) ? el("span", { class: "cite", text: p.slice(1, -1) }) : p);
+  // "[Email 2, Web 1]" becomes tappable chips that open the source; unknown labels stay plain.
+  const parts = String(text).split(/(\[(?:Invite|Email \d+|Attachment \d+|Web \d+)(?:,\s*(?:Invite|Email \d+|Attachment \d+|Web \d+))*\])/g);
+  const out = [];
+  for (const p of parts.filter(Boolean)) {
+    if (!/^\[/.test(p)) { out.push(p); continue; }
+    for (const label of p.slice(1, -1).split(/,\s*/)) {
+      out.push(briefSources.has(label)
+        ? el("button", { class: "cite", type: "button", text: label, onclick: () => showSource(label) })
+        : el("span", { class: "cite cite--plain", text: label }));
+    }
+  }
+  return out;
 }
 
 function briefSection(title, items) {
@@ -194,28 +242,42 @@ function briefSection(title, items) {
     el("ul", { class: "bsec__list" }, items.map((i) => el("li", {}, ...cited(i)))));
 }
 
+function whoSection(who) {
+  if (!who || !who.length) return null;
+  return el("section", { class: "bsec" },
+    el("h3", { class: "bsec__title", text: "Who" }),
+    el("ul", { class: "bsec__list bsec__list--who" }, who.map((w) => {
+      const line = [w.role, w.organization].filter(Boolean).join(", ");
+      return el("li", {},
+        el("span", { class: "who__name", text: w.name }),
+        line ? el("span", { class: "who__role", text: line }) : null,
+        w.note ? el("span", { class: "who__note" }, ...cited(w.note)) : null);
+    })));
+}
+
 function renderBrief(data) {
   const b = data.brief || {};
-  const m = b.material || {};
+  briefSources = sourceIndex(b.material);
   const content = [
-    el("p", { class: "bs-headline", text: b.headline || "" }),
-    b.who && b.who.length ? el("section", { class: "bsec" },
-      el("h3", { class: "bsec__title", text: "Who" }),
-      el("ul", { class: "bsec__list bsec__list--who" }, b.who.map((w) =>
-        el("li", {}, el("strong", { text: w.name }), w.role ? ` \u2014 ${w.role}` : "")))) : null,
+    el("p", { class: "bs-headline" }, ...cited(b.headline || "")),
+    whoSection(b.who),
     briefSection("Context", b.context),
     briefSection("Background", b.background),
     briefSection("Prep", b.prep),
     briefSection("Not covered", b.gaps),
   ];
-  const sources = [...(m.emails || []).map((e) => `${e.label}: \u201c${e.subject}\u201d \u2014 ${e.from}, ${e.received}`),
-                   ...(m.attachments || []).map((a) => `${a.label}: ${a.name}`)];
+  const sources = [...briefSources.entries()].filter(([label]) => label !== "Invite");
   if (sources.length) {
-    content.push(el("details", { class: "bsec bsources" },
-      el("summary", { text: `Sources (${sources.length})` }),
-      el("ul", { class: "bsec__list" }, sources.map((s) => el("li", { text: s })))));
+    content.push(el("section", { class: "bsec" },
+      el("h3", { class: "bsec__title", text: `Sources (${sources.length})` }),
+      el("ul", { class: "rows" }, sources.map(([label, src]) => el("li", {},
+        el("button", { class: "row row--tap", type: "button", onclick: () => showSource(label) },
+          el("span", { class: "row__top" },
+            el("span", { class: "row__title", text: src.title }),
+            el("span", { class: "row__when", text: label })),
+          src.meta ? el("span", { class: "row__sub", text: src.meta }) : null))))));
   }
-  content.push(el("p", { class: "card__note", text: `Prepared ${ago(data.updated_at)} from your calendar and email.` }));
+  content.push(el("p", { class: "card__note", text: `Prepared ${ago(data.updated_at)} from your calendar, email and the web.` }));
   $("#bs-content").replaceChildren(...content.filter(Boolean));
 }
 
@@ -274,6 +336,7 @@ function openBrief(event) {
 
 function closeBrief() {
   openEvent = null;
+  $("#source").hidden = true;
   $("#briefsheet").hidden = true;
 }
 
