@@ -97,3 +97,46 @@ def verify_names(reply: str, known: set[str]) -> tuple[str, list[str]]:
         return f"{name} (name unclear: {' or '.join(sorted(candidates))})"
 
     return _NAME.sub(check, reply), changes
+
+
+# "$153K", "$1,989/mo", "$16.8K per month": the period is part of the amount, so a flag goes after it.
+_DOLLARS = re.compile(r"\$\s?(\d[\d,]*(?:\.\d+)?)\s?([kKmM])?(?![\w])(\s?(?:/|per\s)\s?(?:mo|month|yr|year)\b)?")
+_NUMBER = re.compile(r"(?<![\w.])-?\d[\d,]*(?:\.\d+)?")
+
+
+def known_numbers(*sources: str) -> list[float]:
+    found = set()
+    for text in sources:
+        for raw in _NUMBER.findall(text or ""):
+            try:
+                found.add(abs(float(raw.replace(",", ""))))
+            except ValueError:
+                continue
+    return sorted(found)
+
+
+def verify_dollars(reply: str, known: list[float]) -> tuple[str, list[str]]:
+    """Mark dollar amounts no tool returned.
+
+    The model retypes money: "$153K", "$31,939", "$16.8K/mo". Each must match a
+    number from Dave or a tool, to the precision it's written ($153K covers
+    152,500 to 153,499), or it's marked "(unverified)". Only dollars: plain
+    counts are too often legitimately derived to check this way.
+    """
+    if not known:
+        return reply, []
+    changes: list[str] = []
+
+    def check(match: re.Match) -> str:
+        digits, unit = match.group(1).replace(",", ""), (match.group(2) or "").lower()
+        scale = {"k": 1_000, "m": 1_000_000}.get(unit, 1)
+        value = float(digits) * scale
+        decimals = len(digits.split(".")[1]) if "." in digits else 0
+        # Half a unit of the last digit shown, and at least a dollar for cents rounding.
+        tolerance = max(0.5 * scale / (10 ** decimals), 1.0 if not unit else 0)
+        if any(abs(value - k) <= tolerance for k in known):
+            return match.group(0)
+        changes.append(f"{match.group(0)} unverified")
+        return f"{match.group(0)} (unverified)"
+
+    return _DOLLARS.sub(check, reply), changes

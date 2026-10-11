@@ -11,7 +11,9 @@ from typing import Any
 from agent.actions import Actions, current_conversation
 from agent.calendar import local_zone
 from agent.cards import build_cards
-from agent.factcheck import known_addresses, no_long_dashes, verify_addresses, verify_names
+from agent.factcheck import (
+    known_addresses, known_numbers, no_long_dashes, verify_addresses, verify_dollars, verify_names,
+)
 from agent.loop import _run_tools, run_turn, run_turn_stream, system_prompt
 from agent.tools import ToolRegistry
 from llm.provider import LLMProvider
@@ -93,9 +95,11 @@ class Assistant:
         return text, conversation, history, system_prompt(datetime.now(local_zone()), extra)
 
     def _finish(self, text: str, conversation: dict[str, Any], result: Any) -> dict[str, Any]:
-        reply, fixes = verify_addresses(result.text, known_addresses(*_ground_truth(result.messages)))
+        truth = _ground_truth(result.messages)
+        reply, fixes = verify_addresses(result.text, known_addresses(*truth))
         reply, name_fixes = verify_names(reply, _staff_names(result.trace))
-        fixes += name_fixes
+        reply, money_fixes = verify_dollars(reply, known_numbers(*truth))
+        fixes += name_fixes + money_fixes
         reply = no_long_dashes(reply)
         if fixes:
             print(f"factcheck corrected reply in {conversation['id']}: {fixes}")

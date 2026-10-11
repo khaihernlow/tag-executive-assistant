@@ -41,3 +41,22 @@ def test_blended_staff_names_are_corrected_or_flagged():
     assert changes == ["Cory Lawrence unclear", "Riley Smith -> Riley Jones"]
     # Ordinary capitalised words and names nobody listed are left alone.
     assert verify_names("Last Week, Sawyer Savings met Jordan Rivera.", known)[0] == "Last Week, Sawyer Savings met Jordan Rivera."
+
+
+def test_dollar_amounts_must_come_from_the_data():
+    import json
+
+    from agent.factcheck import known_numbers, verify_dollars
+
+    tool = json.dumps({"quotes": [{"one_time": 153422.5, "monthly": 1989.0}, {"one_time": 31939.0}],
+                       "highlights": {"biggest": ["Masonic Care: PenTest ($16,800)"]}})
+    known = known_numbers(tool, "what's out there?")
+    reply = ("GP Fund is $153K plus $1,989/mo, Casella is $31,939, Masonic is $16.8K, "
+             "and the total is $250K. Also $31.9K and $2,000/mo.")
+    text, changes = verify_dollars(reply, known)
+    assert "$153K plus" in text and "$1,989/mo" in text and "$31,939," in text and "$16.8K," in text
+    assert "$250K (unverified)" in text            # nothing in the data says 250K
+    assert "$31.9K." in text or "$31.9K and" in text   # 31,939 rounds to 31.9K
+    assert "$2,000/mo (unverified)" in text        # 1,989 isn't 2,000 at full precision
+    assert changes == ["$250K unverified", "$2,000/mo unverified"]
+    assert verify_dollars("No money here.", known) == ("No money here.", [])
