@@ -39,4 +39,14 @@ class ToolRegistry:
             result = tool.handler(call.input)
         except Exception as e:  # noqa: BLE001 - every failure must reach the model
             return f"{type(e).__name__}: {e}", True
+        if isinstance(result, dict) and call.name in LIST_CARD_TOOLS:
+            # Said in the result itself, first: the system prompt and tool descriptions
+            # alone didn't stop the model re-typing whole tables the card already shows.
+            result = {"shown_to_dave": SHOWN_ON_CARD, **result}
         return (result if isinstance(result, str) else json.dumps(result, default=str)), False
+
+
+# Tools whose results Dave sees in full on a list card under the reply.
+LIST_CARD_TOOLS = {"find_renewals", "find_tasks", "onboarding_status", "check_time_entries", "find_opportunities"}
+SHOWN_ON_CARD = ("Every row below is already on a card under your reply. Do not restate rows or make a table. "
+                 "Reply in 2-4 sentences: the totals and the one or two things that stand out.")

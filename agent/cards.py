@@ -74,6 +74,12 @@ def build_cards(trace: list[ToolTrace]) -> list[dict[str, Any]]:
             if data.get("unsure"):
                 cards.append({"type": "unsure", "items": data["unsure"]})
 
+        elif t.name == "find_tasks" and data.get("projects"):
+            cards.append({"type": "tasks", **{k: data.get(k) for k in ("person", "open", "overdue", "projects")}})
+
+        elif t.name == "onboarding_status" and data.get("projects"):
+            cards.append({"type": "onboarding", "projects": data["projects"]})
+
         elif t.name == "find_renewals" and data.get("renewals"):
             cards.append({"type": "renewals", **{k: data.get(k) for k in ("window", "count", "monthly_value")},
                           "renewals": data["renewals"][:40]})
@@ -85,9 +91,9 @@ def build_cards(trace: list[ToolTrace]) -> list[dict[str, Any]]:
             cards.append({"type": "opportunities", "opportunities": data["opportunities"][:25]})
 
         elif t.name in ("create_event", "move_event", "cancel_event", "respond_to_invite",
-                        "create_opportunity", "update_opportunity", "start_renewal"):
+                        "create_opportunity", "update_opportunity", "start_renewal", "complete_tasks"):
             card = {"type": "action", **{k: data.get(k) for k in ("action_id", "kind", "status", "summary", "result", "error")}}
-            for extra in ("display", "email"):  # the record's fields, or an editable note
+            for extra in ("display", "email", "items", "pickable", "pick_note"):  # fields, a note, or a checklist
                 if data.get(extra):
                     card[extra] = data[extra]
             cards.append(card)

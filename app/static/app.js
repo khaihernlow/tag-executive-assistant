@@ -624,7 +624,7 @@ const KIND_LABELS = {
   create_event: "Calendar invite", book_meeting: "Calendar invite", create_rule: "Outlook rule",
   move_to_junk: "Inbox clean-up", reply_email: "Email reply", hold_time: "Calendar hold", nudge_colleague: "Email to colleague",
   move_event: "Move meeting", cancel_event: "Cancel meeting", respond_invite: "Invite reply",
-  create_opportunity: "New opportunity", update_opportunity: "Opportunity update",
+  create_opportunity: "New opportunity", update_opportunity: "Opportunity update", complete_tasks: "Autotask tasks",
 };
 
 function slip(action) {
@@ -690,17 +690,17 @@ function fillSlip(node, action) {
   }
   const keepIds = new Set();
   if (action.items && action.items.length) {
-    const pickable = action.kind === "move_to_junk" && action.status === "pending";
+    const pickable = (action.kind === "move_to_junk" || action.pickable) && action.status === "pending";
     parts.push(el("ul", { class: "slip__items" }, action.items.map((i) => {
       const text = [el("span", { class: "slip__item-title", text: i.subject }),
                     el("span", { class: "slip__item-sub", text: [i.from, i.reason].filter(Boolean).join(" \u00b7 ") })];
       if (!pickable) return el("li", {}, ...text);
-      const box = el("input", { type: "checkbox", "aria-label": `Move \u201c${i.subject}\u201d to Junk` });
+      const box = el("input", { type: "checkbox", "aria-label": `Include \u201c${i.subject}\u201d` });
       box.checked = true;
       box.addEventListener("change", () => { box.checked ? keepIds.delete(i.id) : keepIds.add(i.id); });
       return el("li", {}, el("label", { class: "slip__pick" }, box, el("span", {}, ...text)));
     })));
-    if (pickable) parts.push(el("p", { class: "card__note", text: "Untick anything you want to keep." }));
+    if (pickable) parts.push(el("p", { class: "card__note", text: action.pick_note || "Untick anything you want to keep." }));
   }
   node.className = "slip";
 
@@ -742,6 +742,7 @@ function fillSlip(node, action) {
       move_event: "✓ Moved", cancel_event: "✓ Done", hold_time: "✓ Held on your calendar",
       create_opportunity: "✓ Saved in Autotask", update_opportunity: "✓ Updated in Autotask",
       create_rule: "✓ Rule created",
+      complete_tasks: `✓ ${r.completed ?? ""} marked complete${r.failed && r.failed.length ? ` · ${r.failed.length} failed` : ""}`,
     }[action.kind] || "✓ Booked";
     const isAutotask = action.kind.endsWith("_opportunity");
     parts.push(el("span", { class: "stamp stamp--done" }, doneText,
@@ -803,6 +804,32 @@ function emailsCard(card) {
         m.preview ? el("span", { class: "row__preview", text: m.preview }) : null,
         m.attachments && m.attachments.length
           ? el("span", { class: "row__preview", text: `📎 ${m.attachments.join(", ")}` }) : null)))));
+}
+
+function tasksCard(card) {
+  return el("div", { class: "card" },
+    el("p", { class: "card__label", text: `Open tasks \u00b7 ${card.person}` }),
+    el("p", { class: "time__lead", text: `${card.open} open \u00b7 ${card.overdue} overdue` }),
+    ...card.projects.map((p) => el("details", { class: "task__group", open: card.projects.length === 1 },
+      el("summary", {}, el("span", { class: "task__project", text: p.project }),
+        el("span", { class: "task__count", text: `${p.tasks.length}` })),
+      el("ul", { class: "time__list" }, ...p.tasks.map((t) => el("li", { class: "time__row" },
+        el("span", { class: "time__name", text: t.title }),
+        el("span", { class: `time__hours${t.overdue ? " overdue" : ""}`, text: t.due ? `due ${t.due}` : "" })))))));
+}
+
+function onboardingCard(card) {
+  return el("div", { class: "card" },
+    el("p", { class: "card__label", text: "Onboarding projects" }),
+    el("ul", { class: "rows" }, ...card.projects.map((p) => el("li", { class: "row" },
+      el("span", { class: "row__top" },
+        el("span", { class: "row__title", text: p.company || p.project.replace(/^TAG - NEW EMPLOYEE ONBOARDING - /i, "New hire: ") }),
+        el("span", { class: "row__when", text: `${p.percent}%` })),
+      el("span", { class: "progress" }, el("span", { class: "progress__bar", style: `width:${Math.min(100, p.percent)}%` })),
+      el("span", { class: "row__sub", text: [p.kind === "client" ? "Client" : "New employee", p.lead && `lead ${p.lead}`,
+        p.planned_end && `${p.past_end ? "was due" : "due"} ${p.planned_end}`].filter(Boolean).join(" \u00b7 ") }),
+      p.overdue_tasks ? el("span", { class: "row__preview overdue", text: `${p.overdue_tasks} of ${p.open_tasks} open tasks overdue`
+        + (p.unassigned ? ` \u00b7 ${p.unassigned} unassigned` : "") }) : null))));
 }
 
 function renewalsCard(card) {
@@ -908,6 +935,8 @@ function renderCard(card) {
     case "opportunities": return opportunitiesCard(card);
     case "timesheet": return timesheetCard(card);
     case "renewals": return renewalsCard(card);
+    case "tasks": return tasksCard(card);
+    case "onboarding": return onboardingCard(card);
     case "email": return emailCard(card);
     case "people": return peopleCard(card);
     case "events": return eventsCard(card);

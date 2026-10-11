@@ -115,4 +115,6 @@ def public_action(action: dict[str, Any]) -> dict[str, Any]:
     if items:
         # Batch actions (e.g. moving several emails): show each one on the slip.
         out["items"] = [{k: i.get(k) for k in ("id", "from", "subject", "reason")} for i in items]
+        if payload.get("pickable"):
+            out["pickable"], out["pick_note"] = True, payload.get("pick_note")
     return out

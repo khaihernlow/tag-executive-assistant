@@ -16,6 +16,7 @@ from agent.mail import mail_tools
 from agent.opportunities import Directory, opportunity_kinds, opportunity_tools
 from agent.timesheets import timesheet_tools
 from agent.renewals import renewal_tools
+from agent.projects import Picklists, project_kinds, project_tools
 from connectors.tagdata import TagData
 from connectors.autotask import AutotaskClient
 from agent.requests import request_kinds
@@ -46,9 +47,10 @@ def build_services() -> Services:
     store = Store()
     # Autotask is optional: without credentials the assistant just has no CRM tools.
     autotask = AutotaskClient.from_env() if os.environ.get("AUTOTASK_USERNAME") else None
+    picks = Picklists(autotask) if autotask else None
     actions = Actions(store, [create_event_kind(graph), junk_kind(graph, store), *request_kinds(graph, store),
                               file_kind(graph, store), rule_kind(graph, store), *change_kinds(graph),
-                              *(opportunity_kinds(autotask) if autotask else [])])
+                              *(opportunity_kinds(autotask) + project_kinds(autotask, picks) if autotask else [])])
     directory = Directory(autotask) if autotask else None
     tag_data = TagData.from_env()  # Matt's nightly copy of TAG's systems; read-only
     memory = Memory(store)
@@ -67,6 +69,7 @@ def build_services() -> Services:
         + (opportunity_tools(directory, actions) if directory else [])
         + (timesheet_tools(autotask, store) if autotask else [])
         + (renewal_tools(tag_data, directory, actions) if tag_data and directory else [])
+        + (project_tools(autotask, directory, actions, picks) if autotask else [])
     )
     assistant = Assistant(llm, registry, store, actions, memory)
     worker = Worker(graph, llm, store, searcher=llm, fast_llm=fast_llm, actions=actions, autotask=directory)

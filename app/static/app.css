@@ -783,3 +783,12 @@ select.slip__field-input { width: 100%; text-overflow: ellipsis; }
 .time__days li { display: flex; justify-content: space-between; padding: 4px 0; border-top: 1px solid var(--rule-soft);
                  font-size: 14px; font-variant-numeric: tabular-nums; }
 .time__more summary { margin-top: var(--s2); font-size: 13px; color: var(--ink-faint); cursor: pointer; }
+
+/* ── tasks and onboarding ───────────────────────────────────────────────────── */
+
+.task__group { border-top: 1px solid var(--rule-soft); padding: var(--s2) 0; }
+.task__group summary { display: flex; justify-content: space-between; gap: var(--s3); cursor: pointer; font-weight: 600; font-size: 14px; }
+.task__count { color: var(--ink-faint); font-weight: 500; font-variant-numeric: tabular-nums; }
+.task__group .time__name { font-size: 14px; }
+.progress { display: block; height: 4px; margin: var(--s1) 0; background: var(--rule-soft); border-radius: 2px; overflow: hidden; }
+.progress__bar { display: block; height: 100%; background: var(--sage); }
