@@ -19,6 +19,8 @@ from agent.renewals import renewal_tools
 from agent.projects import Picklists, project_kinds, project_tools
 from agent.quotes import quote_tools
 from connectors.tagdata import TagData
+from connectors.apify import ApifyClient
+from agent.linkedin import LinkedIn, linkedin_tools
 from connectors.autotask import AutotaskClient
 from agent.requests import request_kinds
 from agent.memory import Memory, memory_tools
@@ -54,6 +56,8 @@ def build_services() -> Services:
                               *(opportunity_kinds(autotask) + project_kinds(autotask, picks) if autotask else [])])
     directory = Directory(autotask) if autotask else None
     tag_data = TagData.from_env()  # Matt's nightly copy of TAG's systems; read-only
+    apify = ApifyClient.from_env()
+    linkedin = LinkedIn(apify, store) if apify else None
     memory = Memory(store)
     llm = HatzAIProvider()
     # Quick, high-volume judgments (junk triage) use a faster, cheaper model.
@@ -72,7 +76,9 @@ def build_services() -> Services:
         + (renewal_tools(tag_data, directory, actions) if tag_data and directory else [])
         + (project_tools(autotask, directory, actions, picks) if autotask else [])
         + (quote_tools(autotask, directory) if autotask else [])
+        + (linkedin_tools(linkedin, graph, directory) if linkedin else [])
     )
     assistant = Assistant(llm, registry, store, actions, memory)
-    worker = Worker(graph, llm, store, searcher=llm, fast_llm=fast_llm, actions=actions, autotask=directory)
+    worker = Worker(graph, llm, store, searcher=llm, fast_llm=fast_llm, actions=actions, autotask=directory,
+                    linkedin=linkedin)
     return Services(graph, store, actions, assistant, memory, worker, llm, directory)

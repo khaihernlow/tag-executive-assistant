@@ -809,6 +809,36 @@ function emailsCard(card) {
           ? el("span", { class: "row__preview", text: `📎 ${m.attachments.join(", ")}` }) : null)))));
 }
 
+function personCard(card) {
+  const p = card.person;
+  const role = (r) => [r.title, r.company].filter(Boolean).join(" at ") + (r.duration ? ` \u00b7 ${r.duration}` : "");
+  const parts = [el("p", { class: "card__label", text: "LinkedIn" })];
+  if (p) {
+    parts.push(
+      el("p", { class: "person__name" }, p.name,
+        p.linkedin ? el("a", { href: p.linkedin, target: "_blank", rel: "noopener", text: "Profile" }) : null),
+      el("p", { class: "person__headline", text: [p.headline, p.location].filter(Boolean).join(" \u00b7 ") }));
+    const section = (title, items) => items.length ? [el("p", { class: "person__section", text: title }),
+      el("ul", { class: "person__list" }, ...items.map((t) => el("li", { text: t })))] : [];
+    parts.push(...section("Now", p.current.map(role)), ...section("Before", p.past.map(role)),
+      ...section("Education", p.education.map((e) => [e.school, [e.degree, e.field].filter(Boolean).join(", ")].filter(Boolean).join(" \u00b7 "))));
+  }
+  const tag = card.tag || {};
+  const known = [];
+  if (tag.autotask) known.push(`${tag.autotask.company} is in Autotask` + (tag.autotask.open_opportunities.length
+    ? ` \u00b7 ${tag.autotask.open_opportunities.length} open opportunit${tag.autotask.open_opportunities.length === 1 ? "y" : "ies"}` : ""));
+  if (tag.emails_with_dave && tag.emails_with_dave.length) known.push(`${tag.emails_with_dave.length} emails mention them, latest ${tag.emails_with_dave[0].received}`);
+  if (known.length) parts.push(el("p", { class: "person__section", text: "At TAG" }), el("ul", { class: "person__list" }, ...known.map((t) => el("li", { text: t }))));
+  if (card.other_matches && card.other_matches.length) {
+    parts.push(el("p", { class: "person__section", text: p ? "Also found" : "Which one?" }),
+      el("ul", { class: "rows" }, ...card.other_matches.map((o) => el("li", {},
+        el("a", { class: "row row--tap", href: o.linkedin, target: "_blank", rel: "noopener" },
+          el("span", { class: "row__title", text: o.name }),
+          el("span", { class: "row__sub", text: [o.headline, o.location].filter(Boolean).join(" \u00b7 ") }))))));
+  }
+  return el("div", { class: "card" }, ...parts);
+}
+
 function quotesCard(card) {
   const money = (n) => `$${Math.round(n).toLocaleString()}`;
   return el("div", { class: "card" },
@@ -956,6 +986,7 @@ function renderCard(card) {
     case "renewals": return renewalsCard(card);
     case "tasks": return tasksCard(card);
     case "quotes": return quotesCard(card);
+    case "person": return personCard(card);
     case "onboarding": return onboardingCard(card);
     case "email": return emailCard(card);
     case "people": return peopleCard(card);

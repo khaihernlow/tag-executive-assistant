@@ -7,6 +7,8 @@ LLM sees what the sender actually wrote and not twenty quoted replies.
 
 from __future__ import annotations
 
+import re
+
 from datetime import datetime, timedelta, timezone
 from typing import Any, Protocol
 
@@ -111,6 +113,24 @@ def search_mail(
         # $search can't take a date filter; fetch extra to survive the date cut.
         return recent(graph.get_all(
             path, {"$search": query, "$select": LIST_FIELDS, "$expand": ATTACHMENT_NAMES, "$top": 25}, limit=50))
+
+    if sender and re.fullmatch(r"[^@\s]+@[^@\s]+\.[A-Za-z]{2,}", sender.strip()):
+        # An exact address: filter on the sender field. Text search ($search) misses recent
+        # mail: "from:cpadilla@..." returned one of her four emails, not her two newest.
+        address = sender.strip().replace("'", "''")
+        raw = graph.get_all(path, {
+            "$filter": f"receivedDateTime ge {cutoff.strftime('%Y-%m-%dT%H:%M:%SZ')} "
+                       f"and from/emailAddress/address eq '{address}'",
+            "$orderby": "receivedDateTime desc",
+            "$select": LIST_FIELDS,
+            "$expand": ATTACHMENT_NAMES,
+            "$top": 25,
+        }, limit=50)
+        if about:
+            words = [w.lower() for w in re.findall(r"\w+", about) if len(w) > 2]
+            raw = [m for m in raw if all(w in f"{m.get('subject', '')} {m.get('bodyPreview', '')}".lower() for w in words)]
+        if raw or not about:
+            return [summarize(m) | {"matched": "all words"} for m in recent(raw)[:limit]]
 
     query = build_search(sender, about)
     if not query:

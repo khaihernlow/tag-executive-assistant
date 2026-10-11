@@ -199,3 +199,30 @@ def test_mutual_time_flags_calendars_it_cannot_see():
 def test_mutual_time_rejects_names_instead_of_addresses():
     content, is_error = run_mutual(FakeGraph(), attendees=["Kai"])
     assert is_error and "find_person" in content
+
+
+def test_searching_by_an_address_filters_on_the_sender_not_text_search():
+    from datetime import datetime, timezone
+
+    from agent.mail import search_mail
+
+    class Graph:
+        mailbox = "dave@tag.example"
+
+        def __init__(self):
+            self.params = []
+
+        def get_all(self, path, params=None, limit=500, headers=None):
+            self.params.append(params)
+            return [{"id": "1", "subject": "RE: onsite", "bodyPreview": "see you Thursday", "receivedDateTime": "2026-10-08T18:17:45Z",
+                     "from": {"emailAddress": {"name": "Casey Morgan", "address": "cm@northwind.example"}}},
+                    {"id": "2", "subject": "RE: follow-up", "bodyPreview": "thanks", "receivedDateTime": "2026-10-02T19:25:56Z",
+                     "from": {"emailAddress": {"name": "Casey Morgan", "address": "cm@northwind.example"}}}]
+
+    graph = Graph()
+    now = datetime(2026, 10, 11, tzinfo=timezone.utc)
+    found = search_mail(graph, sender="cm@northwind.example", since_days=30, now=now)
+    assert [m["id"] for m in found] == ["1", "2"]
+    assert "from/emailAddress/address eq 'cm@northwind.example'" in graph.params[0]["$filter"]
+    assert "$search" not in graph.params[0]
+    assert [m["id"] for m in search_mail(graph, sender="cm@northwind.example", about="onsite", now=now)] == ["1"]

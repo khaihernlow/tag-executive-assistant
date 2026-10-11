@@ -792,3 +792,13 @@ select.slip__field-input { width: 100%; text-overflow: ellipsis; }
 .task__group .time__name { font-size: 14px; }
 .progress { display: block; height: 4px; margin: var(--s1) 0; background: var(--rule-soft); border-radius: 2px; overflow: hidden; }
 .progress__bar { display: block; height: 100%; background: var(--sage); }
+
+/* ── person (LinkedIn) ──────────────────────────────────────────────────────── */
+
+.person__name { margin: 0; font-family: var(--serif); font-size: 18px; font-weight: 600; }
+.person__name a { margin-left: var(--s2); font-family: var(--sans); font-size: 13px; color: var(--navy); text-decoration: none; }
+.person__headline { margin: 2px 0 var(--s2); font-size: 13px; color: var(--ink-soft); }
+.person__section { margin: var(--s3) 0 var(--s1); font-size: 11px; font-weight: 600; letter-spacing: 0.08em;
+                   text-transform: uppercase; color: var(--ink-faint); }
+.person__list { margin: 0; padding-left: var(--s4); font-size: 14px; }
+.person__list li + li { margin-top: 2px; }

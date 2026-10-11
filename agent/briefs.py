@@ -80,7 +80,36 @@ def _excerpt(text: str, limit: int = EXCERPT_CHARS) -> str:
     return text if len(text) <= limit else text[:limit].rsplit(" ", 1)[0] + "…"
 
 
-def gather(graph: Any, event: Event, searcher: Any = None) -> dict[str, Any]:
+MAX_LINKEDIN = 3  # people per brief (about a cent each, cached for a month)
+
+
+def linkedin_findings(linkedin: Any, directory: Any, outside: list[dict[str, str]], first_label: int) -> list[dict[str, str]]:
+    """Each outside attendee's LinkedIn background, as a '[Web n]' source with their profile link.
+    The company comes from their email domain in Autotask; with no company and several
+    profiles for the name, the person is skipped rather than guessed."""
+    found = []
+    for a in outside:
+        name = (a.get("name") or "").strip()
+        if len(found) >= MAX_LINKEDIN or "@" in name or len(name.split()) < 2:
+            continue
+        company = ""
+        if directory is not None:
+            try:
+                companies = directory.find_companies(email=a.get("email") or "")
+                company = companies[0]["name"] if len(companies) == 1 else ""
+            except Exception:  # noqa: BLE001
+                company = ""
+        try:
+            result = linkedin.find(name, company)
+        except Exception:  # noqa: BLE001 - budget reached or Apify down: the brief goes ahead without it
+            continue
+        if result["person"]:
+            found.append({"label": f"Web {first_label + len(found)}", "about": f"{name} (LinkedIn)",
+                          "fact": result["summary"], "url": result["person"]["linkedin"]})
+    return found
+
+
+def gather(graph: Any, event: Event, searcher: Any = None, linkedin: Any = None, directory: Any = None) -> dict[str, Any]:
     domain = internal_domain()
     externals = external_attendees(event, graph.mailbox, domain)
     found: dict[str, str] = {}  # message id -> received
@@ -123,6 +152,8 @@ def gather(graph: Any, event: Event, searcher: Any = None) -> dict[str, Any]:
     detail = event_detail(event)
     outside = [a for a in detail["attendees"] if a["email"] in externals]
     web = web_research(searcher, event.subject, research_targets(outside, domain)) if searcher else []
+    if linkedin is not None:
+        web += linkedin_findings(linkedin, directory, outside, len(web) + 1)
     return {"event": detail, "external": externals, "emails": emails, "attachments": attachments, "web": web}
 
 
@@ -240,12 +271,13 @@ def material_record(event: Event, gathered: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def prepare_brief(graph: Any, llm: Any, store: Any, event: Event, force: bool = False, searcher: Any = None) -> bool:
+def prepare_brief(graph: Any, llm: Any, store: Any, event: Event, force: bool = False, searcher: Any = None,
+                  linkedin: Any = None, directory: Any = None) -> bool:
     """Generate (or refresh) one brief. False if someone else is on it or it's current."""
     if not store.claim_brief(event.id, event.subject, event.start.isoformat(), fingerprint(event), force=force):
         return False
     try:
-        gathered = gather(graph, event, searcher)
+        gathered = gather(graph, event, searcher, linkedin, directory)
         brief = write_brief(llm, gathered)
         brief["meeting"] = {"subject": event.subject, "when": fmt_local(event.start),
                             "ends": event.end.strftime("%I:%M %p").lstrip("0"), "location": event.location,
