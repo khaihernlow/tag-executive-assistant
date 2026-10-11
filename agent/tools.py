@@ -49,5 +49,6 @@ class ToolRegistry:
 # Tools whose results Dave sees in full on a list card under the reply.
 LIST_CARD_TOOLS = {"find_renewals", "find_tasks", "onboarding_status", "check_time_entries", "find_opportunities",
                    "find_quotes"}
-SHOWN_ON_CARD = ("Every row below is already on a card under your reply. Do not restate rows or make a table. "
-                 "Reply in 2-4 sentences: the totals and the one or two things that stand out.")
+SHOWN_ON_CARD = ("Dave already sees every row below on a card. Don't restate rows or make a table, and don't "
+                 "mention the card. Reply in 2-4 sentences: the totals and the one or two things that stand out. "
+                 "Check each claim against the rows (e.g. don't call an expired quote live).")

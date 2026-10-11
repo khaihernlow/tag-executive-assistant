@@ -103,7 +103,31 @@ def find_quotes(at: Any, directory: Directory, company_id: int | None = None, ab
             "owner": directory.resource_name(opp["ownerResourceID"]) if opp else "",
             "link": web_link("opportunity", q["opportunityID"]) if q.get("opportunityID") else "",
         })
-    return {"count": len(rows), "quotes": rows}
+    return {"count": len(rows), "highlights": highlights(rows, today), "quotes": rows}
+
+
+def highlights(rows: list[dict[str, Any]], today: date) -> dict[str, Any]:
+    """The facts a summary needs, worked out in code: the model once filed an expired
+    quote under "still live" while saying it had expired."""
+    def value(q: dict[str, Any]) -> float:
+        return q["one_time"] + 12 * q["monthly"]  # a year of recurring, to compare like with like
+
+    def label(q: dict[str, Any]) -> str:
+        price = " + ".join(p for p in (f"${q['one_time']:,.0f}" if q["one_time"] else "",
+                                       f"${q['monthly']:,.0f}/mo" if q["monthly"] else "") if p)
+        return f"{q['company']}: {q['name']} ({price or 'no price'})"
+
+    open_ = [q for q in rows if q["status"] not in ("Approved", "Declined")]
+    live = sorted((q for q in open_ if not q["expired"]), key=value, reverse=True)
+    expired = sorted((q for q in open_ if q["expired"]), key=value, reverse=True)
+    soon = [q for q in live if q["expires"] and
+            (datetime.strptime(q["expires"], "%b %d, %Y").date() - today).days <= 7]
+    return {
+        "open": len(open_), "live": len(live), "expired": len(expired),
+        "biggest_live": [label(q) + f", expires {q['expires']}" for q in live[:3]],
+        "biggest_expired": [label(q) + f", expired {q['expires']}" for q in expired[:3]],
+        "expiring_within_7_days": [label(q) + f", expires {q['expires']}" for q in soon],
+    }
 
 
 def quote_tools(at: Any, directory: Directory) -> list[Tool]:
@@ -111,7 +135,8 @@ def quote_tools(at: Any, directory: Directory) -> list[Tool]:
         name="find_quotes",
         description=("Quotes in Autotask (built in QuoteWerks): for a company (company_id from find_company), on Dave's "
                      "open opportunities (mine=true), or the last N days. Each has one-time and monthly totals, its "
-                     "lines, expiry, and status: Not sent for approval, Waiting on client, Approved, Declined. Read-only."),
+                     "lines, expiry, and status: Not sent for approval, Waiting on client, Approved, Declined. Read-only. "
+                     "Summarise from 'highlights' (worked out in code); don't recount or re-sort the rows yourself."),
         input_schema={"type": "object", "properties": {
             "company_id": {"type": "integer"}, "about": {"type": "string", "description": "Words in the quote name"},
             "mine": {"type": "boolean"}, "days": {"type": "integer", "description": "How far back (default 90)"},

@@ -78,3 +78,11 @@ def test_filters_company_mine_and_status():
     with pytest.raises(ValueError, match="status must be"):
         find_quotes(at, d, status="pending", today=TODAY)
     assert quote_tools(at, d)[0].spec.name == "find_quotes"
+
+
+def test_highlights_separate_live_from_expired():
+    at = FakeAutotask()
+    h = find_quotes(at, Directory(at), today=TODAY)["highlights"]
+    assert (h["open"], h["live"], h["expired"]) == (1, 0, 1)   # the approved laptop quote isn't open
+    assert h["biggest_live"] == [] and h["expiring_within_7_days"] == []
+    assert h["biggest_expired"] == ["Northwind Savings Bank: Core Managed Services ($9,775 + $9,775/mo), expired Oct 9, 2026"]

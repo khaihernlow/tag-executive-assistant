@@ -113,7 +113,22 @@ async def home(request: Request):
         if e.status_code == 401:
             return RedirectResponse("/auth/login")
         raise
-    return templates.TemplateResponse(request, "app.html", {"user": user})
+    response = templates.TemplateResponse(request, "app.html", {"user": user, "v": asset_version()})
+    # The page is tiny and always fresh; it points at the current app.js/app.css.
+    response.headers["Cache-Control"] = "no-cache"
+    return response
+
+
+def asset_version() -> str:
+    """A fingerprint of app.js and app.css. It goes on their URLs, so a browser
+    (or Dave's iPhone) can't keep running old code after an update: a cached
+    app.js once silently dropped a new kind of card."""
+    import hashlib
+
+    digest = hashlib.sha1()
+    for name in ("app.js", "app.css"):
+        digest.update((BASE_DIR / "static" / name).read_bytes())
+    return digest.hexdigest()[:10]
 
 
 @app.get("/manifest.webmanifest")
