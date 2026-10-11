@@ -89,3 +89,11 @@ def test_unknown_contract_and_tools():
     with pytest.raises(ValueError, match="find_renewals"):
         propose_renewal(FakeDB(), directory, actions, 12345, today=TODAY)
     assert {t.spec.name for t in renewal_tools(FakeDB(), directory, actions)} == {"find_renewals", "start_renewal"}
+
+
+def test_renewal_highlights_are_counted_in_code():
+    _, directory, _ = setup()
+    h = upcoming_renewals(FakeDB(), directory, days=90, today=TODAY)["highlights"]
+    assert h["biggest"][0].startswith("Northwind Savings Bank: Managed Services - Complete ($4,200/mo")
+    assert h["needs_review_count"] == 1 and len(h["flagged_needs_review"]) == 1
+    assert h["ending_within_30_days"] == {"count": 1, "monthly_value": 4200}

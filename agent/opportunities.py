@@ -214,6 +214,21 @@ def find_opportunities(directory: Directory, company_id: int | None = None, abou
     return [describe_opportunity(directory, o, today) for o in rows]
 
 
+def with_highlights(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """The list plus the facts a summary needs, counted and sorted in code."""
+    label = lambda o: f"{o['title']} ({o['company']}, {o['stage']}, closes {o['close_date']})"  # noqa: E731
+    overdue = [o for o in rows if o["overdue"]]
+    return {
+        "highlights": {
+            "count": len(rows), "past_close_date": len(overdue),
+            "oldest_past_close": [label(o) for o in overdue[:3]],
+            "biggest_amount": [label(o) + f", ${o['amount']:,.0f}" for o in
+                               sorted(rows, key=lambda o: -(o.get("amount") or 0))[:3] if o.get("amount")],
+        },
+        "opportunities": rows,
+    }
+
+
 # ── proposing changes ────────────────────────────────────────────────────────
 
 def _at_date(day: date) -> str:
@@ -411,9 +426,9 @@ def opportunity_tools(directory: Directory, actions: Actions) -> list[Tool]:
             input_schema={"type": "object", "properties": {
                 "company_id": {"type": "integer"}, "about": {"type": "string", "description": "Words in the title"},
                 "mine": {"type": "boolean"}, "open_only": {"type": "boolean"}, "overdue_only": {"type": "boolean"}}}),
-            handler=lambda a: {"opportunities": find_opportunities(
+            handler=lambda a: with_highlights(find_opportunities(
                 directory, a.get("company_id"), a.get("about", ""), a.get("mine", not a.get("company_id")),
-                a.get("open_only", True), a.get("overdue_only", False))}),
+                a.get("open_only", True), a.get("overdue_only", False)))),
         Tool(spec=ToolSpec(
             name="create_opportunity",
             description=(

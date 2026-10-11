@@ -85,9 +85,17 @@ def upcoming_renewals(db: Any, directory: Directory | None, days: int = 90, cust
     if customer:
         items = [i for i in items if customer.lower() in i["customer"].lower()]
     stale = db.rows(STALE_SQL, {"today": today})[0]["n"]
+    soon = [i for i in items if i["days_left"] <= 30]
+    label = lambda i: f"{i['customer']}: {i['contract']} (${i['monthly_value']:,.0f}/mo, ends {i['ends']})"  # noqa: E731
     return {
         "window": f"next {days} days", "count": len(items),
         "monthly_value": round(sum(i["monthly_value"] for i in items), 2),
+        "highlights": {
+            "biggest": [label(i) for i in sorted(items, key=lambda i: -i["monthly_value"])[:3]],
+            "flagged_needs_review": [label(i) for i in items if i["needs_review"]][:5],
+            "needs_review_count": sum(i["needs_review"] for i in items),
+            "ending_within_30_days": {"count": len(soon), "monthly_value": round(sum(i["monthly_value"] for i in soon), 2)},
+        },
         "renewals": items,
         "note": (f"Active recurring contracts ending by {until.strftime('%b %d, %Y').replace(' 0', ' ')}, from the nightly "
                  f"copy of Autotask. {stale} more are still marked Active past their end date; nearly all are old "

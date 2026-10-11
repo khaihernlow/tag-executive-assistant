@@ -135,7 +135,11 @@ def week_report(at: Any, store: Any, week: str = "last", person: str = "", today
     label = f"Week of {start.strftime('%b %d').replace(' 0', ' ')}" + (" (so far)" if today <= end else "")
     return {
         "week": label, "target_hours": target, "workdays_counted": len(counted),
-        "flagged": sum(r["flagged"] for r in rows), "people": rows,
+        "flagged": sum(r["flagged"] for r in rows),
+        "highlights": {"behind": [f"{r['name']}: {r['why']}" for r in rows if r["flagged"]],
+                       "on_track": sum(1 for r in rows if not r["flagged"] and not r["occasional"]),
+                       "occasional_loggers": sum(r["occasional"] for r in rows)},
+        "people": rows,
         "note": (f"Checked everyone who logged Autotask time in the past {ROSTER_WEEKS} weeks; only those who "
                  f"usually log {FULL_TIME_MIN:g}+ hours a week can be flagged. "
                  "Holidays and PTO aren't known, so a missing day may be time off.")

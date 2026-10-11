@@ -93,7 +93,10 @@ def open_tasks(at: Any, directory: Directory, picks: Picklists, project: str = "
            for pid, items in groups.items()]
     out.sort(key=lambda g: -len(g["tasks"]))
     return {"person": directory.resource_name(who), "open": sum(len(g["tasks"]) for g in out),
-            "overdue": sum(i["overdue"] for g in out for i in g["tasks"]), "projects": out}
+            "overdue": sum(i["overdue"] for g in out for i in g["tasks"]),
+            "highlights": {"by_project": [f"{g['project']}: {len(g['tasks'])} open, "
+                                          f"{sum(i['overdue'] for i in g['tasks'])} overdue" for g in out[:4]]},
+            "projects": out}
 
 
 def onboarding_status(at: Any, directory: Directory, picks: Picklists, today: date | None = None) -> dict[str, Any]:
@@ -127,7 +130,21 @@ def onboarding_status(at: Any, directory: Directory, picks: Picklists, today: da
             "unassigned": sum(1 for t in open_ if not t.get("assignedResourceID")),
         })
     rows.sort(key=lambda r: (r["kind"], r["planned_end"] == "", r["planned_end"]))
-    return {"projects": rows}
+    name = lambda r: r["company"] or r["project"]  # noqa: E731
+    return {
+        "highlights": {
+            "live": len(rows), "client": sum(r["kind"] == "client" for r in rows),
+            "past_planned_end": [f"{name(r)} ({r['percent']}% done, was due {r['planned_end']})" for r in rows if r["past_end"]],
+            "most_overdue_tasks": [f"{name(r)}: {r['overdue_tasks']} of {r['open_tasks']} open tasks overdue"
+                                   for r in sorted(rows, key=lambda r: -r["overdue_tasks"])[:3] if r["overdue_tasks"]],
+            "unassigned_tasks": [f"{name(r)}: {r['unassigned']}" for r in sorted(rows, key=lambda r: -r["unassigned"])
+                                 if r["unassigned"]][:3],
+            "due_in_next_14_days": [f"{name(r)} ({r['percent']}% done, due {r['planned_end']})" for r in rows
+                                    if not r["past_end"] and r["planned_end"] and
+                                    (datetime.strptime(r["planned_end"], "%b %d, %Y").date() - today).days <= 14],
+        },
+        "projects": rows,
+    }
 
 
 # ── ticking tasks off ────────────────────────────────────────────────────────

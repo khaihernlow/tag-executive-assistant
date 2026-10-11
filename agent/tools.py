@@ -6,6 +6,7 @@ import json
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from agent.dates import date_guide, today_local
 from llm.provider import ToolCall, ToolSpec
 
 
@@ -39,6 +40,11 @@ class ToolRegistry:
             result = tool.handler(call.input)
         except Exception as e:  # noqa: BLE001 - every failure must reach the model
             return f"{type(e).__name__}: {e}", True
+        if isinstance(result, dict):
+            guide = date_guide(result)
+            if guide:
+                # Weekdays and "tomorrow"/"in 9 days" for every date mentioned, worked out in code.
+                result = {**result, "dates": {"today": today_local().strftime("%A, %b %d, %Y"), **guide}}
         if isinstance(result, dict) and call.name in LIST_CARD_TOOLS:
             # Said in the result itself, first: the system prompt and tool descriptions
             # alone didn't stop the model re-typing whole tables the card already shows.

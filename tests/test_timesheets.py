@@ -107,3 +107,9 @@ def test_weeks_and_the_tool():
     assert resolve_week("2026-10-10", TODAY) == date(2026, 10, 5)
     [tool] = timesheet_tools(FakeAutotask(), None)
     assert tool.spec.name == "check_time_entries"
+
+
+def test_time_highlights():
+    h = week_report(FakeAutotask(), None, "last", today=TODAY)["highlights"]
+    assert h["behind"] == ["Alex Kim: 2h of 35h, nothing on Tue, Wed, Thu, Fri; under half their usual (35h)"]
+    assert (h["on_track"], h["occasional_loggers"]) == (2, 1)

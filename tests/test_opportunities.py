@@ -218,3 +218,13 @@ def test_pipeline_answers(choice, extra, patch):
     actions = Actions(store, opportunity_kinds(at), auto=set())
     quick_update(directory, actions, store, 100, choice, extra, today=TODAY)
     assert at.updated == [("Opportunities", {"id": 100, **patch})]
+
+
+def test_opportunity_list_highlights():
+    from agent.opportunities import with_highlights
+
+    _, directory, _ = setup()
+    h = with_highlights(find_opportunities(directory, today=TODAY))["highlights"]
+    assert (h["count"], h["past_close_date"]) == (2, 1)
+    assert h["oldest_past_close"] == ["Managed Services (Northwind Savings Bank, Business Case Alignment, closes Jun 9, 2026)"]
+    assert h["biggest_amount"][0].startswith("Firewall refresh") and h["biggest_amount"][0].endswith("$9,000")

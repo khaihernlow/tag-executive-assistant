@@ -122,3 +122,12 @@ def test_tools():
     assert set(tools) == {"find_tasks", "onboarding_status", "complete_tasks"}
     with pytest.raises(ValueError, match="already complete"):
         propose_complete(at, picks, actions, [12])
+
+
+def test_onboarding_highlights_are_counted_in_code():
+    at, directory, picks, _ = setup()
+    h = onboarding_status(at, directory, picks, today=TODAY)["highlights"]
+    assert h["live"] == 2 and h["client"] == 1
+    assert h["past_planned_end"] == ["TAG - NEW EMPLOYEE ONBOARDING - Riley Jones (10% done, was due Jun 4, 2026)"]
+    assert h["most_overdue_tasks"][0] == "TAG - NEW EMPLOYEE ONBOARDING - Riley Jones: 2 of 2 open tasks overdue"
+    assert h["unassigned_tasks"] == ["Northwind Dental: 1"] and h["due_in_next_14_days"] == []
