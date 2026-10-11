@@ -38,6 +38,7 @@ from agent.junk import known_correspondents
 from agent.mail import read_email
 from agent.relationship import automated, clean_preview, describe, has_emailed, relationship_label, thread_history
 from agent.scheduling import get_busy
+from agent.when import resolve as resolve_when
 from llm.provider import ToolSpec
 
 REPLY_KIND = "reply_email"
@@ -110,6 +111,8 @@ CLASSIFY = ToolSpec(
             "who": {"type": "string", "description": "Their role and organization, from the signature or domain, "
                     "e.g. 'AVP Finance & IT, Sawyer Savings Bank'. Under 10 words. Empty if unknown."},
             "duration_minutes": {"type": "integer", "description": "Only if stated"},
+            "when_text": {"type": "string", "description": "The scheduling words exactly as written, e.g. "
+                          "'next week', 'Thursday at 2', 'October 22 at 11:00 AM'. Empty if none."},
             "earliest_date": {"type": "string", "description": "YYYY-MM-DD, from phrases like 'next week'"},
             "latest_date": {"type": "string", "description": "YYYY-MM-DD"},
             "time_of_day": {"type": "string", "enum": ["morning", "afternoon", "any"]},
@@ -157,6 +160,19 @@ def classify(llm: Any, messages: list[dict[str, Any]], facts: dict[str, dict[str
             n = item.get("n")
             if isinstance(n, int) and 0 <= n < len(messages):
                 out[messages[n]["id"]] = item
+    return out
+
+
+def with_code_dates(verdict: dict[str, Any], received: str | None) -> dict[str, Any]:
+    """Dates from the quoted phrase, worked out in code, override the model's own arithmetic."""
+    if not received or not verdict.get("when_text"):
+        return verdict
+    day = datetime.fromisoformat(received.replace("Z", "+00:00")).astimezone(local_zone()).date()
+    resolved = resolve_when(verdict["when_text"], day)
+    if not resolved:
+        return verdict
+    out = {**verdict, **{k: v for k, v in resolved.items() if k != "proposed_start" or verdict.get("kind") == "proposes_time"}}
+    out["dates_from"] = "code"
     return out
 
 
@@ -272,6 +288,7 @@ def scan(graph: Any, llm: Any, store: Any, now: datetime | None = None, actions:
             store.save_request(m["id"], thread, m["receivedDateTime"], "ignored")
             continue
         sender = (m.get("from") or {}).get("emailAddress") or {}
+        verdict = with_code_dates(verdict, m.get("receivedDateTime"))
         request = {
             **{k: v for k, v in verdict.items() if k != "n" and v not in (None, "")},
             "from_name": sender.get("name") or sender.get("address"),
@@ -410,6 +427,7 @@ READ_ANSWER = ToolSpec(
         "outcome": {"type": "string", "enum": ["picked_offered", "proposed_other", "declined", "other"]},
         "slot_number": {"type": "integer", "description": "For picked_offered: which offered time (1-based)"},
         "proposed_start": {"type": "string", "description": "For proposed_other: YYYY-MM-DDTHH:MM, Dave's local time"},
+        "when_text": {"type": "string", "description": "For proposed_other: their words for the time, exactly as written"},
         "summary": {"type": "string", "description": "Their reply in under 15 words"},
     }, "required": ["outcome", "summary"]},
 )
@@ -509,9 +527,16 @@ def follow_up(graph: Any, llm: Any, store: Any, actions: Any) -> None:
                 # A clash, or the reply doesn't clearly name that time: Dave signs off the invite.
                 store.update_request(row["message_id"], status="new",
                                      request={**request, "unconfirmed_pick": not confirmed})
-        elif outcome == "proposed_other" and answer.get("proposed_start"):
-            store.update_request(row["message_id"], status="new",
-                                 request={**request, "kind": "proposes_time", "proposed_start": answer["proposed_start"]})
+        elif outcome == "proposed_other" and (answer.get("proposed_start") or answer.get("when_text")):
+            answer = with_code_dates({**answer, "kind": "proposes_time"}, latest.get("receivedDateTime"))
+            request = {**request, "answer": answer}
+            if answer.get("proposed_start"):
+                request = {**request, "kind": "proposes_time", "proposed_start": answer["proposed_start"]}
+            else:
+                # A day but no time ("Thursday works better"): offer times that day instead.
+                request = {**request, "kind": "asks_for_times", "earliest_date": answer.get("earliest_date"),
+                           "latest_date": answer.get("latest_date")}
+            store.update_request(row["message_id"], status="new", request=request)
         else:
             store.update_request(row["message_id"], status="new", request=request)
 
