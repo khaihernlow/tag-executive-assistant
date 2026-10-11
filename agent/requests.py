@@ -430,6 +430,53 @@ def read_answer(llm: Any, offered: list[str], reply_text: str, received: str) ->
     return response.tool_calls[0].input if response.tool_calls else {"outcome": "other", "summary": ""}
 
 
+_ORDINALS = {1: ("first", "1st", "option 1", "option one", "#1"), 2: ("second", "2nd", "option 2", "option two", "#2"),
+             3: ("third", "3rd", "option 3", "option three", "#3")}
+
+
+def _slot_mentions(text: str, start: datetime) -> tuple[bool, bool]:
+    """(names its day, names its time) somewhere in the reply."""
+    day_words = {start.strftime("%A").lower(), start.strftime("%a").lower(), start.strftime("%a").lower() + "."}
+    if start.strftime("%A") == "Tuesday":
+        day_words.add("tues")
+    if start.strftime("%A") == "Thursday":
+        day_words |= {"thur", "thurs"}
+    month = start.strftime("%b").lower()
+    dates = {f"{start.month}/{start.day}", f"{month} {start.day}", f"{start.strftime('%B').lower()} {start.day}",
+             f"{start.day}th", f"{start.day}st", f"{start.day}nd", f"{start.day}rd"}
+    hour12 = start.hour % 12 or 12
+    suffix = "am" if start.hour < 12 else "pm"
+    times = {f"{hour12}:{start.minute:02d}", f"{start.hour}:{start.minute:02d}"}
+    if start.minute == 0:
+        times |= {f"{hour12}{suffix}", f"{hour12} {suffix}", f"{hour12} o'clock", f"at {hour12}"}
+    words = re.findall(r"[a-z0-9:/.']+", text)
+    day = any(w in day_words for w in words) or any(d in text for d in dates)
+    when = any(re.search(rf"(?<![0-9:]){re.escape(t)}(?![0-9])", text) for t in times)
+    return day, when
+
+
+def reply_confirms_slot(reply: str, offered: list[str], number: int) -> bool:
+    """Does the reply itself name the offered time the model says they picked, and
+    no other? Auto-booking acts on this, so it isn't left to the model's reading."""
+    text = " ".join(reply.lower().split())
+    # Their own words only: not the quoted email with all three times in it.
+    text = re.split(r"\bfrom:|\bon .{5,60} wrote:|-----original message", text)[0]
+    if any(o in text for o in _ORDINALS.get(number, ())) and not any(
+            o in text for n, words in _ORDINALS.items() if n != number for o in words):
+        return True
+    starts = [datetime.fromisoformat(s).astimezone(local_zone()) for s in offered]
+    scores = []
+    for start in starts:
+        day, when = _slot_mentions(text, start)
+        scores.append(2 * day + when)
+    picked = scores[number - 1]
+    # It must name the picked time (day and time, or its day when no other offer shares that day) ...
+    same_day = sum(1 for s in starts if s.date() == starts[number - 1].date()) > 1
+    named = picked == 3 or (picked >= 2 and not same_day)
+    # ... and match it better than any other offered time.
+    return named and all(score < picked for i, score in enumerate(scores) if i != number - 1)
+
+
 def follow_up(graph: Any, llm: Any, store: Any, actions: Any) -> None:
     """For threads waiting on the other person: did they answer, and with what?"""
     for row in store.requests_in(("waiting",)):
@@ -454,11 +501,14 @@ def follow_up(graph: Any, llm: Any, store: Any, actions: Any) -> None:
             store.update_request(row["message_id"], request=request)
             action = propose_booking(graph, store, actions, row["message_id"], offered[number - 1],
                                      allow_status=("waiting",))
-            if not action.get("conflicts_found"):
-                # Dave chose this time when he sent it; it's still free, so book it.
+            confirmed = reply_confirms_slot(text, offered, number)
+            if confirmed and not action.get("conflicts_found"):
+                # Dave chose this time when he sent it, their reply names it, and it's still free: book it.
                 actions.approve(action["action_id"], decided_by=f"auto: {request.get('from_name')} picked a time you offered")
             else:
-                store.update_request(row["message_id"], status="new")
+                # A clash, or the reply doesn't clearly name that time: Dave signs off the invite.
+                store.update_request(row["message_id"], status="new",
+                                     request={**request, "unconfirmed_pick": not confirmed})
         elif outcome == "proposed_other" and answer.get("proposed_start"):
             store.update_request(row["message_id"], status="new",
                                  request={**request, "kind": "proposes_time", "proposed_start": answer["proposed_start"]})
@@ -744,6 +794,7 @@ def open_requests_view(graph: Any, store: Any, actions_store: Any, memory: Any =
             "status": row["status"],
             "offered": [slot_label(datetime.fromisoformat(s).astimezone(local_zone())) for s in request.get("offered") or []],
             "answer": (request.get("answer") or {}).get("summary"),
+            "unconfirmed_pick": bool(request.get("unconfirmed_pick")),
             "booked": slot_label(datetime.fromisoformat(request["booked_start"]))
                       if request.get("booked_start") else None,
             "received": row["received_at"],

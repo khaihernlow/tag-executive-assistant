@@ -355,6 +355,44 @@ def test_a_picked_time_that_is_no_longer_free_comes_back_for_approval():
     assert not any(p.endswith("/events") for p, _ in graph.posts)
 
 
+THREE = [datetime(2099, 10, 13, 10, 0, tzinfo=NY), datetime(2099, 10, 14, 14, 30, tzinfo=NY),
+         datetime(2099, 10, 14, 16, 0, tzinfo=NY)]  # Tue 10, Wed 2:30, Wed 4
+
+
+@pytest.mark.parametrize("reply, number, ok", [
+    ("Tuesday at 10 works for us", 1, True),
+    ("Tues works", 1, True),                                  # the only Tuesday offered
+    ("10/13 is great", 1, True),
+    ("Let's do the first one", 1, True),
+    ("Wednesday at 2:30 please", 2, True),
+    ("Wednesday works", 2, False),                            # two Wednesday times: which one?
+    ("4pm Wednesday", 3, True),
+    ("Tuesday works", 2, False),                              # names a different offer than the model picked
+    ("Sounds good, see you then", 1, False),                  # names nothing
+    ("Either Tuesday or Wednesday at 2:30 works", 2, True),   # 2:30 Wednesday is the clearest match
+    ("Tuesday at 10 or Wed 2:30, whichever", 1, False),       # both named equally
+    ("Wed at 4 works.\nOn Mon, Oct 12 Dave wrote: Tuesday at 10 or Wednesday 2:30?", 3, True),  # quoted mail ignored
+])
+def test_a_reply_must_name_the_time_before_it_is_booked_automatically(reply, number, ok):
+    from agent.requests import reply_confirms_slot
+
+    assert reply_confirms_slot(reply, [s.isoformat() for s in THREE], number) is ok
+
+
+def test_a_pick_the_reply_does_not_back_up_comes_back_for_approval():
+    graph = FakeGraph(thread=[msg_from("mark@vendor.example", "ans")], reply_body="Sounds good, see you then!")
+    store = Store(":memory:")
+    actions = Actions(store, request_kinds(graph, store), auto=set())
+    waiting_request(store)
+    follow_up(graph, FakeLLM("record_answer", {"outcome": "picked_offered", "slot_number": 2, "summary": "Sounds good"}),
+              store, actions)
+    row = store.get_request("req")
+    assert row["status"] == "new" and row["request"]["unconfirmed_pick"] is True
+    [pending] = store.list_actions()
+    assert pending["status"] == "pending"
+    assert not any(p.endswith("/events") for p, _ in graph.posts)  # no invite went out
+
+
 def test_a_different_time_brings_the_card_back_with_their_suggestion():
     graph, store = FakeGraph(thread=[msg_from("mark@vendor.example", "ans")]), Store(":memory:")
     actions = Actions(store, request_kinds(graph, store), auto=set())

@@ -461,6 +461,9 @@ function requestCard(r) {
       el("strong", { text: `${r.handler} is handling this.` }), " You\u2019re copied, so there\u2019s nothing to reply to."));
   }
   if (r.answer) body.append(el("p", { class: "request__answer", text: `They replied: \u201c${r.answer}\u201d` }));
+  if (r.unconfirmed_pick) {
+    body.append(el("p", { class: "card__note", text: "Their reply doesn\u2019t clearly name one of your times, so the invite waits for you. Check it\u2019s the right one." }));
+  }
   if (r.action) {
     body.append(slip(r.action));
     return card;
