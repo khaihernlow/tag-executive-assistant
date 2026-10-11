@@ -74,6 +74,9 @@ def build_cards(trace: list[ToolTrace]) -> list[dict[str, Any]]:
             if data.get("unsure"):
                 cards.append({"type": "unsure", "items": data["unsure"]})
 
+        elif t.name == "find_quotes" and data.get("quotes"):
+            cards.append({"type": "quotes", "quotes": data["quotes"]})
+
         elif t.name == "find_tasks" and data.get("projects"):
             cards.append({"type": "tasks", **{k: data.get(k) for k in ("person", "open", "overdue", "projects")}})
 

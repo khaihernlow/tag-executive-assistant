@@ -17,6 +17,7 @@ from agent.opportunities import Directory, opportunity_kinds, opportunity_tools
 from agent.timesheets import timesheet_tools
 from agent.renewals import renewal_tools
 from agent.projects import Picklists, project_kinds, project_tools
+from agent.quotes import quote_tools
 from connectors.tagdata import TagData
 from connectors.autotask import AutotaskClient
 from agent.requests import request_kinds
@@ -70,6 +71,7 @@ def build_services() -> Services:
         + (timesheet_tools(autotask, store) if autotask else [])
         + (renewal_tools(tag_data, directory, actions) if tag_data and directory else [])
         + (project_tools(autotask, directory, actions, picks) if autotask else [])
+        + (quote_tools(autotask, directory) if autotask else [])
     )
     assistant = Assistant(llm, registry, store, actions, memory)
     worker = Worker(graph, llm, store, searcher=llm, fast_llm=fast_llm, actions=actions, autotask=directory)

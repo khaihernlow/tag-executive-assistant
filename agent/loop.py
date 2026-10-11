@@ -143,6 +143,7 @@ STEP_LABELS = {
     "check_time_entries": "Checking time entries in Autotask",
     "find_renewals": "Checking contracts up for renewal",
     "find_tasks": "Checking your Autotask tasks",
+    "find_quotes": "Looking up quotes",
     "onboarding_status": "Checking onboarding projects",
     "complete_tasks": "Preparing the task update",
     "start_renewal": "Preparing the renewal opportunity",

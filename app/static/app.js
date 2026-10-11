@@ -806,6 +806,22 @@ function emailsCard(card) {
           ? el("span", { class: "row__preview", text: `📎 ${m.attachments.join(", ")}` }) : null)))));
 }
 
+function quotesCard(card) {
+  const money = (n) => `$${Math.round(n).toLocaleString()}`;
+  return el("div", { class: "card" },
+    el("p", { class: "card__label", text: `Quotes \u00b7 ${card.quotes.length}` }),
+    el("ul", { class: "rows" }, card.quotes.map((q) => el("li", {},
+      el(q.link ? "a" : "div", { class: "row row--tap", ...(q.link ? { href: q.link, target: "_blank", rel: "noopener" } : {}) },
+        el("span", { class: "row__top" },
+          el("span", { class: "row__title", text: q.name }),
+          el("span", { class: "row__when", text: [q.one_time ? money(q.one_time) : "", q.monthly ? `${money(q.monthly)}/mo` : ""]
+            .filter(Boolean).join(" + ") })),
+        el("span", { class: "row__sub", text: `${q.company} \u00b7 #${q.quote_number} \u00b7 ${q.created}` }),
+        el("span", { class: `row__preview${q.status === "Declined" || q.expired ? " overdue" : ""}`,
+          text: [q.status, q.expired ? `expired ${q.expires}` : q.expires && q.status !== "Approved" ? `expires ${q.expires}` : ""]
+            .filter(Boolean).join(" \u00b7 ") }))))));
+}
+
 function tasksCard(card) {
   return el("div", { class: "card" },
     el("p", { class: "card__label", text: `Open tasks \u00b7 ${card.person}` }),
@@ -936,6 +952,7 @@ function renderCard(card) {
     case "timesheet": return timesheetCard(card);
     case "renewals": return renewalsCard(card);
     case "tasks": return tasksCard(card);
+    case "quotes": return quotesCard(card);
     case "onboarding": return onboardingCard(card);
     case "email": return emailCard(card);
     case "people": return peopleCard(card);
