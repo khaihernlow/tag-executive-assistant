@@ -248,12 +248,15 @@ def test_undo_moves_it_back_once_and_keeps_the_sender():
 
 
 def test_sweep_only_looks_at_mail_since_the_last_check():
+    from datetime import datetime, timezone
+
+    now = datetime(2026, 10, 8, 18, 0, tzinfo=timezone.utc)  # the first run looks back from "now"
     graph, store, actions, llm = setup(inbox=[msg("n1", "client@client.example", received="2026-10-08T12:00:00Z")])
-    sweep_new(graph, llm, store, actions)
+    sweep_new(graph, llm, store, actions, now=now)
     assert "receivedDateTime gt" in graph.inbox_filters[0]
     assert store.get_state("junk_checkpoint") == "2026-10-08T12:00:00Z"
     graph.inbox = []
-    sweep_new(graph, llm, store, actions)
+    sweep_new(graph, llm, store, actions, now=now)
     assert graph.inbox_filters[1] == "receivedDateTime gt 2026-10-08T12:00:00Z"
     assert store.get_state("junk_checkpoint") == "2026-10-08T12:00:00Z"
 

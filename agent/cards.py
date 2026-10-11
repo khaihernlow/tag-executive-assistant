@@ -74,6 +74,10 @@ def build_cards(trace: list[ToolTrace]) -> list[dict[str, Any]]:
             if data.get("unsure"):
                 cards.append({"type": "unsure", "items": data["unsure"]})
 
+        elif t.name == "find_renewals" and data.get("renewals"):
+            cards.append({"type": "renewals", **{k: data.get(k) for k in ("window", "count", "monthly_value")},
+                          "renewals": data["renewals"][:40]})
+
         elif t.name == "check_time_entries" and data.get("people"):
             cards.append({"type": "timesheet", **{k: data.get(k) for k in ("week", "target_hours", "flagged", "people")}})
 
@@ -81,7 +85,7 @@ def build_cards(trace: list[ToolTrace]) -> list[dict[str, Any]]:
             cards.append({"type": "opportunities", "opportunities": data["opportunities"][:25]})
 
         elif t.name in ("create_event", "move_event", "cancel_event", "respond_to_invite",
-                        "create_opportunity", "update_opportunity"):
+                        "create_opportunity", "update_opportunity", "start_renewal"):
             card = {"type": "action", **{k: data.get(k) for k in ("action_id", "kind", "status", "summary", "result", "error")}}
             for extra in ("display", "email"):  # the record's fields, or an editable note
                 if data.get(extra):

@@ -70,6 +70,15 @@ class Directory:
             self._stages = {key: by_number[num] for key, (num, _, _) in STAGES.items() if num in by_number}
         return self._stages
 
+    def category_id(self, word: str) -> int:
+        """TAG's opportunity category whose label contains `word` ('renewal' -> 'Renewals')."""
+        info = self.at._request_json("GET", self.at._api_url("Opportunities/entityInformation/fields"))
+        field = next((f for f in info["fields"] if f["name"] == "opportunityCategoryID"), {})
+        for v in field.get("picklistValues") or []:
+            if word.lower() in v["label"].lower() and v.get("isActive", True):
+                return int(v["value"])
+        raise ValueError(f"Autotask has no opportunity category like '{word}'.")
+
     def stage_label(self, stage_id: int) -> str:
         self.stage_ids()
         return self._stage_labels.get(stage_id, str(stage_id))
@@ -248,7 +257,8 @@ def propose_create(directory: Directory, actions: Actions, args: dict[str, Any],
         "title": title, "companyID": company_id, "ownerResourceID": owner,
         "stage": directory.stage_ids()[stage_key], "status": status, "probability": probability,
         "startDate": _at_date(today), "projectedCloseDate": _at_date(close),
-        "amount": float(args.get("amount") or 0), "cost": 0.0, "useQuoteTotals": True, "opportunityCategoryID": 1,
+        "amount": float(args.get("amount") or 0), "cost": 0.0, "useQuoteTotals": True,
+        "opportunityCategoryID": directory.category_id(args["category"]) if args.get("category") else 1,
         "description": (args.get("description") or "").strip(),
     }
     if contact:
@@ -282,6 +292,8 @@ def propose_create(directory: Directory, actions: Actions, args: dict[str, Any],
             ["Closes", close.strftime("%b %d, %Y").replace(" 0", " "), "", "close_date"],
             ["Owner", directory.resource_name(owner), "", "owner_id"],
             ["Contact", contact_row, "New contact" if new_contact else ""]]
+    if args.get("category"):
+        rows.insert(1, ["Category", args["category"].title() + "s"])
     stages = directory.stage_ids()
     edit_fields = {
         "stage": {"options": [[k, f"{directory.stage_label(stages[k])} \u00b7 {STAGES[k][1]}%"]

@@ -141,6 +141,8 @@ STEP_LABELS = {
     "create_opportunity": "Preparing the opportunity",
     "update_opportunity": "Preparing the update",
     "check_time_entries": "Checking time entries in Autotask",
+    "find_renewals": "Checking contracts up for renewal",
+    "start_renewal": "Preparing the renewal opportunity",
 }
 
 

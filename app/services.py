@@ -15,6 +15,8 @@ from agent.junk import junk_kind, junk_tools
 from agent.mail import mail_tools
 from agent.opportunities import Directory, opportunity_kinds, opportunity_tools
 from agent.timesheets import timesheet_tools
+from agent.renewals import renewal_tools
+from connectors.tagdata import TagData
 from connectors.autotask import AutotaskClient
 from agent.requests import request_kinds
 from agent.memory import Memory, memory_tools
@@ -48,6 +50,7 @@ def build_services() -> Services:
                               file_kind(graph, store), rule_kind(graph, store), *change_kinds(graph),
                               *(opportunity_kinds(autotask) if autotask else [])])
     directory = Directory(autotask) if autotask else None
+    tag_data = TagData.from_env()  # Matt's nightly copy of TAG's systems; read-only
     memory = Memory(store)
     llm = HatzAIProvider()
     # Quick, high-volume judgments (junk triage) use a faster, cheaper model.
@@ -63,6 +66,7 @@ def build_services() -> Services:
         + change_tools(graph, actions)
         + (opportunity_tools(directory, actions) if directory else [])
         + (timesheet_tools(autotask, store) if autotask else [])
+        + (renewal_tools(tag_data, directory, actions) if tag_data and directory else [])
     )
     assistant = Assistant(llm, registry, store, actions, memory)
     worker = Worker(graph, llm, store, searcher=llm, fast_llm=fast_llm, actions=actions, autotask=directory)

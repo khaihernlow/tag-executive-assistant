@@ -805,6 +805,23 @@ function emailsCard(card) {
           ? el("span", { class: "row__preview", text: `📎 ${m.attachments.join(", ")}` }) : null)))));
 }
 
+function renewalsCard(card) {
+  const money = (n) => `$${Math.round(n).toLocaleString()}`;
+  return el("div", { class: "card" },
+    el("p", { class: "card__label", text: `Renewals \u00b7 ${card.window}` }),
+    el("p", { class: "time__lead", text: `${card.count} contracts \u00b7 ${money(card.monthly_value)}/month at stake` }),
+    el("ul", { class: "rows" }, card.renewals.map((r) => el("li", {},
+      el("button", { class: "row row--tap", type: "button",
+        onclick: () => send(`Start a renewal opportunity for ${r.customer}'s contract "${r.contract}" (contract ${r.contract_id}).`) },
+        el("span", { class: "row__top" },
+          el("span", { class: "row__title", text: r.customer || r.contract }),
+          el("span", { class: `row__when${r.days_left <= 30 ? " overdue" : ""}`, text: `ends ${r.ends}` })),
+        el("span", { class: "row__sub", text: [r.contract, r.monthly_value ? `${money(r.monthly_value)}/mo` : ""]
+          .filter(Boolean).join(" \u00b7 ") }),
+        r.needs_review ? el("span", { class: "slip__note", text: "Needs renewal review" }) : null)))),
+    el("p", { class: "card__note", text: "Tap one to open a renewal opportunity in Autotask." }));
+}
+
 function timesheetCard(card) {
   // Flagged people first, then everyone else; occasional loggers folded away.
   const regular = card.people.filter((p) => !p.occasional);
@@ -890,6 +907,7 @@ function renderCard(card) {
     case "emails": return emailsCard(card);
     case "opportunities": return opportunitiesCard(card);
     case "timesheet": return timesheetCard(card);
+    case "renewals": return renewalsCard(card);
     case "email": return emailCard(card);
     case "people": return peopleCard(card);
     case "events": return eventsCard(card);
