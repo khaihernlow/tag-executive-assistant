@@ -802,3 +802,106 @@ select.slip__field-input { width: 100%; text-overflow: ellipsis; }
                    text-transform: uppercase; color: var(--ink-faint); }
 .person__list { margin: 0; padding-left: var(--s4); font-size: 14px; }
 .person__list li + li { margin-top: 2px; }
+
+
+/* ══ Layout overhaul: next up, "needs you", and a two-pane desktop ══════════════ */
+
+/* Compact header: the date is the title; no greeting taking a phone's top inch. */
+.masthead { align-items: center; padding-top: calc(env(safe-area-inset-top) + var(--s3)); padding-bottom: var(--s3); }
+.masthead__date {
+  margin: 0; font: 600 22px/1.2 var(--serif); letter-spacing: -0.01em;
+  text-transform: none; color: var(--ink);
+}
+
+.panes { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.pane--chat { position: relative; display: flex; flex-direction: column; min-height: 0; flex: 1; }
+.sheet[data-tab="today"] .pane--chat { flex: 0 0 0; }   /* phone: only its overlays show on Today */
+
+/* Next up */
+.next { padding-top: var(--s4); }
+.next__label { margin: 0; font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--brass); }
+.next__when { text-transform: none; letter-spacing: 0; font-weight: 500; color: var(--ink-soft); }
+.next__title { margin: var(--s1) 0 0; font: 600 21px/1.25 var(--serif); }
+.next__meta { margin: 2px 0 0; font-size: 14px; color: var(--ink-faint); }
+.next__actions { display: flex; gap: var(--s2); margin-top: var(--s3); }
+.next__actions .btn { padding-left: var(--s4); padding-right: var(--s4); text-decoration: none; }
+
+/* Needs you: one line per item; the full card opens in a panel */
+.count {
+  display: inline-block; min-width: 20px; margin-left: 6px; padding: 0 6px;
+  border-radius: 999px; background: var(--navy); color: var(--on-navy);
+  font-size: 11px; line-height: 18px; text-align: center; letter-spacing: 0; vertical-align: 1px;
+}
+.count:empty { display: none; }
+.needs { list-style: none; margin: 0; padding: 0; border: 1px solid var(--rule); border-radius: var(--r-lg);
+         background: var(--paper-raised); overflow: hidden; }
+.needs li + li .need { border-top: 1px solid var(--rule-soft); }
+.need {
+  width: 100%; display: grid; grid-template-columns: 10px 1fr auto; gap: var(--s3); align-items: center;
+  padding: var(--s3) var(--s4); border: 0; background: none; text-align: left; cursor: pointer;
+}
+.need:hover { background: var(--paper-inset); }
+.need__dot { width: 8px; height: 8px; border-radius: 50%; background: var(--navy); }
+.need--urgent .need__dot { background: var(--pencil); }
+.need--muted .need__dot { background: var(--rule-strong); }
+.need__text { min-width: 0; }
+.need__kind { display: block; font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-faint); }
+.need__title { display: block; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.need__sub { display: block; font-size: 13px; color: var(--ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.need--urgent .need__sub { color: var(--pencil); }
+.need--muted .need__title, .need--muted .need__sub { color: var(--ink-faint); font-weight: 500; }
+.need__chevron { font-size: 22px; color: var(--ink-ghost); }
+
+/* Overlays (an item's full card, a brief): the whole screen on a phone */
+.overlay {
+  position: fixed; inset: 0; z-index: 20; margin: 0; max-width: none;
+  display: flex; flex-direction: column; background: var(--paper);
+}
+.overlay[hidden] { display: none; }
+.overlay__bar {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: calc(env(safe-area-inset-top) + var(--s3)) var(--s3) var(--s2);
+  border-bottom: 1px solid var(--rule);
+}
+.overlay__body { flex: 1; overflow-y: auto; padding: var(--s4) var(--s4) var(--s6);
+                 scrollbar-width: thin; scrollbar-color: var(--rule-strong) transparent; }
+.overlay__title { margin: 0 0 var(--s4); font: 600 22px/1.25 var(--serif); }
+.detail .card, .detail .slip { margin: 0; }
+
+/* ── Desktop: the day on the left, the assistant always open on the right ── */
+@media (min-width: 1024px) {
+  .sheet { max-width: 1480px; }
+  .masthead { padding-left: var(--s6); padding-right: var(--s6); }
+  .tabs { display: none; }
+  .view[hidden] { display: block; }
+  .sheet .composer.chat-only { display: flex; }
+  .sheet .icon-btn.chat-only { display: grid; }
+  .panes { flex-direction: row; }
+  .pane--day { flex: 0 0 min(46%, 600px); padding: 0 var(--s6) var(--s6); border-right: 1px solid var(--rule); }
+  .sheet[data-tab] .pane--chat { flex: 1; }
+  .pane--chat .scroll { padding: 0 var(--s6) var(--s6); }
+  .pane--chat .block--thread, .pane--chat .composer > * { max-width: 760px; }
+  .pane--chat .block--thread { margin: 0 auto; }
+  .composer { justify-content: center; padding-left: var(--s6); padding-right: var(--s6);
+              padding-bottom: calc(env(safe-area-inset-bottom) + var(--s3)); }
+  .composer textarea { max-width: 712px; }
+  /* Details and briefs open over the assistant, not over the day. */
+  .overlay { position: absolute; z-index: 5; border-left: 1px solid var(--rule); box-shadow: -8px 0 24px rgba(20, 23, 28, 0.06); }
+  .overlay__bar { padding-top: var(--s3); }
+  .overlay__body { padding: var(--s5) var(--s6) var(--s6); }
+  .overlay__body > * { max-width: 760px; }
+  .briefsheet__foot { padding-left: var(--s6); padding-right: var(--s6); }
+  .stop--now::before { left: -14px; }
+}
+
+/* Next up's buttons, including Join (a link) */
+.next__actions .btn { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; width: auto; min-width: 112px;
+                      color: var(--ink); }
+.next__actions .btn--sign { color: var(--on-navy); }
+
+/* Empty chat: something to tap */
+.thread__empty p { margin: 0 0 var(--s3); }
+.suggestions { display: flex; flex-wrap: wrap; gap: var(--s2); }
+.suggestion { padding: var(--s2) var(--s3); border: 1px solid var(--rule-strong); border-radius: 999px;
+              background: var(--paper-raised); color: var(--ink-soft); font-size: 14px; cursor: pointer; text-align: left; }
+.suggestion:hover { border-color: var(--navy); color: var(--ink); }

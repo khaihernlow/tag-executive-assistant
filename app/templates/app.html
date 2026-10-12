@@ -17,12 +17,11 @@
   <link rel="stylesheet" href="/static/app.css?v={{ v }}">
 </head>
 <body>
+  <!-- Phone: Today and Chat are tabs. Desktop (wide screens): the day on the left,
+       the assistant always open on the right, details open over the assistant. -->
   <div class="sheet" data-tab="today">
     <header class="masthead">
-      <div>
-        <p class="masthead__date" id="date">&nbsp;</p>
-        <h1 class="masthead__greeting" id="greeting">Your day</h1>
-      </div>
+      <h1 class="masthead__date" id="date">&nbsp;</h1>
       <div class="masthead__actions">
         <button class="icon-btn" id="memory-btn" type="button" aria-label="What I remember" title="What I remember" aria-expanded="false" aria-controls="memory">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v18l-6-4-6 4z"/></svg>
@@ -57,54 +56,102 @@
       </div>
     </div>
 
-    <!-- Today: what Dave glances at between meetings -->
-    <main class="scroll view" id="view-today" aria-label="Today">
-      <section class="block" aria-labelledby="signoff-title" id="signoff-block" hidden>
-        <h2 class="block__title" id="signoff-title">Awaiting your sign-off</h2>
-        <div id="signoff"></div>
-      </section>
+    <div class="panes">
+      <!-- The day: what Dave glances at between meetings -->
+      <main class="scroll view pane pane--day" id="view-today" aria-label="Today">
+        <section class="block next" id="next-block" aria-label="Next up" hidden></section>
 
-      <section class="block" aria-labelledby="requests-title" id="requests-block" hidden>
-        <h2 class="block__title" id="requests-title">Meeting requests</h2>
-        <div id="requests"></div>
-      </section>
+        <section class="block" aria-labelledby="needs-title" id="needs-block" hidden>
+          <h2 class="block__title" id="needs-title">Needs you <span class="count" id="needs-count"></span></h2>
+          <ul class="needs" id="needs"></ul>
+        </section>
 
-      <section class="block" aria-labelledby="invites-title" id="invites-block" hidden>
-        <h2 class="block__title" id="invites-title">Invitations</h2>
-        <div id="invites"></div>
-      </section>
+        <section class="block" aria-labelledby="today-title">
+          <h2 class="block__title" id="today-title">Today</h2>
+          <p class="done-today" id="done-today" hidden></p>
+          <ol class="itinerary" id="itinerary">
+            <li class="itinerary__empty">Loading your calendar…</li>
+          </ol>
+        </section>
 
-      <section class="block" aria-labelledby="today-title">
-        <h2 class="block__title" id="today-title">Today</h2>
-        <p class="done-today" id="done-today" hidden></p>
-        <ol class="itinerary" id="itinerary">
-          <li class="itinerary__empty">Loading your calendar…</li>
-        </ol>
-      </section>
+        <!-- An FYI log of what the assistant tidied, so it sits last and starts collapsed. -->
+        <section class="block" aria-labelledby="junk-title" id="junk-block" hidden>
+          <h2 class="block__title" id="junk-title">Tidied up</h2>
+          <div id="junk"></div>
+        </section>
+      </main>
 
-      <!-- An FYI log of what the assistant tidied, so it sits last and starts collapsed. -->
-      <section class="block" aria-labelledby="junk-title" id="junk-block" hidden>
-        <h2 class="block__title" id="junk-title">Tidied up</h2>
-        <div id="junk"></div>
-      </section>
-    </main>
+      <!-- The assistant -->
+      <section class="pane pane--chat" aria-label="Assistant">
+        <main class="scroll view" id="view-chat" aria-label="Chat" hidden>
+          <section class="block block--thread" aria-label="Conversation">
+            <p class="topic" id="topic" hidden></p>
+            <div class="thread" id="thread" aria-live="polite"></div>
+            <div class="thread__empty" id="thread-empty">
+              <p>Ask about your calendar, email, Autotask, or anyone you're meeting. For example:</p>
+              <div class="suggestions">
+                <button type="button" class="suggestion">What's on my calendar tomorrow?</button>
+                <button type="button" class="suggestion">Which quotes are waiting on clients?</button>
+                <button type="button" class="suggestion">What's coming up for renewal this month?</button>
+                <button type="button" class="suggestion">Who didn't log their time last week?</button>
+              </div>
+            </div>
+          </section>
+        </main>
 
-    <!-- Chat: conversations with the assistant -->
-    <main class="scroll view" id="view-chat" aria-label="Chat" hidden>
-      <section class="block block--thread" aria-label="Conversation">
-        <p class="topic" id="topic" hidden></p>
-        <div class="thread" id="thread" aria-live="polite"></div>
-        <p class="thread__empty" id="thread-empty">Ask about your calendar, email or a meeting.</p>
-      </section>
-    </main>
+        <form class="composer chat-only" id="composer" autocomplete="off">
+          <label class="visually-hidden" for="input">Ask your assistant</label>
+          <textarea id="input" rows="1" placeholder="Ask your assistant…" enterkeyhint="send"></textarea>
+          <button class="send" id="send" type="submit" aria-label="Send" disabled>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6"/></svg>
+          </button>
+        </form>
 
-    <form class="composer chat-only" id="composer" autocomplete="off">
-      <label class="visually-hidden" for="input">Ask your assistant</label>
-      <textarea id="input" rows="1" placeholder="Ask your assistant…" enterkeyhint="send"></textarea>
-      <button class="send" id="send" type="submit" aria-label="Send" disabled>
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6"/></svg>
-      </button>
-    </form>
+        <!-- One item from "Needs you", opened in full: over everything on a phone, over the assistant on desktop -->
+        <div class="overlay detail" id="detail" hidden role="dialog" aria-modal="true" aria-labelledby="detail-title">
+          <div class="overlay__bar">
+            <button class="link-btn" id="detail-close" type="button">‹ Back</button>
+          </div>
+          <div class="overlay__body">
+            <!-- The card says what it is; these are for screen readers. -->
+            <p class="visually-hidden" id="detail-kind"></p>
+            <h2 class="visually-hidden" id="detail-title"></h2>
+            <div id="detail-body"></div>
+          </div>
+        </div>
+
+        <!-- Meeting brief: same place as a detail -->
+        <div class="overlay briefsheet" id="briefsheet" hidden role="dialog" aria-modal="true" aria-labelledby="bs-title">
+          <div class="overlay__bar briefsheet__bar">
+            <button class="link-btn" id="bs-close" type="button">‹ Back</button>
+            <button class="link-btn" id="bs-refresh" type="button" hidden>Refresh</button>
+          </div>
+          <div class="overlay__body briefsheet__body">
+            <p class="slip__kind">Meeting brief</p>
+            <h2 class="briefsheet__title" id="bs-title"></h2>
+            <p class="briefsheet__when" id="bs-when"></p>
+            <div id="bs-content"></div>
+          </div>
+          <div class="briefsheet__foot" id="bs-foot" hidden>
+            <button class="btn btn--sign" id="bs-ask" type="button">Ask about this meeting</button>
+          </div>
+
+          <!-- A cited source, opened from a citation or the Sources list -->
+          <div class="source" id="source" hidden>
+            <div class="source__panel" role="dialog" aria-labelledby="src-title">
+              <div class="recent__head">
+                <p class="slip__kind" id="src-kind"></p>
+                <button class="link-btn" id="src-close" type="button">Close</button>
+              </div>
+              <h3 class="source__title" id="src-title"></h3>
+              <p class="source__meta" id="src-meta"></p>
+              <p class="source__excerpt" id="src-excerpt"></p>
+              <a class="btn btn--sign source__open" id="src-open" target="_blank" rel="noopener" hidden></a>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
 
     <nav class="tabs" aria-label="Sections">
       <button class="tab" type="button" data-tab="today" aria-current="page">
@@ -116,37 +163,6 @@
         Chat
       </button>
     </nav>
-
-    <!-- Meeting brief: opens over everything -->
-    <div class="briefsheet" id="briefsheet" hidden role="dialog" aria-modal="true" aria-labelledby="bs-title">
-      <div class="briefsheet__bar">
-        <button class="link-btn" id="bs-close" type="button">‹ Back</button>
-        <button class="link-btn" id="bs-refresh" type="button" hidden>Refresh</button>
-      </div>
-      <div class="briefsheet__body">
-        <p class="slip__kind">Meeting brief</p>
-        <h2 class="briefsheet__title" id="bs-title"></h2>
-        <p class="briefsheet__when" id="bs-when"></p>
-        <div id="bs-content"></div>
-      </div>
-      <div class="briefsheet__foot" id="bs-foot" hidden>
-        <button class="btn btn--sign" id="bs-ask" type="button">Ask about this meeting</button>
-      </div>
-
-      <!-- A cited source, opened from a citation or the Sources list -->
-      <div class="source" id="source" hidden>
-        <div class="source__panel" role="dialog" aria-labelledby="src-title">
-          <div class="recent__head">
-            <p class="slip__kind" id="src-kind"></p>
-            <button class="link-btn" id="src-close" type="button">Close</button>
-          </div>
-          <h3 class="source__title" id="src-title"></h3>
-          <p class="source__meta" id="src-meta"></p>
-          <p class="source__excerpt" id="src-excerpt"></p>
-          <a class="btn btn--sign source__open" id="src-open" target="_blank" rel="noopener" hidden></a>
-        </div>
-      </div>
-    </div>
   </div>
 
   <script src="/static/app.js?v={{ v }}"></script>

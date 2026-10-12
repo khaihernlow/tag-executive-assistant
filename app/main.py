@@ -159,17 +159,22 @@ def _agenda_events(svc, day, now) -> list[dict]:
             continue
         e = parse_event(item, tz)
         place, join_url = meeting_place(e.location, e.join_url)
+        # A block of 12 hours or more (a trip, "up at the lake") reads as all day, not "started 3 days ago".
+        long_block = e.all_day or e.end - e.start >= timedelta(hours=12)
         events.append({
             "id": e.id,
             "briefable": needs_brief(e, svc.graph.mailbox, internal_domain()),
             "subject": e.subject,
-            "start": "All day" if e.all_day else e.start.strftime("%I:%M %p").lstrip("0"),
+            "start": "All day" if long_block else e.start.strftime("%I:%M %p").lstrip("0"),
             "end": e.end.strftime("%I:%M %p").lstrip("0"),
             "location": place,
             "show_as": e.show_as,
             "join_url": join_url,
             "past": e.end <= now,
             "now": e.start <= now < e.end,
+            "starts_at": e.start.isoformat(),
+            "all_day": long_block,
+            "people": len([a for a in e.attendee_emails if a and a != svc.graph.mailbox.lower()]),
         })
     return events
 
@@ -178,7 +183,8 @@ def _agenda_events(svc, day, now) -> list[dict]:
 def today(user: dict = Depends(require_auth), svc=Depends(services)):
     now = datetime.now(local_zone())
     todays = _agenda_events(svc, now.date(), now)
-    day = agenda_day(now, anything_left_today=any(not e["past"] for e in todays))
+    # All-day items and multi-day blocks don't keep the evening on "today".
+    day = agenda_day(now, anything_left_today=any(not e["past"] and not e["all_day"] for e in todays))
 
     if day == now.date():
         title, events, done_today = "Today", todays, 0

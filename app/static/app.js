@@ -131,16 +131,15 @@ async function loadToday() {
   try {
     const day = await api("/api/today");
     $("#date").textContent = day.date;
-    $("#greeting").textContent = day.name ? `${day.greeting}, ${day.name}` : day.greeting;
     const isToday = day.agenda_title === "Today";
     $("#today-title").textContent = isToday ? "Today" : `${day.agenda_title} · ${day.agenda_date}`;
     const done = $("#done-today");
     done.hidden = !day.done_today;
     done.textContent = day.done_today === 1 ? "Today's meeting is done." : `Today's ${day.done_today} meetings are done.`;
     renderItinerary(day.events, isToday ? "today" : day.agenda_title.toLowerCase());
-    renderSignoff(day.pending.filter((a) => !["reply_email", "book_meeting"].includes(a.kind)));
-    renderRequests(day.requests || []);
-    renderInvites(day.invites || []);
+    renderNext(day.events, isToday ? "" : day.agenda_title);
+    renderNeeds(day.pending.filter((a) => !["reply_email", "book_meeting"].includes(a.kind)),
+                day.requests || [], day.invites || []);
     renderJunk(day.junk_moved || [], day.filed || []);
     // While the worker is preparing briefs, check back so the "Brief" buttons appear.
     clearTimeout(loadToday.timer);
@@ -327,6 +326,7 @@ async function prepare(event, refresh = false) {
 }
 
 function openBrief(event) {
+  if (!$("#detail").hidden) { $("#detail").hidden = true; $("#detail-body").replaceChildren(); }
   openEvent = event;
   $("#bs-title").textContent = event.subject;
   $("#bs-when").textContent = [`${event.start}\u2013${event.end}`, event.location].filter(Boolean).join(" \u00b7 ");
@@ -417,10 +417,6 @@ function renderJunk(moved, filed) {
 
 // ── meeting requests ───────────────────────────────────────────────────────────
 
-function renderRequests(requests) {
-  $("#requests-block").hidden = !requests.length;
-  $("#requests").replaceChildren(...requests.map(requestCard));
-}
 
 // "Thursday, Oct 22 at 11:00 AM ET" -> "Thu, Oct 22 · 11:00 AM"
 const shortSlot = (label) => label.replace(" ET", "").replace(/^(\w{3})\w*/, "$1").replace(" at ", " \u00b7 ");
@@ -564,9 +560,10 @@ function requestCard(r) {
   const dismiss = el("button", { class: "link-btn", type: "button", text: "Dismiss",
     onclick: async () => {
       dismiss.disabled = true;
-      try { await api(`/api/requests/${encodeURIComponent(r.id)}/dismiss`, { method: "POST" }); card.remove(); }
-      catch (err) { dismiss.disabled = false; status.textContent = err.message; }
-      if (!$("#requests").children.length) $("#requests-block").hidden = true;
+      try {
+        await api(`/api/requests/${encodeURIComponent(r.id)}/dismiss`, { method: "POST" });
+        closeDetail();
+      } catch (err) { dismiss.disabled = false; status.textContent = err.message; }
     } });
   buttons.push(dismiss);
   body.append(status, el("div", { class: "request__foot" }, dismiss));
@@ -577,10 +574,6 @@ function requestCard(r) {
 
 const INVITE_DONE = { accept: "\u2713 Accepted", tentative: "Maybe sent", decline: "Declined" };
 
-function renderInvites(invites) {
-  $("#invites-block").hidden = !invites.length;
-  $("#invites").replaceChildren(...invites.map(inviteCard));
-}
 
 function inviteCard(inv) {
   const card = el("div", { class: "card invite" });
@@ -616,10 +609,105 @@ function inviteCard(inv) {
   return card;
 }
 
-function renderSignoff(pending) {
-  $("#signoff-block").hidden = !pending.length;
-  $("#signoff").replaceChildren(...pending.map(slip));
+// ── next up and "needs you" ────────────────────────────────────────────────────
+
+function untilText(iso) {
+  const minutes = Math.round((new Date(iso) - Date.now()) / 60000);
+  if (minutes <= 0) return minutes > -2 ? "starting now" : `started ${-minutes} min ago`;
+  if (minutes < 60) return `in ${minutes} min`;
+  const hours = Math.floor(minutes / 60), rest = minutes % 60;
+  return `in ${hours} hr${rest ? ` ${rest} min` : ""}`;
 }
+
+function renderNext(events, laterDay) {
+  const block = $("#next-block");
+  const next = events.find((e) => !e.past && !e.all_day);
+  block.hidden = !next;
+  if (!next) return;
+  const label = next.now ? "Now" : laterDay ? `First up ${laterDay.toLowerCase()}` : "Next";
+  const meta = [next.location, next.people ? `${next.people} ${next.people === 1 ? "person" : "people"}` : ""]
+    .filter(Boolean).join(" \u00b7 ");
+  const actions = [];
+  if (next.brief === "ready" || next.briefable) {
+    actions.push(el("button", { class: "btn btn--sign", type: "button", text: next.brief === "ready" ? "Open brief" : "Brief",
+      onclick: () => openBrief(next) }));
+  }
+  if (next.join_url) actions.push(el("a", { class: "btn", href: next.join_url, target: "_blank", rel: "noopener", text: "Join" }));
+  block.replaceChildren(...[
+    el("p", { class: "next__label" }, label,
+      el("span", { class: "next__when", text: ` \u00b7 ${next.start}${laterDay ? "" : ` \u00b7 ${untilText(next.starts_at)}`}` })),
+    el("p", { class: "next__title", text: next.subject }),
+    meta ? el("p", { class: "next__meta", text: meta }) : null,
+    // replaceChildren would print a null as the text "null"
+    actions.length ? el("div", { class: "next__actions" }, ...actions) : null].filter(Boolean));
+}
+
+function needsRow({ kind, title, sub, urgent, muted, open }) {
+  return el("li", {},
+    el("button", { class: `need${urgent ? " need--urgent" : ""}${muted ? " need--muted" : ""}`, type: "button", onclick: open },
+      el("span", { class: "need__dot", "aria-hidden": "true" }),
+      el("span", { class: "need__text" },
+        el("span", { class: "need__kind", text: kind }),
+        el("span", { class: "need__title", text: title }),
+        sub ? el("span", { class: "need__sub", text: sub }) : null),
+      el("span", { class: "need__chevron", "aria-hidden": "true", text: "\u203a" })));
+}
+
+function renderNeeds(pending, requests, invites) {
+  const rows = [];
+  for (const a of pending) {
+    const [main, ...warnings] = (a.summary || "").split(" \u00b7 \u26a0 ");
+    const title = (a.display && (a.display.title || a.display.heading)) || main.split(" \u00b7 ")[0];
+    rows.push(needsRow({
+      kind: KIND_LABELS[a.kind] || "Sign-off", title,
+      sub: warnings.length ? `\u26a0 ${warnings[0]}` : main.split(" \u00b7 ").slice(1, 3).join(" \u00b7 "),
+      urgent: warnings.length > 0,
+      open: () => openDetail(KIND_LABELS[a.kind] || "Sign-off", title, slip(a)),
+    }));
+  }
+  for (const r of requests) {
+    const waiting = r.status !== "new";
+    const busy = r.proposed && r.proposed.free === false;
+    const sub = r.status === "booked" ? `\u2713 Booked ${r.booked ? shortSlot(r.booked) : ""}`
+      : r.status === "waiting" ? `Times sent, waiting for ${firstName(r.from)}`
+      : r.handler ? `${firstName(r.handler)} is handling it${busy ? " \u00b7 you're busy then" : ""}`
+      : r.proposed ? `Asked for ${shortSlot(r.proposed.label)}${busy ? " \u00b7 you're busy then" : ""}`
+      : "Wants to find a time";
+    const title = `${r.from}${r.purpose ? ` \u00b7 ${r.purpose}` : ""}`;
+    rows.push(needsRow({ kind: "Meeting request", title, sub, urgent: busy && !r.handler, muted: waiting,
+      open: () => openDetail("Meeting request", title, requestCard(r)) }));
+  }
+  for (const inv of invites) {
+    rows.push(needsRow({ kind: "Invitation", title: inv.subject,
+      sub: inv.clashes.length ? `${inv.when} \u00b7 \u26a0 clashes` : `${inv.when} \u00b7 from ${inv.organizer}`,
+      urgent: inv.clashes.length > 0,
+      open: () => openDetail("Invitation", inv.subject, inviteCard(inv)) }));
+  }
+  const active = rows.filter((r) => !r.querySelector(".need--muted")).length;
+  $("#needs-block").hidden = !rows.length;
+  $("#needs-count").textContent = active ? String(active) : "";
+  $("#needs").replaceChildren(...rows);
+}
+
+function openDetail(kind, title, node) {
+  closeBrief();
+  $("#detail-kind").textContent = kind;
+  $("#detail-title").textContent = title;
+  $("#detail-body").replaceChildren(node);
+  $("#detail").hidden = false;
+  $("#detail-close").focus();
+}
+
+function closeDetail() {
+  if ($("#detail").hidden) return;
+  $("#detail").hidden = true;
+  $("#detail-body").replaceChildren();
+  loadToday();  // whatever was decided inside is reflected in the list
+}
+
+$("#detail-close").addEventListener("click", closeDetail);
+document.querySelectorAll(".suggestion").forEach((b) => b.addEventListener("click", () => { showTab("chat"); send(b.textContent); }));
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeDetail(); });
 
 // ── cards ──────────────────────────────────────────────────────────────────────
 
