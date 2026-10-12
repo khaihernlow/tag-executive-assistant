@@ -21,10 +21,20 @@
        the assistant always open on the right, details open over the assistant. -->
   <div class="sheet" data-tab="today">
     <div class="panes">
+      <!-- Desktop: the day collapsed to a thin strip, with what still needs Dave -->
+      <aside class="day-rail" id="day-rail" aria-label="Your day (hidden)">
+        <button class="tool-btn" id="day-expand" type="button" title="Show the day" aria-label="Show the day">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="M9 4.5v15M13 10l2 2-2 2"/></svg>
+        </button>
+        <span class="count" id="rail-count" title="Needs you"></span>
+      </aside>
       <!-- The day: what Dave glances at between meetings -->
       <main class="scroll view pane pane--day" id="view-today" aria-label="Today">
         <header class="pane-head">
           <h1 class="pane-head__title" id="date">&nbsp;</h1>
+          <button class="tool-btn desk-only" id="day-collapse" type="button" title="Hide the day" aria-label="Hide the day">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="M9 4.5v15M15 10l-2 2 2 2"/></svg>
+          </button>
         </header>
         <section class="block next" id="next-block" aria-label="Next up" hidden></section>
 
@@ -47,6 +57,9 @@
           <div id="junk"></div>
         </section>
       </main>
+
+      <!-- Desktop: drag to make the day wider or narrower -->
+      <div class="resizer" id="resizer" role="separator" aria-orientation="vertical" aria-label="Resize the day" tabindex="0"></div>
 
       <!-- The assistant -->
       <section class="pane pane--chat" aria-label="Assistant">

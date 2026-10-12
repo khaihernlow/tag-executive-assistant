@@ -177,12 +177,75 @@ function updateScrollEdges() {
   const atBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 32;
   head.classList.toggle("is-scrolled", scroller.scrollTop > 4);
   $("#composer").classList.toggle("has-more", !atBottom);
-  $("#to-latest").hidden = atBottom || !thread.children.length;
+  setJumpVisible(!atBottom && thread.children.length > 0);
+}
+
+// The jump button fades rather than vanishing, and hides a moment after it's no longer
+// needed: a tap that lands as it goes must hit the button, not the card underneath
+// (that once started a renewal opportunity).
+let jumpTimer = null;
+function setJumpVisible(show) {
+  const jump = $("#to-latest");
+  clearTimeout(jumpTimer);
+  if (show) {
+    jump.hidden = false;
+    requestAnimationFrame(() => jump.classList.add("is-shown"));
+  } else if (!jump.hidden) {
+    jump.classList.remove("is-shown");
+    jumpTimer = setTimeout(() => { jump.hidden = true; }, 400);
+  }
 }
 scroller.addEventListener("scroll", updateScrollEdges, { passive: true });
 $("#view-today").addEventListener("scroll", (e) => {
   e.currentTarget.querySelector(".pane-head").classList.toggle("is-scrolled", e.currentTarget.scrollTop > 4);
 }, { passive: true });
+// ── desktop: hide the day, or drag its width (remembered in this browser) ─────
+
+const DAY_KEY = "ea.dayLayout";
+const dayLayout = (() => { try { return JSON.parse(localStorage.getItem(DAY_KEY)) || {}; } catch { return {}; } })();
+const saveDayLayout = () => { try { localStorage.setItem(DAY_KEY, JSON.stringify(dayLayout)); } catch { /* private mode */ } };
+
+function applyDayLayout() {
+  sheet.classList.toggle("day-collapsed", Boolean(dayLayout.collapsed));
+  if (dayLayout.width) sheet.style.setProperty("--day-width", `${dayLayout.width}px`);
+}
+function setDayCollapsed(collapsed) {
+  dayLayout.collapsed = collapsed;
+  saveDayLayout();
+  applyDayLayout();
+}
+$("#day-collapse").addEventListener("click", () => setDayCollapsed(true));
+$("#day-expand").addEventListener("click", () => setDayCollapsed(false));
+
+function clampDayWidth(px) {
+  return Math.round(Math.min(Math.max(px, 340), Math.max(340, window.innerWidth - 480)));
+}
+$("#resizer").addEventListener("pointerdown", (down) => {
+  down.preventDefault();
+  const resizer = down.currentTarget;
+  resizer.setPointerCapture(down.pointerId);
+  sheet.classList.add("resizing");
+  const left = $("#view-today").getBoundingClientRect().left;
+  const move = (e) => sheet.style.setProperty("--day-width", `${clampDayWidth(e.clientX - left)}px`);
+  const up = (e) => {
+    dayLayout.width = clampDayWidth(e.clientX - left);
+    saveDayLayout();
+    sheet.classList.remove("resizing");
+    resizer.removeEventListener("pointermove", move);
+    resizer.removeEventListener("pointerup", up);
+  };
+  resizer.addEventListener("pointermove", move);
+  resizer.addEventListener("pointerup", up);
+});
+$("#resizer").addEventListener("keydown", (e) => {   // arrows resize for keyboard users
+  if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+  const now = $("#view-today").getBoundingClientRect().width;
+  dayLayout.width = clampDayWidth(now + (e.key === "ArrowRight" ? 24 : -24));
+  saveDayLayout();
+  applyDayLayout();
+});
+applyDayLayout();
+
 $("#to-latest").addEventListener("click", () => scroller.scrollTo({ top: scroller.scrollHeight, behavior: "smooth" }));
 
 // A meeting is joinable from 15 minutes before it starts until it ends.
@@ -766,6 +829,7 @@ function renderNeeds(pending, requests, invites) {
   const active = rows.filter((r) => !r.querySelector(".need--muted")).length;
   $("#needs-block").hidden = !rows.length;
   $("#needs-count").textContent = active ? String(active) : "";
+  $("#rail-count").textContent = active ? String(active) : "";
   $("#needs").replaceChildren(...rows);
 }
 

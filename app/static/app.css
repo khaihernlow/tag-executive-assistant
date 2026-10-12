@@ -735,3 +735,30 @@ button.cite:hover { background: var(--rule-strong); }
 @media (min-width: 1024px) { .sheet .composer.chat-only { display: block; } }
 /* A quieter focus: the box lifts a little, no thick ring. */
 .composer__box:focus-within { border-color: var(--rule-strong); box-shadow: 0 4px 20px rgba(20, 23, 28, 0.12); }
+
+/* Headers: content slides under cleanly, no line or shadow appearing. */
+.pane-head.is-scrolled { box-shadow: none; }
+
+/* ── Desktop: hide the day, or drag its width ── */
+.day-rail, .resizer, .desk-only { display: none; }
+@media (min-width: 1024px) {
+  .desk-only { display: inline-flex; }
+  #day-collapse { padding: 0 var(--s2); color: var(--ink-faint); }
+  .pane--day { flex: 0 0 var(--day-width, min(46%, 600px)); position: relative; }
+  .resizer { display: block; position: relative; flex: 0 0 0; z-index: 4; cursor: col-resize; touch-action: none; }
+  .resizer::before { content: ""; position: absolute; top: 0; bottom: 0; left: -4px; width: 8px; }   /* easy to grab */
+  .resizer::after { content: ""; position: absolute; top: 0; bottom: 0; left: -1px; width: 2px; background: transparent; transition: background 0.15s; }
+  .resizer:hover::after, .resizer:focus-visible::after, .sheet.resizing .resizer::after { background: var(--navy); }
+  .sheet.resizing { cursor: col-resize; user-select: none; }
+  .sheet.day-collapsed .pane--day, .sheet.day-collapsed .resizer { display: none; }
+  .sheet.day-collapsed .day-rail {
+    display: flex; flex-direction: column; align-items: center; gap: var(--s2);
+    flex: 0 0 56px; padding-top: var(--s3); border-right: 1px solid var(--rule);
+  }
+  .day-rail .tool-btn { padding: 0 var(--s2); }
+  .day-rail .count { margin: 0; }
+}
+
+/* The jump button fades in and out; it stays clickable while fading. */
+.to-latest { opacity: 0; transition: opacity 0.2s ease; }
+.to-latest.is-shown { opacity: 1; }
