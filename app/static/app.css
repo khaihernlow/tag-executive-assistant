@@ -578,3 +578,20 @@ button.cite:hover { background: var(--rule-strong); }
 .request__body > .request__offer:first-child { padding-top: 0; }
 /* A warning inside a row keeps its colour over the row's own text colour. */
 .row__preview.overdue, .row__when.overdue, .time__hours.overdue { color: var(--pencil); }
+
+/* ══ Detail and brief: the right side changing, not a window opening ══════════
+   No second divider, no separate Back bar, no card inside the panel. */
+.overlay__bar { border-bottom: 0; padding: calc(env(safe-area-inset-top) + var(--s3)) var(--s4) 0; }
+.overlay__bar .link-btn { padding-left: 0; }
+.overlay__body { padding-top: var(--s3); }
+.detail .card, .detail .slip, .detail .request, .detail .invite {
+  background: transparent; border: 0; box-shadow: none; padding: 0;
+}
+.detail .request__head { padding-bottom: var(--s4); }
+/* The row that's open stays marked, so the list and the panel read as one. */
+.need.is-open { background: var(--sunken); box-shadow: inset 3px 0 0 var(--navy); }
+@media (min-width: 1024px) {
+  .overlay { border-left: 0; }
+  .overlay__bar { padding: var(--s5) var(--s6) 0; }
+  .overlay__body { padding-top: var(--s3); }
+}

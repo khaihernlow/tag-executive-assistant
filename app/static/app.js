@@ -644,7 +644,8 @@ function renderNext(events, laterDay) {
 
 function needsRow({ kind, title, sub, urgent, muted, open }) {
   return el("li", {},
-    el("button", { class: `need${urgent ? " need--urgent" : ""}${muted ? " need--muted" : ""}`, type: "button", onclick: open },
+    el("button", { class: `need${urgent ? " need--urgent" : ""}${muted ? " need--muted" : ""}`, type: "button",
+      onclick: (ev) => { markOpen(ev.currentTarget); open(); } },
       el("span", { class: "need__dot", "aria-hidden": "true" }),
       el("span", { class: "need__text" },
         el("span", { class: "need__kind", text: kind }),
@@ -689,6 +690,11 @@ function renderNeeds(pending, requests, invites) {
   $("#needs").replaceChildren(...rows);
 }
 
+function markOpen(row) {
+  document.querySelectorAll(".need.is-open").forEach((n) => n.classList.remove("is-open"));
+  if (row) row.classList.add("is-open");
+}
+
 function openDetail(kind, title, node) {
   closeBrief();
   $("#detail-kind").textContent = kind;
@@ -702,6 +708,7 @@ function closeDetail() {
   if ($("#detail").hidden) return;
   $("#detail").hidden = true;
   $("#detail-body").replaceChildren();
+  markOpen(null);
   loadToday();  // whatever was decided inside is reflected in the list
 }
 
