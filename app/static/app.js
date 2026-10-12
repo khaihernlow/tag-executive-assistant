@@ -61,7 +61,10 @@ async function api(path, options = {}) {
 }
 
 function scrollToEnd() {
-  requestAnimationFrame(() => { scroller.scrollTop = scroller.scrollHeight; });
+  requestAnimationFrame(() => {
+    scroller.scrollTop = scroller.scrollHeight;
+    if (typeof updateScrollEdges === "function") updateScrollEdges();
+  });
 }
 
 // ── minimal markdown: escaped first, then bold/italic/lists/headings ───────────
@@ -127,7 +130,7 @@ function updateEmptyState() {
 
 // ── the right side (desktop) / full screen (phone): one panel at a time ───────
 
-const PANELS = ["detail", "briefsheet", "recent", "memory"];
+const PANELS = ["detail", "briefsheet"];
 
 function closePanels(except = "") {
   for (const id of PANELS) {
@@ -136,9 +139,51 @@ function closePanels(except = "") {
     if (id === "detail") { $("#detail-body").replaceChildren(); markOpen(null); }
     if (id === "briefsheet") { openEvent = null; $("#source").hidden = true; }
   }
-  $("#recent-btn").setAttribute("aria-expanded", String(except === "recent"));
-  $("#memory-btn").setAttribute("aria-expanded", String(except === "memory"));
 }
+
+// ── menus under their buttons (Recent, Remembered); a sheet from the bottom on a phone ──
+
+function closePopovers() {
+  for (const id of ["recent", "memory"]) {
+    $(`#${id}`).hidden = true;
+    $(`#${id}-btn`).setAttribute("aria-expanded", "false");
+  }
+  $("#scrim").hidden = true;
+}
+
+function openPopover(id) {
+  closePopovers();
+  $(`#${id}`).hidden = false;
+  $(`#${id}-btn`).setAttribute("aria-expanded", "true");
+  $("#scrim").hidden = false;   // a click anywhere else closes it
+}
+
+$("#scrim").addEventListener("click", closePopovers);
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") closePopovers(); });
+
+// ── the chat's title, and edges that only show when something scrolls under them ──
+
+function shortTitle(text) {
+  text = (text || "").trim();
+  return text.length <= 80 ? text : `${text.slice(0, 80).replace(/\s+\S*$/, "")}\u2026`;
+}
+
+function setChatTitle(title) {
+  $("#chat-title").textContent = title || "New chat";
+}
+
+function updateScrollEdges() {
+  const head = $(".pane-head--chat");
+  const atBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 32;
+  head.classList.toggle("is-scrolled", scroller.scrollTop > 4);
+  $("#composer").classList.toggle("has-more", !atBottom);
+  $("#to-latest").hidden = atBottom || !thread.children.length;
+}
+scroller.addEventListener("scroll", updateScrollEdges, { passive: true });
+$("#view-today").addEventListener("scroll", (e) => {
+  e.currentTarget.querySelector(".pane-head").classList.toggle("is-scrolled", e.currentTarget.scrollTop > 4);
+}, { passive: true });
+$("#to-latest").addEventListener("click", () => scroller.scrollTo({ top: scroller.scrollHeight, behavior: "smooth" }));
 
 // A meeting is joinable from 15 minutes before it starts until it ends.
 const joinable = (e) => e.join_url && !e.past && (e.now || (new Date(e.starts_at) - Date.now()) < 15 * 60000);
@@ -1155,6 +1200,7 @@ async function openConversation(id) {
     }
     conversationId = id;
     writeStored(id);
+    setChatTitle(convo.title);
     updateEmptyState();
     scrollToEnd();
   } catch {
@@ -1176,13 +1222,12 @@ function ago(iso) {
 }
 
 function closeRecent() {
-  if (!$("#recent").hidden) closePanels();
+  closePopovers();
 }
 
 async function showRecent() {
   showTab("chat");
-  closePanels("recent");
-  $("#recent").hidden = false;
+  openPopover("recent");
   const list = $("#recent-list");
   list.replaceChildren(el("li", { class: "itinerary__empty", text: "Loading…" }));
   try {
@@ -1194,7 +1239,7 @@ async function showRecent() {
     list.replaceChildren(...conversations.map((c) => el("li", {},
       el("button", {
         class: `row row--tap${c.id === conversationId ? " row--current" : ""}`, type: "button",
-        onclick: () => { closeRecent(); openConversation(c.id); },
+        onclick: () => { closePopovers(); closePanels(); openConversation(c.id); },
       },
         el("span", { class: "row__top" },
           el("span", { class: "row__title", text: c.title || "Untitled" }),
@@ -1207,13 +1252,12 @@ async function showRecent() {
 // ── what the assistant remembers ───────────────────────────────────────────────────────────
 
 function closeMemory() {
-  if (!$("#memory").hidden) closePanels();
+  closePopovers();
 }
 
 async function showMemory() {
   showTab("chat");
-  closePanels("memory");
-  $("#memory").hidden = false;
+  openPopover("memory");
   const list = $("#memory-list");
   list.replaceChildren(el("li", { class: "itinerary__empty", text: "Loading…" }));
   try {
@@ -1289,6 +1333,7 @@ async function send(text) {
   busy = true;
   sendBtn.disabled = true;
   showTab("chat");
+  if (!conversationId) setChatTitle(pendingTopic ? `Brief: ${pendingTopic.subject}` : shortTitle(text));
   addNote(text);
   updateEmptyState();
 
@@ -1390,6 +1435,8 @@ $("#composer").addEventListener("submit", (e) => {
 
 $("#new-chat").addEventListener("click", () => {
   closePanels();
+  closePopovers();
+  setChatTitle("");
   showTab("chat");
   conversationId = null;
   pendingTopic = null;

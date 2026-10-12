@@ -660,3 +660,78 @@ button.cite:hover { background: var(--rule-strong); }
 .stop__meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Recent conversations: titles may take two lines rather than be cut. */
 #recent-list .row__title { white-space: normal; }
+
+/* ══ Calmer chat (like ChatGPT): no rules, a floating input, menus from their buttons ══ */
+
+/* Headers have no line; one appears only once something scrolls underneath. */
+.pane-head { border-bottom: 0; transition: box-shadow 0.15s ease; }
+.pane-head.is-scrolled { box-shadow: 0 1px 0 var(--rule), 0 8px 16px -14px rgba(20, 23, 28, 0.35); }
+.pane-head__title--chat { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+                          font: 600 15px/1.3 var(--sans); color: var(--ink-soft); }
+
+/* The input: a floating box with the send button inside; the chat fades out behind it. */
+.composer { position: relative; display: block; border-top: 0; padding: 0 var(--s4) calc(env(safe-area-inset-bottom) + var(--s3)); background: var(--paper); }
+.composer::before {
+  content: ""; position: absolute; left: 0; right: 0; bottom: 100%; height: 28px; pointer-events: none;
+  background: linear-gradient(to bottom, transparent, var(--paper)); opacity: 0; transition: opacity 0.15s ease;
+}
+.composer.has-more::before { opacity: 1; }
+.composer__box {
+  display: flex; align-items: flex-end; gap: var(--s2);
+  max-width: 760px; margin: 0 auto; padding: 6px 6px 6px var(--s4);
+  background: var(--surface); border: 1px solid var(--rule); border-radius: 24px;
+  box-shadow: 0 2px 14px rgba(20, 23, 28, 0.07);
+}
+.composer__box:focus-within { border-color: var(--rule-strong); box-shadow: 0 2px 18px rgba(20, 23, 28, 0.10), 0 0 0 3px var(--focus); }
+.composer__box textarea {
+  flex: 1; min-height: 36px; max-height: 160px; padding: 7px 0;
+  border: 0; border-radius: 0; background: transparent; box-shadow: none; outline: none;
+}
+.composer__box textarea:focus-visible { box-shadow: none; }
+.composer__box .send { width: 36px; height: 36px; }
+.composer__box .send svg { width: 18px; height: 18px; }
+
+/* Jump back to the latest message. */
+.to-latest {
+  position: absolute; left: 50%; bottom: 84px; z-index: 3; transform: translateX(-50%);
+  width: 36px; height: 36px; display: grid; place-items: center;
+  border: 1px solid var(--rule); border-radius: 50%; background: var(--surface); color: var(--ink-soft);
+  box-shadow: 0 2px 10px rgba(20, 23, 28, 0.10); cursor: pointer;
+}
+.to-latest svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+/* Menus under their buttons. */
+.pane-head__actions { position: relative; }
+.scrim { position: fixed; inset: 0; z-index: 30; background: transparent; }
+.popover {
+  position: absolute; top: calc(100% + 8px); right: 0; z-index: 31;
+  width: 360px; max-height: min(70vh, 560px); display: flex; flex-direction: column;
+  background: var(--surface); border: 1px solid var(--rule); border-radius: var(--r-lg);
+  box-shadow: 0 12px 32px rgba(20, 23, 28, 0.14); overflow: hidden;
+}
+.popover__head { display: flex; justify-content: space-between; align-items: center; padding: var(--s3) var(--s4) var(--s1); }
+.popover__title { margin: 0; font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-faint); }
+.popover__hint { margin: 0; padding: 0 var(--s4) var(--s2); font-size: 13px; color: var(--ink-faint); }
+.popover__list { flex: 1; overflow-y: auto; padding: 0 var(--s2) var(--s2); scrollbar-width: thin; scrollbar-color: var(--rule-strong) transparent; }
+.popover__list .row { padding: var(--s2); border-top: 0; border-radius: var(--r-md); }
+.popover__list .row:hover { background: var(--sunken); }
+.popover__list .row__title { white-space: normal; font-weight: 500; }
+.popover__list .memory-row { padding: var(--s2); }
+.popover__list .itinerary__empty { padding: var(--s3) var(--s2); }
+
+/* Phone: the menus rise from the bottom over a dimmed page. */
+@media (max-width: 1023px) {
+  .scrim { background: var(--scrim); }
+  .popover {
+    position: fixed; top: auto; left: 0; right: 0; bottom: 0; width: auto; max-height: 72dvh;
+    border-radius: var(--r-lg) var(--r-lg) 0 0; padding-bottom: env(safe-area-inset-bottom);
+  }
+  .popover__head { padding-top: var(--s4); }
+}
+@media (min-width: 1024px) {
+  .composer { padding: 0 var(--s6) var(--s4); }
+}
+/* The composer is a block holding the box; an older desktop rule made it a row that shrank the box. */
+@media (min-width: 1024px) { .sheet .composer.chat-only { display: block; } }
+/* A quieter focus: the box lifts a little, no thick ring. */
+.composer__box:focus-within { border-color: var(--rule-strong); box-shadow: 0 4px 20px rgba(20, 23, 28, 0.12); }

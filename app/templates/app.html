@@ -51,7 +51,7 @@
       <!-- The assistant -->
       <section class="pane pane--chat" aria-label="Assistant">
         <header class="pane-head pane-head--chat chat-only">
-          <h2 class="pane-head__title">Assistant</h2>
+          <h2 class="pane-head__title pane-head__title--chat" id="chat-title">New chat</h2>
           <div class="pane-head__actions">
             <button class="tool-btn" id="recent-btn" type="button" aria-expanded="false" aria-controls="recent">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 7v5l3 2"/><path d="M3.5 12a8.5 8.5 0 1 0 2.5-6"/><path d="M3 4v4h4"/></svg>
@@ -65,6 +65,24 @@
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
               <span>New chat</span>
             </button>
+
+            <!-- Menus that drop from their buttons (a sheet from the bottom on a phone) -->
+            <div class="scrim" id="scrim" hidden></div>
+            <div class="popover" id="recent" hidden role="dialog" aria-label="Recent conversations">
+              <div class="popover__head">
+                <p class="popover__title">Recent</p>
+                <button class="link-btn" id="recent-close" type="button">Close</button>
+              </div>
+              <ul class="popover__list rows" id="recent-list"></ul>
+            </div>
+            <div class="popover" id="memory" hidden role="dialog" aria-label="What I remember">
+              <div class="popover__head">
+                <p class="popover__title">What I remember</p>
+                <button class="link-btn" id="memory-close" type="button">Close</button>
+              </div>
+              <p class="popover__hint">Tell me things in chat, like “Kai means Khaihern” or “no meetings before 8:30”.</p>
+              <ul class="popover__list rows" id="memory-list"></ul>
+            </div>
           </div>
         </header>
         <main class="scroll view" id="view-chat" aria-label="Chat" hidden>
@@ -83,12 +101,17 @@
           </section>
         </main>
 
+        <button class="to-latest chat-only" id="to-latest" type="button" aria-label="Jump to the latest message" hidden>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M6 13l6 6 6-6"/></svg>
+        </button>
         <form class="composer chat-only" id="composer" autocomplete="off">
-          <label class="visually-hidden" for="input">Ask your assistant</label>
-          <textarea id="input" rows="1" placeholder="Ask your assistant…" enterkeyhint="send"></textarea>
-          <button class="send" id="send" type="submit" aria-label="Send" disabled>
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6"/></svg>
-          </button>
+          <div class="composer__box">
+            <label class="visually-hidden" for="input">Ask your assistant</label>
+            <textarea id="input" rows="1" placeholder="Ask your assistant…" enterkeyhint="send"></textarea>
+            <button class="send" id="send" type="submit" aria-label="Send" disabled>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6"/></svg>
+            </button>
+          </div>
         </form>
 
         <!-- One item from "Needs you", opened in full: over everything on a phone, over the assistant on desktop -->
@@ -101,23 +124,6 @@
             <p class="visually-hidden" id="detail-kind"></p>
             <h2 class="visually-hidden" id="detail-title"></h2>
             <div id="detail-body"></div>
-          </div>
-        </div>
-
-        <div class="overlay" id="recent" hidden role="dialog" aria-label="Recent conversations">
-          <div class="overlay__bar"><button class="link-btn" id="recent-close" type="button">‹ Back</button></div>
-          <div class="overlay__body">
-            <h2 class="overlay__title">Recent conversations</h2>
-            <ul class="rows rows--spaced" id="recent-list"></ul>
-          </div>
-        </div>
-
-        <div class="overlay" id="memory" hidden role="dialog" aria-label="What I remember">
-          <div class="overlay__bar"><button class="link-btn" id="memory-close" type="button">‹ Back</button></div>
-          <div class="overlay__body">
-            <h2 class="overlay__title">What I remember</h2>
-            <p class="card__note memory-hint">Tell me things in chat, like “Kai means Khaihern” or “no meetings before 8:30”.</p>
-            <ul class="rows rows--spaced" id="memory-list"></ul>
           </div>
         </div>
 
