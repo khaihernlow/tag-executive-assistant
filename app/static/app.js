@@ -125,6 +125,29 @@ function updateEmptyState() {
   $("#thread-empty").hidden = thread.children.length > 0;
 }
 
+// ── the right side (desktop) / full screen (phone): one panel at a time ───────
+
+const PANELS = ["detail", "briefsheet", "recent", "memory"];
+
+function closePanels(except = "") {
+  for (const id of PANELS) {
+    if (id === except || $(`#${id}`).hidden) continue;
+    $(`#${id}`).hidden = true;
+    if (id === "detail") { $("#detail-body").replaceChildren(); markOpen(null); }
+    if (id === "briefsheet") { openEvent = null; $("#source").hidden = true; }
+  }
+  $("#recent-btn").setAttribute("aria-expanded", String(except === "recent"));
+  $("#memory-btn").setAttribute("aria-expanded", String(except === "memory"));
+}
+
+// A meeting is joinable from 15 minutes before it starts until it ends.
+const joinable = (e) => e.join_url && !e.past && (e.now || (new Date(e.starts_at) - Date.now()) < 15 * 60000);
+
+function whenLabel(e) {
+  const day = new Date(e.starts_at).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+  return e.all_day ? `${day} \u00b7 all day` : `${day} \u00b7 ${e.start}\u2013${e.end}`;
+}
+
 // ── today ──────────────────────────────────────────────────────────────────────
 
 async function loadToday() {
@@ -135,7 +158,7 @@ async function loadToday() {
     $("#today-title").textContent = isToday ? "Today" : `${day.agenda_title} · ${day.agenda_date}`;
     const done = $("#done-today");
     done.hidden = !day.done_today;
-    done.textContent = day.done_today === 1 ? "Today's meeting is done." : `Today's ${day.done_today} meetings are done.`;
+    done.textContent = `\u2713 ${day.done_today} done today`;
     renderItinerary(day.events, isToday ? "today" : day.agenda_title.toLowerCase());
     renderNext(day.events, isToday ? "" : day.agenda_title);
     renderNeeds(day.pending.filter((a) => !["reply_email", "book_meeting"].includes(a.kind)),
@@ -163,7 +186,7 @@ function renderItinerary(events, when) {
     const meta = [e.location, e.show_as === "tentative" ? "tentative" : ""].filter(Boolean).join(" · ");
     const pill = e.brief === "ready" ? el("span", { class: "pill pill--brief", text: "Brief" })
       : e.brief === "preparing" ? el("span", { class: "pill", text: "Preparing…" }) : null;
-    const join = e.join_url && !e.past
+    const join = joinable(e)
       ? el("a", { class: "join", href: e.join_url, target: "_blank", rel: "noopener", text: "Join",
                   onclick: (ev) => ev.stopPropagation() })
       : null;
@@ -288,11 +311,13 @@ async function loadBrief(event) {
   try {
     const data = await api(`/api/briefs/${encodeURIComponent(event.id)}`);
     if (openEvent !== event) return; // sheet moved on
-    $("#bs-refresh").hidden = data.status === "preparing";
+    $("#bs-refresh").hidden = data.status !== "ready";   // only a brief that exists can be updated
     if (data.status === "ready") {
       renderBrief(data);
       $("#bs-foot").hidden = false;
       openEvent.conversationId = data.conversation_id;
+    } else if (data.status === "none") {
+      target.replaceChildren(briefEmpty(event));
     } else if (data.status === "preparing") {
       target.replaceChildren(el("p", { class: "thinking", text: "Preparing the brief from your calendar and email" }));
       setTimeout(() => openEvent === event && loadBrief(event), 4000);
@@ -303,10 +328,21 @@ async function loadBrief(event) {
   } catch (err) {
     if (openEvent !== event) return;
     $("#bs-refresh").hidden = true;
-    target.replaceChildren(
-      el("p", { class: "card__note", text: "No brief for this meeting yet." }),
-      prepareButton(event, "Prepare brief"));
+    target.replaceChildren(el("p", { class: "error", text: `Couldn't load the brief: ${err.message}` }));
   }
+}
+
+function briefEmpty(event) {
+  // Briefs are written automatically for meetings with people outside TAG; say which this is.
+  const external = event.briefable;
+  return el("div", { class: "empty" },
+    el("p", { class: "empty__title", text: external ? "No brief yet" : "No brief for internal meetings" }),
+    el("p", { class: "empty__text", text: external
+      ? "Briefs are usually ready a few minutes after a meeting is booked. You can prepare this one now."
+      : "Briefs are prepared automatically for meetings with people outside TAG. This one is internal, but you can still have one prepared." }),
+    el("div", { class: "empty__actions" },
+      el("button", { class: `btn${external ? " btn--sign" : ""}`, type: "button",
+        text: external ? "Prepare brief" : "Prepare one anyway", onclick: () => prepare(event) })));
 }
 
 function prepareButton(event, label, refresh = false) {
@@ -326,10 +362,10 @@ async function prepare(event, refresh = false) {
 }
 
 function openBrief(event) {
-  if (!$("#detail").hidden) { $("#detail").hidden = true; $("#detail-body").replaceChildren(); }
+  closePanels("briefsheet");
   openEvent = event;
   $("#bs-title").textContent = event.subject;
-  $("#bs-when").textContent = [`${event.start}\u2013${event.end}`, event.location].filter(Boolean).join(" \u00b7 ");
+  $("#bs-when").textContent = [whenLabel(event), event.location].filter(Boolean).join(" \u00b7 ");
   $("#bs-foot").hidden = true;
   $("#bs-refresh").hidden = true;
   $("#bs-content").replaceChildren(el("p", { class: "thinking", text: "Loading" }));
@@ -338,9 +374,7 @@ function openBrief(event) {
 }
 
 function closeBrief() {
-  openEvent = null;
-  $("#source").hidden = true;
-  $("#briefsheet").hidden = true;
+  if (!$("#briefsheet").hidden) closePanels();
 }
 
 $("#bs-close").addEventListener("click", closeBrief);
@@ -628,11 +662,11 @@ function renderNext(events, laterDay) {
   const meta = [next.location, next.people ? `${next.people} ${next.people === 1 ? "person" : "people"}` : ""]
     .filter(Boolean).join(" \u00b7 ");
   const actions = [];
-  if (next.brief === "ready" || next.briefable) {
-    actions.push(el("button", { class: "btn btn--sign", type: "button", text: next.brief === "ready" ? "Open brief" : "Brief",
+  if (joinable(next)) actions.push(el("a", { class: "btn btn--sign", href: next.join_url, target: "_blank", rel: "noopener", text: "Join" }));
+  if (next.brief === "ready") {
+    actions.push(el("button", { class: `btn${actions.length ? "" : " btn--sign"}`, type: "button", text: "Open brief",
       onclick: () => openBrief(next) }));
   }
-  if (next.join_url) actions.push(el("a", { class: "btn", href: next.join_url, target: "_blank", rel: "noopener", text: "Join" }));
   block.replaceChildren(...[
     el("p", { class: "next__label" }, label,
       el("span", { class: "next__when", text: ` \u00b7 ${next.start}${laterDay ? "" : ` \u00b7 ${untilText(next.starts_at)}`}` })),
@@ -696,7 +730,7 @@ function markOpen(row) {
 }
 
 function openDetail(kind, title, node) {
-  closeBrief();
+  closePanels("detail");
   $("#detail-kind").textContent = kind;
   $("#detail-title").textContent = title;
   $("#detail-body").replaceChildren(node);
@@ -706,9 +740,7 @@ function openDetail(kind, title, node) {
 
 function closeDetail() {
   if ($("#detail").hidden) return;
-  $("#detail").hidden = true;
-  $("#detail-body").replaceChildren();
-  markOpen(null);
+  closePanels();
   loadToday();  // whatever was decided inside is reflected in the list
 }
 
@@ -1144,13 +1176,13 @@ function ago(iso) {
 }
 
 function closeRecent() {
-  $("#recent").hidden = true;
-  $("#recent-btn").setAttribute("aria-expanded", "false");
+  if (!$("#recent").hidden) closePanels();
 }
 
 async function showRecent() {
+  showTab("chat");
+  closePanels("recent");
   $("#recent").hidden = false;
-  $("#recent-btn").setAttribute("aria-expanded", "true");
   const list = $("#recent-list");
   list.replaceChildren(el("li", { class: "itinerary__empty", text: "Loading…" }));
   try {
@@ -1175,14 +1207,13 @@ async function showRecent() {
 // ── what the assistant remembers ───────────────────────────────────────────────────────────
 
 function closeMemory() {
-  $("#memory").hidden = true;
-  $("#memory-btn").setAttribute("aria-expanded", "false");
+  if (!$("#memory").hidden) closePanels();
 }
 
 async function showMemory() {
-  closeRecent();
+  showTab("chat");
+  closePanels("memory");
   $("#memory").hidden = false;
-  $("#memory-btn").setAttribute("aria-expanded", "true");
   const list = $("#memory-list");
   list.replaceChildren(el("li", { class: "itinerary__empty", text: "Loading…" }));
   try {
@@ -1215,12 +1246,10 @@ async function showMemory() {
 
 $("#memory-btn").addEventListener("click", () => ($("#memory").hidden ? showMemory() : closeMemory()));
 $("#memory-close").addEventListener("click", closeMemory);
-$("#memory").addEventListener("click", (e) => { if (e.target.id === "memory") closeMemory(); });
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeMemory(); });
 
 $("#recent-btn").addEventListener("click", () => { closeMemory(); ($("#recent").hidden ? showRecent() : closeRecent()); });
 $("#recent-close").addEventListener("click", closeRecent);
-$("#recent").addEventListener("click", (e) => { if (e.target.id === "recent") closeRecent(); });
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeRecent(); });
 
 // Read a streamed response: one JSON event per line.
@@ -1360,6 +1389,8 @@ $("#composer").addEventListener("submit", (e) => {
 });
 
 $("#new-chat").addEventListener("click", () => {
+  closePanels();
+  showTab("chat");
   conversationId = null;
   pendingTopic = null;
   writeStored(null);

@@ -595,3 +595,68 @@ button.cite:hover { background: var(--rule-strong); }
   .overlay__bar { padding: var(--s5) var(--s6) 0; }
   .overlay__body { padding-top: var(--s3); }
 }
+
+/* ══ Audit fixes ══════════════════════════════════════════════════════════════ */
+
+/* Hidden means hidden, whatever display a component sets (a blank "Open" button showed through). */
+/* (The two panes are the exception: on desktop both show, whatever the phone's tab says.) */
+[hidden]:not(.view) { display: none !important; }
+
+/* Each side has its own header: the date over the day, "Assistant" and its tools over the chat. */
+.pane-head {
+  position: sticky; top: 0; z-index: 2;
+  display: flex; align-items: center; justify-content: space-between; gap: var(--s3);
+  min-height: 56px; margin: 0 calc(-1 * var(--s4)); padding: calc(env(safe-area-inset-top) + var(--s2)) var(--s4) var(--s2);
+  background: var(--paper); border-bottom: 1px solid var(--rule);
+}
+.pane-head__title { margin: 0; font: 600 21px/1.2 var(--serif); letter-spacing: -0.01em; }
+.pane-head--chat { margin: 0; }
+.pane-head__actions { display: flex; gap: var(--s1); }
+.tool-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 34px; padding: 0 var(--s3); border: 1px solid transparent; border-radius: var(--r-md);
+  background: none; color: var(--ink-soft); font-size: 13px; font-weight: 600; cursor: pointer;
+}
+.tool-btn:hover, .tool-btn[aria-expanded="true"] { background: var(--sunken); color: var(--ink); }
+.tool-btn svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.tool-btn--primary { border-color: var(--rule-strong); color: var(--ink); background: var(--surface); }
+@media (max-width: 480px) {
+  .tool-btn span { display: none; }      /* phone: icons only, with their labels for screen readers */
+  .tool-btn { padding: 0 var(--s2); }
+}
+.next { padding-top: var(--s4); }
+
+/* The agenda's title can carry a quiet note on the right ("✓ 5 done today"). */
+.block__title--split { justify-content: space-between; }
+.block__aside { font-size: 12px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--sage); }
+
+/* Empty states: a short title, why, and what you can do. */
+.empty { padding: var(--s5); border: 1px dashed var(--rule-strong); border-radius: var(--r-lg); }
+.empty__title { margin: 0; font-weight: 600; }
+.empty__text { margin: var(--s1) 0 var(--s4); font-size: 14px; color: var(--ink-soft); }
+.empty__actions { display: flex; }
+.empty__actions .btn { flex: 0 0 auto; }
+
+/* Panels' lists: comfortable rows. */
+.rows--spaced .row { padding: var(--s3) 0; }
+.overlay__title { margin-bottom: var(--s4); }
+
+/* Rows in chat cards: long names wrap rather than vanish behind the date. */
+.card .row__title { white-space: normal; overflow: visible; }
+.card .row .slip__note { margin: var(--s1) 0 0; }
+
+/* The brief's action bar lines up with its content on desktop. */
+@media (min-width: 1024px) {
+  .briefsheet__foot .btn { max-width: 760px; }
+  .pane--day > .pane-head { margin: 0 calc(-1 * var(--s6)); padding-left: var(--s6); padding-right: var(--s6); }
+  .pane-head--chat { padding-left: var(--s6); padding-right: var(--s6); }
+}
+/* Desktop always shows the assistant's header, whichever "tab" the phone layout would be on. */
+@media (min-width: 1024px) { .sheet .pane-head--chat.chat-only { display: flex; } }
+/* Desktop: panels open under the assistant's header, so New chat, Recent and Remembered stay usable. */
+@media (min-width: 1024px) { .pane--chat > .overlay { top: 56px; } }
+
+/* Agenda details are one line: an invite's whole description once spilled into the list. */
+.stop__meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Recent conversations: titles may take two lines rather than be cut. */
+#recent-list .row__title { white-space: normal; }

@@ -20,45 +20,12 @@
   <!-- Phone: Today and Chat are tabs. Desktop (wide screens): the day on the left,
        the assistant always open on the right, details open over the assistant. -->
   <div class="sheet" data-tab="today">
-    <header class="masthead">
-      <h1 class="masthead__date" id="date">&nbsp;</h1>
-      <div class="masthead__actions">
-        <button class="icon-btn" id="memory-btn" type="button" aria-label="What I remember" title="What I remember" aria-expanded="false" aria-controls="memory">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v18l-6-4-6 4z"/></svg>
-        </button>
-        <button class="icon-btn chat-only" id="recent-btn" type="button" aria-label="Recent conversations" title="Recent conversations" aria-expanded="false" aria-controls="recent">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 7v5l3 2"/><path d="M3.5 12a8.5 8.5 0 1 0 2.5-6"/><path d="M3 4v4h4"/></svg>
-        </button>
-        <button class="icon-btn chat-only" id="new-chat" type="button" aria-label="New conversation" title="New conversation">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
-        </button>
-      </div>
-    </header>
-
-    <div class="recent" id="recent" hidden>
-      <div class="recent__panel" role="dialog" aria-label="Recent conversations">
-        <div class="recent__head">
-          <h2 class="block__title">Recent</h2>
-          <button class="link-btn" id="recent-close" type="button">Close</button>
-        </div>
-        <ul class="rows" id="recent-list"></ul>
-      </div>
-    </div>
-
-    <div class="recent" id="memory" hidden>
-      <div class="recent__panel" role="dialog" aria-label="What I remember">
-        <div class="recent__head">
-          <h2 class="block__title">Remembered</h2>
-          <button class="link-btn" id="memory-close" type="button">Close</button>
-        </div>
-        <p class="card__note memory-hint">Tell me things to remember in chat, like “Kai means Khaihern” or “no meetings before 8:30”.</p>
-        <ul class="rows" id="memory-list"></ul>
-      </div>
-    </div>
-
     <div class="panes">
       <!-- The day: what Dave glances at between meetings -->
       <main class="scroll view pane pane--day" id="view-today" aria-label="Today">
+        <header class="pane-head">
+          <h1 class="pane-head__title" id="date">&nbsp;</h1>
+        </header>
         <section class="block next" id="next-block" aria-label="Next up" hidden></section>
 
         <section class="block" aria-labelledby="needs-title" id="needs-block" hidden>
@@ -67,8 +34,8 @@
         </section>
 
         <section class="block" aria-labelledby="today-title">
-          <h2 class="block__title" id="today-title">Today</h2>
-          <p class="done-today" id="done-today" hidden></p>
+          <h2 class="block__title block__title--split"><span id="today-title">Today</span>
+            <span class="block__aside" id="done-today" hidden></span></h2>
           <ol class="itinerary" id="itinerary">
             <li class="itinerary__empty">Loading your calendar…</li>
           </ol>
@@ -83,6 +50,23 @@
 
       <!-- The assistant -->
       <section class="pane pane--chat" aria-label="Assistant">
+        <header class="pane-head pane-head--chat chat-only">
+          <h2 class="pane-head__title">Assistant</h2>
+          <div class="pane-head__actions">
+            <button class="tool-btn" id="recent-btn" type="button" aria-expanded="false" aria-controls="recent">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 7v5l3 2"/><path d="M3.5 12a8.5 8.5 0 1 0 2.5-6"/><path d="M3 4v4h4"/></svg>
+              <span>Recent</span>
+            </button>
+            <button class="tool-btn" id="memory-btn" type="button" aria-expanded="false" aria-controls="memory">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a6 6 0 0 0-6 6c0 2.2 1.2 3.6 2.2 4.6.6.6.8 1.2.8 1.9V17h6v-1.5c0-.7.2-1.3.8-1.9 1-1 2.2-2.4 2.2-4.6a6 6 0 0 0-6-6z"/><path d="M9.5 20.5h5"/></svg>
+              <span>Remembered</span>
+            </button>
+            <button class="tool-btn tool-btn--primary" id="new-chat" type="button">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+              <span>New chat</span>
+            </button>
+          </div>
+        </header>
         <main class="scroll view" id="view-chat" aria-label="Chat" hidden>
           <section class="block block--thread" aria-label="Conversation">
             <p class="topic" id="topic" hidden></p>
@@ -120,11 +104,28 @@
           </div>
         </div>
 
+        <div class="overlay" id="recent" hidden role="dialog" aria-label="Recent conversations">
+          <div class="overlay__bar"><button class="link-btn" id="recent-close" type="button">‹ Back</button></div>
+          <div class="overlay__body">
+            <h2 class="overlay__title">Recent conversations</h2>
+            <ul class="rows rows--spaced" id="recent-list"></ul>
+          </div>
+        </div>
+
+        <div class="overlay" id="memory" hidden role="dialog" aria-label="What I remember">
+          <div class="overlay__bar"><button class="link-btn" id="memory-close" type="button">‹ Back</button></div>
+          <div class="overlay__body">
+            <h2 class="overlay__title">What I remember</h2>
+            <p class="card__note memory-hint">Tell me things in chat, like “Kai means Khaihern” or “no meetings before 8:30”.</p>
+            <ul class="rows rows--spaced" id="memory-list"></ul>
+          </div>
+        </div>
+
         <!-- Meeting brief: same place as a detail -->
         <div class="overlay briefsheet" id="briefsheet" hidden role="dialog" aria-modal="true" aria-labelledby="bs-title">
           <div class="overlay__bar briefsheet__bar">
             <button class="link-btn" id="bs-close" type="button">‹ Back</button>
-            <button class="link-btn" id="bs-refresh" type="button" hidden>Refresh</button>
+            <button class="link-btn" id="bs-refresh" type="button" hidden>Update brief</button>
           </div>
           <div class="overlay__body briefsheet__body">
             <p class="slip__kind">Meeting brief</p>

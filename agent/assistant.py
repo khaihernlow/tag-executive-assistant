@@ -83,7 +83,8 @@ class Assistant:
             raise ValueError("Empty message")
         conversation = self.store.get_conversation(conversation_id) if conversation_id else None
         if conversation is None:
-            title = text[:80]
+            # Cut at a word, not mid-word ("...meeting from Christ").
+            title = text if len(text) <= 80 else text[:80].rsplit(" ", 1)[0].rstrip(",.;:") + "…"
             if topic and topic.get("brief"):
                 row = self.store.get_brief(topic["brief"])
                 title = f"Brief: {row['subject']}" if row else title

@@ -148,7 +148,8 @@ def test_brief_endpoints_and_topic_conversation(monkeypatch):
         http = TestClient(app)
         got = http.get("/api/briefs/evt1").json()
         assert got["status"] == "ready" and got["conversation_id"] is None
-        assert http.get("/api/briefs/nope").status_code == 404
+        # No brief is a normal answer, not an error.
+        assert http.get("/api/briefs/nope").json()["status"] == "none"
 
         assert http.post("/api/briefs/evt9/prepare?refresh=true").json()["status"] == "preparing"
         assert prepared == [("evt9", True)]

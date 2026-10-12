@@ -286,7 +286,9 @@ def reject(aid: str, user: dict = Depends(require_auth), svc=Depends(services)):
 def brief(event_id: str, user: dict = Depends(require_auth), svc=Depends(services)):
     row = svc.store.get_brief(event_id)
     if row is None:
-        raise HTTPException(status_code=404, detail="No brief for this meeting yet")
+        # Not an error: most meetings simply don't have one (yet).
+        return {"event_id": event_id, "status": "none", "brief": None, "error": None,
+                "updated_at": None, "conversation_id": None}
     convo = svc.store.find_conversation({"brief": event_id})
     return {
         "event_id": event_id,
