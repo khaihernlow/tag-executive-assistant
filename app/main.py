@@ -113,7 +113,9 @@ async def home(request: Request):
         if e.status_code == 401:
             return RedirectResponse("/auth/login")
         raise
-    response = templates.TemplateResponse(request, "app.html", {"user": user, "v": asset_version()})
+    # The date is in the page itself, so it shows before the calendar has loaded.
+    today = datetime.now(local_zone()).strftime("%A, %b %d").replace(" 0", " ")
+    response = templates.TemplateResponse(request, "app.html", {"user": user, "v": asset_version(), "today": today})
     # The page is tiny and always fresh; it points at the current app.js/app.css.
     response.headers["Cache-Control"] = "no-cache"
     return response
@@ -249,8 +251,9 @@ def chat_stream(body: ChatIn, user: dict = Depends(require_auth), svc=Depends(se
 
 
 @app.get("/api/conversations")
-def conversations(user: dict = Depends(require_auth), svc=Depends(services)):
-    return {"conversations": svc.store.list_conversations()}
+def conversations(q: str = "", user: dict = Depends(require_auth), svc=Depends(services)):
+    """Recent conversations, or with q, those whose title or text mention it."""
+    return {"conversations": svc.store.list_conversations(limit=50 if q else 30, query=q)}
 
 
 @app.get("/api/conversations/{cid}")

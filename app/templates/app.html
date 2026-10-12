@@ -31,11 +31,18 @@
       <!-- The day: what Dave glances at between meetings -->
       <main class="scroll view pane pane--day" id="view-today" aria-label="Today">
         <header class="pane-head">
-          <h1 class="pane-head__title" id="date">&nbsp;</h1>
+          <h1 class="pane-head__title" id="date">{{ today }}</h1>
           <button class="tool-btn desk-only" id="day-collapse" type="button" title="Hide the day" aria-label="Hide the day">
             <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="M9 4.5v15M15 10l-2 2 2 2"/></svg>
           </button>
         </header>
+        <div class="skeleton-day" id="today-skeleton" aria-hidden="true">
+          <div class="skel skel--label"></div><div class="skel skel--title"></div><div class="skel skel--line"></div>
+          <div class="skel skel--label skel--gap"></div>
+          <div class="skel-card"><div class="skel skel--row"></div><div class="skel skel--row"></div><div class="skel skel--row"></div></div>
+          <div class="skel skel--label skel--gap"></div>
+          <div class="skel-card"><div class="skel skel--row"></div><div class="skel skel--row"></div><div class="skel skel--row"></div><div class="skel skel--row"></div></div>
+        </div>
         <section class="block next" id="next-block" aria-label="Next up" hidden></section>
 
         <section class="block" aria-labelledby="needs-title" id="needs-block" hidden>
@@ -43,11 +50,11 @@
           <ul class="needs" id="needs"></ul>
         </section>
 
-        <section class="block" aria-labelledby="today-title">
+        <section class="block" aria-labelledby="today-title" id="agenda-block" hidden>
           <h2 class="block__title block__title--split"><span id="today-title">Today</span>
             <span class="block__aside" id="done-today" hidden></span></h2>
           <ol class="itinerary" id="itinerary">
-            <li class="itinerary__empty">Loading your calendar…</li>
+
           </ol>
         </section>
 
@@ -79,29 +86,13 @@
               <span>New chat</span>
             </button>
 
-            <!-- Menus that drop from their buttons (a sheet from the bottom on a phone) -->
-            <div class="scrim" id="scrim" hidden></div>
-            <div class="popover" id="recent" hidden role="dialog" aria-label="Recent conversations">
-              <div class="popover__head">
-                <p class="popover__title">Recent</p>
-                <button class="link-btn" id="recent-close" type="button">Close</button>
-              </div>
-              <ul class="popover__list rows" id="recent-list"></ul>
-            </div>
-            <div class="popover" id="memory" hidden role="dialog" aria-label="What I remember">
-              <div class="popover__head">
-                <p class="popover__title">What I remember</p>
-                <button class="link-btn" id="memory-close" type="button">Close</button>
-              </div>
-              <p class="popover__hint">Tell me things in chat, like “Kai means Khaihern” or “no meetings before 8:30”.</p>
-              <ul class="popover__list rows" id="memory-list"></ul>
-            </div>
           </div>
         </header>
         <main class="scroll view" id="view-chat" aria-label="Chat" hidden>
           <section class="block block--thread" aria-label="Conversation">
             <p class="topic" id="topic" hidden></p>
             <div class="thread" id="thread" aria-live="polite"></div>
+            <div class="thread-end" id="thread-end" aria-hidden="true"></div>
             <div class="thread__empty" id="thread-empty">
               <p>Ask about your calendar, email, Autotask, or anyone you're meeting. For example:</p>
               <div class="suggestions">
@@ -183,6 +174,26 @@
         Chat
       </button>
     </nav>
+  </div>
+
+  <!-- Recent (with search) and Remembered: a pop-up near the top of the screen -->
+  <div class="scrim" id="scrim" hidden></div>
+  <div class="modal" id="recent" hidden role="dialog" aria-label="Search conversations">
+    <div class="modal__search">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/></svg>
+      <label class="visually-hidden" for="recent-search">Search conversations</label>
+      <input id="recent-search" type="search" placeholder="Search conversations" autocomplete="off" enterkeyhint="search">
+      <button class="link-btn" id="recent-close" type="button">Close</button>
+    </div>
+    <ul class="modal__list rows" id="recent-list"></ul>
+  </div>
+  <div class="modal" id="memory" hidden role="dialog" aria-labelledby="memory-title">
+    <div class="modal__head">
+      <h2 class="modal__title" id="memory-title">What I remember</h2>
+      <button class="link-btn" id="memory-close" type="button">Close</button>
+    </div>
+    <p class="modal__hint">Tell me things in chat, like “Kai means Khaihern” or “no meetings before 8:30”.</p>
+    <ul class="modal__list rows" id="memory-list"></ul>
   </div>
 
   <script src="/static/app.js?v={{ v }}"></script>

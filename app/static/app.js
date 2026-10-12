@@ -109,12 +109,13 @@ function renderMarkdown(source) {
 // ── tabs ───────────────────────────────────────────────────────────────────────
 
 function showTab(name) {
+  const switching = sheet.dataset.tab !== name;
   sheet.dataset.tab = name;
   $("#view-today").hidden = name !== "today";
   $("#view-chat").hidden = name !== "chat";
   document.querySelectorAll(".tab").forEach((t) =>
     t.dataset.tab === name ? t.setAttribute("aria-current", "page") : t.removeAttribute("aria-current"));
-  if (name === "chat") scrollToEnd();
+  if (name === "chat" && switching) scrollToEnd();
 }
 document.querySelectorAll(".tab").forEach((t) => t.addEventListener("click", () => showTab(t.dataset.tab)));
 
@@ -141,7 +142,7 @@ function closePanels(except = "") {
   }
 }
 
-// ── menus under their buttons (Recent, Remembered); a sheet from the bottom on a phone ──
+// ── Recent and Remembered: a pop-up near the top; nothing behind it moves ──
 
 function closePopovers() {
   for (const id of ["recent", "memory"]) {
@@ -149,6 +150,7 @@ function closePopovers() {
     $(`#${id}-btn`).setAttribute("aria-expanded", "false");
   }
   $("#scrim").hidden = true;
+  document.body.classList.remove("modal-open");
 }
 
 function openPopover(id) {
@@ -156,6 +158,7 @@ function openPopover(id) {
   $(`#${id}`).hidden = false;
   $(`#${id}-btn`).setAttribute("aria-expanded", "true");
   $("#scrim").hidden = false;   // a click anywhere else closes it
+  document.body.classList.add("modal-open");
 }
 
 $("#scrim").addEventListener("click", closePopovers);
@@ -172,13 +175,16 @@ function setChatTitle(title) {
   $("#chat-title").textContent = title || "New chat";
 }
 
+let atBottom = true;
 function updateScrollEdges() {
-  const head = $(".pane-head--chat");
-  const atBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 32;
-  head.classList.toggle("is-scrolled", scroller.scrollTop > 4);
+  $(".pane-head--chat").classList.toggle("is-scrolled", scroller.scrollTop > 4);
   $("#composer").classList.toggle("has-more", !atBottom);
   setJumpVisible(!atBottom && thread.children.length > 0);
 }
+new IntersectionObserver(([entry]) => {
+  atBottom = entry.isIntersecting;
+  updateScrollEdges();
+}, { root: scroller, rootMargin: "0px 0px 32px 0px" }).observe($("#thread-end"));
 
 // The jump button fades rather than vanishing, and hides a moment after it's no longer
 // needed: a tap that lands as it goes must hit the button, not the card underneath
@@ -207,7 +213,7 @@ const saveDayLayout = () => { try { localStorage.setItem(DAY_KEY, JSON.stringify
 
 function applyDayLayout() {
   sheet.classList.toggle("day-collapsed", Boolean(dayLayout.collapsed));
-  if (dayLayout.width) sheet.style.setProperty("--day-width", `${dayLayout.width}px`);
+  if (dayLayout.width) sheet.style.setProperty("--day-width", `${clampDayWidth(dayLayout.width)}px`);
 }
 function setDayCollapsed(collapsed) {
   dayLayout.collapsed = collapsed;
@@ -217,8 +223,9 @@ function setDayCollapsed(collapsed) {
 $("#day-collapse").addEventListener("click", () => setDayCollapsed(true));
 $("#day-expand").addEventListener("click", () => setDayCollapsed(false));
 
+const dayMax = () => Math.max(340, Math.min(640, window.innerWidth * 0.5));
 function clampDayWidth(px) {
-  return Math.round(Math.min(Math.max(px, 340), Math.max(340, window.innerWidth - 480)));
+  return Math.round(Math.min(Math.max(px, 340), dayMax()));
 }
 $("#resizer").addEventListener("pointerdown", (down) => {
   down.preventDefault();
@@ -262,6 +269,8 @@ async function loadToday() {
   try {
     const day = await api("/api/today");
     $("#date").textContent = day.date;
+    $("#today-skeleton").hidden = true;
+    $("#agenda-block").hidden = false;
     const isToday = day.agenda_title === "Today";
     $("#today-title").textContent = isToday ? "Today" : `${day.agenda_title} · ${day.agenda_date}`;
     const done = $("#done-today");
@@ -276,6 +285,8 @@ async function loadToday() {
     clearTimeout(loadToday.timer);
     if (day.events.some((e) => e.brief === "preparing")) loadToday.timer = setTimeout(loadToday, 5000);
   } catch (err) {
+    $("#today-skeleton").hidden = true;
+    $("#agenda-block").hidden = false;
     $("#itinerary").replaceChildren(el("li", { class: "itinerary__empty", text: `Couldn't load your calendar: ${err.message}` }));
   }
 }
@@ -476,7 +487,8 @@ function openBrief(event) {
   $("#bs-when").textContent = [whenLabel(event), event.location].filter(Boolean).join(" \u00b7 ");
   $("#bs-foot").hidden = true;
   $("#bs-refresh").hidden = true;
-  $("#bs-content").replaceChildren(el("p", { class: "thinking", text: "Loading" }));
+  $("#bs-content").replaceChildren(el("div", { class: "skel-brief", "aria-label": "Loading the brief" },
+    ...Array.from({ length: 7 }, () => el("span", { class: "skel skel--row" }))));
   $("#briefsheet").hidden = false;
   loadBrief(event);
 }
@@ -1289,15 +1301,34 @@ function closeRecent() {
   closePopovers();
 }
 
-async function showRecent() {
-  showTab("chat");
-  openPopover("recent");
+const skeletonRows = (n) => Array.from({ length: n }, () =>
+  el("li", { class: "skel-row", "aria-hidden": "true" }, el("span", { class: "skel skel--row" }), el("span", { class: "skel skel--short" })));
+
+// The search words in a snippet, marked: text nodes and <mark>s, never HTML from the server.
+function marked(text, query) {
+  if (!query) return [text];
+  const parts = [];
+  const low = text.toLowerCase(), needle = query.toLowerCase();
+  let from = 0, at;
+  while ((at = low.indexOf(needle, from)) >= 0) {
+    parts.push(text.slice(from, at), el("mark", { text: text.slice(at, at + needle.length) }));
+    from = at + needle.length;
+  }
+  parts.push(text.slice(from));
+  return parts.filter((p) => p !== "");
+}
+
+let recentSeq = 0;
+async function loadRecent(query) {
+  const seq = ++recentSeq;
   const list = $("#recent-list");
-  list.replaceChildren(el("li", { class: "itinerary__empty", text: "Loading…" }));
+  if (!list.children.length || !query) list.replaceChildren(...skeletonRows(5));
   try {
-    const { conversations } = await api("/api/conversations");
+    const { conversations } = await api(`/api/conversations${query ? `?q=${encodeURIComponent(query)}` : ""}`);
+    if (seq !== recentSeq) return;   // a newer search already answered
     if (!conversations.length) {
-      list.replaceChildren(el("li", { class: "itinerary__empty", text: "No conversations yet." }));
+      list.replaceChildren(el("li", { class: "itinerary__empty",
+        text: query ? `No conversations mention “${query}”.` : "No conversations yet." }));
       return;
     }
     list.replaceChildren(...conversations.map((c) => el("li", {},
@@ -1307,11 +1338,27 @@ async function showRecent() {
       },
         el("span", { class: "row__top" },
           el("span", { class: "row__title", text: c.title || "Untitled" }),
-          el("span", { class: "row__when", text: ago(c.updated_at) }))))));
+          el("span", { class: "row__when", text: ago(c.updated_at) })),
+        c.snippet ? el("span", { class: "row__sub" }, ...marked(c.snippet, query)) : null))));
   } catch (err) {
-    list.replaceChildren(el("li", { class: "error", text: `Couldn't load: ${err.message}` }));
+    if (seq === recentSeq) list.replaceChildren(el("li", { class: "error", text: `Couldn't load: ${err.message}` }));
   }
 }
+
+async function showRecent() {
+  openPopover("recent");
+  const search = $("#recent-search");
+  search.value = "";
+  $("#recent-list").replaceChildren();
+  if (matchMedia("(hover: hover)").matches) search.focus();   // no surprise keyboard on a phone
+  await loadRecent("");
+}
+
+let searchTimer = null;
+$("#recent-search").addEventListener("input", (e) => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => loadRecent(e.target.value.trim()), 200);
+});
 
 // ── what the assistant remembers ───────────────────────────────────────────────────────────
 
@@ -1320,10 +1367,9 @@ function closeMemory() {
 }
 
 async function showMemory() {
-  showTab("chat");
   openPopover("memory");
   const list = $("#memory-list");
-  list.replaceChildren(el("li", { class: "itinerary__empty", text: "Loading…" }));
+  list.replaceChildren(...skeletonRows(4));
   try {
     const { items } = await api("/api/memory");
     if (!items.length) {

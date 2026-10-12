@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sqlite3
 import threading
 import uuid
@@ -174,11 +175,29 @@ class Store:
             (json.dumps(llm_messages), json.dumps(display), now_iso(), title, cid),
         )
 
-    def list_conversations(self, limit: int = 20) -> list[dict[str, Any]]:
+    def list_conversations(self, limit: int = 20, query: str = "") -> list[dict[str, Any]]:
+        """Newest first. With a query: conversations whose title or text contains it, each with a
+        short snippet of where it matched."""
+        if not query.strip():
+            rows = self._execute(
+                "SELECT id, title, created_at, updated_at FROM conversations ORDER BY updated_at DESC LIMIT ?", (limit,)
+            ).fetchall()
+            return [dict(r) for r in rows]
+        needle = query.strip()
+        # "!" escapes LIKE's wildcards, so a search for "100%" means the text "100%".
+        like = "%" + needle.replace("!", "!!").replace("%", "!%").replace("_", "!_") + "%"
         rows = self._execute(
-            "SELECT id, title, created_at, updated_at FROM conversations ORDER BY updated_at DESC LIMIT ?", (limit,)
+            "SELECT id, title, created_at, updated_at, display FROM conversations "
+            "WHERE title LIKE ? ESCAPE '!' OR display LIKE ? ESCAPE '!' ORDER BY updated_at DESC LIMIT ?",
+            (like, like, limit),
         ).fetchall()
-        return [dict(r) for r in rows]
+        out = []
+        for r in rows:
+            item = {k: r[k] for k in ("id", "title", "created_at", "updated_at")}
+            if needle.lower() not in (r["title"] or "").lower():
+                item["snippet"] = _snippet(r["display"], needle)
+            out.append(item)
+        return out
 
     # ── actions ──────────────────────────────────────────────────────────────
 
@@ -425,3 +444,26 @@ class Store:
             self._conn.executemany("INSERT OR IGNORE INTO filing_seen (message_id, decided_at) VALUES (?, ?)",
                                    [(m, stamp) for m in message_ids])
             self._conn.commit()
+
+
+def _snippet(display_json: str, needle: str, width: int = 60) -> str:
+    """'…the quote for Masonic Care expires Nov 1…' around the first message that mentions it."""
+    try:
+        messages = json.loads(display_json or "[]")
+    except ValueError:
+        return ""
+    low = needle.lower()
+    for m in messages:
+        # Plain words: the replies' markdown (**bold**, # headings, - bullets) isn't shown here.
+        text = re.sub(r"\*+|`+|^\s*#+\s*|^\s*[-•]\s+", "", str(m.get("text") or ""), flags=re.M)
+        text = " ".join(text.split())
+        at = text.lower().find(low)
+        if at < 0:
+            continue
+        start, end = max(0, at - width), min(len(text), at + len(needle) + width)
+        if start:   # whole words at the edges
+            start = text.find(" ", start, at) + 1 or start
+        if end < len(text):
+            end = max(text.rfind(" ", at + len(needle), end), at + len(needle))
+        return ("…" if start else "") + text[start:end].strip() + ("…" if end < len(text) else "")
+    return ""

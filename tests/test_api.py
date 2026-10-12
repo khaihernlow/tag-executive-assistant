@@ -148,3 +148,30 @@ def test_memory_panel_lists_and_removes(client):
     assert http.delete(f"/api/memory/{items[0]['key']}").status_code == 200
     assert [i["kind"] for i in http.get("/api/memory").json()["items"]] == ["Preference"]
     assert http.delete("/api/memory/alias:nobody").status_code == 404
+
+
+def test_conversation_search_matches_titles_and_messages_with_a_plain_snippet():
+    store = Store(":memory:")
+    quotes = store.create_conversation("Which quotes are waiting?")
+    store.save_conversation(quotes, [], [
+        {"role": "user", "text": "Which quotes are waiting?"},
+        {"role": "assistant", "text": "- The biggest is **Casella Waste - KnowBe4 Renewal** at $31,939, expiring Nov 1."},
+    ])
+    renewals = store.create_conversation("Renewals this month")
+    store.create_conversation("Lunch order")
+
+    found = store.list_conversations(query="knowbe4")
+    assert [c["id"] for c in found] == [quotes]
+    assert found[0]["snippet"] == "The biggest is Casella Waste - KnowBe4 Renewal at $31,939, expiring Nov 1."
+
+    assert [c["id"] for c in store.list_conversations(query="renewals")] == [renewals]
+    assert "snippet" not in store.list_conversations(query="renewals")[0]   # the title says it
+    assert store.list_conversations(query="100%") == []                       # % is text, not a wildcard
+    assert len(store.list_conversations(query="  ")) == 3
+
+
+def test_conversation_search_endpoint(client):
+    http, _, _ = client
+    http.post("/api/chat", json={"message": "Book it"})
+    assert len(http.get("/api/conversations", params={"q": "approval"}).json()["conversations"]) == 1
+    assert http.get("/api/conversations", params={"q": "nothing like this"}).json()["conversations"] == []

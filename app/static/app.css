@@ -700,34 +700,6 @@ button.cite:hover { background: var(--rule-strong); }
 }
 .to-latest svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 
-/* Menus under their buttons. */
-.pane-head__actions { position: relative; }
-.scrim { position: fixed; inset: 0; z-index: 30; background: transparent; }
-.popover {
-  position: absolute; top: calc(100% + 8px); right: 0; z-index: 31;
-  width: 360px; max-height: min(70vh, 560px); display: flex; flex-direction: column;
-  background: var(--surface); border: 1px solid var(--rule); border-radius: var(--r-lg);
-  box-shadow: 0 12px 32px rgba(20, 23, 28, 0.14); overflow: hidden;
-}
-.popover__head { display: flex; justify-content: space-between; align-items: center; padding: var(--s3) var(--s4) var(--s1); }
-.popover__title { margin: 0; font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-faint); }
-.popover__hint { margin: 0; padding: 0 var(--s4) var(--s2); font-size: 13px; color: var(--ink-faint); }
-.popover__list { flex: 1; overflow-y: auto; padding: 0 var(--s2) var(--s2); scrollbar-width: thin; scrollbar-color: var(--rule-strong) transparent; }
-.popover__list .row { padding: var(--s2); border-top: 0; border-radius: var(--r-md); }
-.popover__list .row:hover { background: var(--sunken); }
-.popover__list .row__title { white-space: normal; font-weight: 500; }
-.popover__list .memory-row { padding: var(--s2); }
-.popover__list .itinerary__empty { padding: var(--s3) var(--s2); }
-
-/* Phone: the menus rise from the bottom over a dimmed page. */
-@media (max-width: 1023px) {
-  .scrim { background: var(--scrim); }
-  .popover {
-    position: fixed; top: auto; left: 0; right: 0; bottom: 0; width: auto; max-height: 72dvh;
-    border-radius: var(--r-lg) var(--r-lg) 0 0; padding-bottom: env(safe-area-inset-bottom);
-  }
-  .popover__head { padding-top: var(--s4); }
-}
 @media (min-width: 1024px) {
   .composer { padding: 0 var(--s6) var(--s4); }
 }
@@ -744,7 +716,7 @@ button.cite:hover { background: var(--rule-strong); }
 @media (min-width: 1024px) {
   .desk-only { display: inline-flex; }
   #day-collapse { padding: 0 var(--s2); color: var(--ink-faint); }
-  .pane--day { flex: 0 0 var(--day-width, min(46%, 600px)); position: relative; }
+  .pane--day { flex: 0 0 clamp(340px, var(--day-width, min(46%, 600px)), min(640px, 50%)); position: relative; }
   .resizer { display: block; position: relative; flex: 0 0 0; z-index: 4; cursor: col-resize; touch-action: none; }
   .resizer::before { content: ""; position: absolute; top: 0; bottom: 0; left: -4px; width: 8px; }   /* easy to grab */
   .resizer::after { content: ""; position: absolute; top: 0; bottom: 0; left: -1px; width: 2px; background: transparent; transition: background 0.15s; }
@@ -762,3 +734,74 @@ button.cite:hover { background: var(--rule-strong); }
 /* The jump button fades in and out; it stays clickable while fading. */
 .to-latest { opacity: 0; transition: opacity 0.2s ease; }
 .to-latest.is-shown { opacity: 1; }
+
+/* ── Headers: a little more room above the date, the same height on both sides ── */
+.pane-head { min-height: 64px; padding-top: calc(env(safe-area-inset-top) + var(--s4)); padding-bottom: var(--s3); }
+@media (min-width: 1024px) { .pane--chat > .overlay { top: 64px; } }
+
+/* ── Recent and Remembered: one pop-up near the top, over a dimmed page ── */
+.scrim { position: fixed; inset: 0; z-index: 40; background: var(--scrim); }
+.modal {
+  position: fixed; z-index: 41; top: max(10vh, calc(env(safe-area-inset-top) + var(--s4)));
+  left: 50%; transform: translateX(-50%);
+  width: min(560px, calc(100% - 2 * var(--s4))); max-height: min(70dvh, 600px);
+  display: flex; flex-direction: column; overflow: hidden;
+  background: var(--surface); border: 1px solid var(--rule); border-radius: var(--r-lg);
+  box-shadow: 0 16px 48px rgba(20, 23, 28, 0.18);
+}
+.modal__search {
+  display: flex; align-items: center; gap: var(--s2);
+  padding: var(--s2) var(--s3) var(--s2) var(--s4); border-bottom: 1px solid var(--rule-soft);
+}
+.modal__search svg { flex: none; width: 18px; height: 18px; fill: none; stroke: var(--ink-faint); stroke-width: 2; stroke-linecap: round; }
+.modal__search input {
+  flex: 1; min-width: 0; height: 40px; padding: 0; border: 0; background: transparent; box-shadow: none;
+  font: 400 16px/1.3 var(--sans); color: var(--ink); outline: none;
+}
+.modal__search input::placeholder { color: var(--ink-ghost); }
+.modal__search input::-webkit-search-cancel-button { display: none; }
+.modal__head { display: flex; justify-content: space-between; align-items: center; padding: var(--s4) var(--s3) var(--s1) var(--s4); }
+.modal__title { margin: 0; font: 600 18px/1.3 var(--serif); }
+.modal__hint { margin: 0; padding: 0 var(--s4) var(--s2); font-size: 13px; color: var(--ink-faint); }
+.modal__list {
+  flex: 1; min-height: 0; overflow-y: auto; margin: 0; padding: var(--s2);
+  scrollbar-width: thin; scrollbar-color: var(--rule-strong) transparent;
+}
+.modal__list .row { padding: var(--s2) var(--s3); border-top: 0; border-radius: var(--r-md); }
+.modal__list .row:hover, .modal__list .row--current { background: var(--sunken); }
+.modal__list .row__title { white-space: normal; font-weight: 500; }
+.modal__list .row__sub { display: block; margin-top: 2px; white-space: normal;
+                         overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.modal__list .memory-row { padding: var(--s2) var(--s3); }
+.modal__list .itinerary__empty { padding: var(--s4) var(--s3); }
+body.modal-open { overflow: hidden; }
+
+/* ── Skeletons: the shape of what's coming, while it comes ── */
+.skel {
+  display: block; height: 12px; border-radius: var(--r-sm);
+  background: linear-gradient(90deg, var(--sunken) 0%, var(--rule-soft) 50%, var(--sunken) 100%);
+  background-size: 200% 100%; animation: skel 1.4s ease-in-out infinite;
+}
+@keyframes skel { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+@media (prefers-reduced-motion: reduce) { .skel { animation: none; } }
+.skel--label { width: 72px; height: 10px; margin-bottom: var(--s3); }
+.skel--title { width: 62%; height: 22px; margin-bottom: var(--s2); }
+.skel--line { width: 40%; }
+.skel--row { width: 78%; }
+.skel--short { width: 36%; height: 10px; margin-top: var(--s2); }
+.skel--gap { margin-top: var(--s8); }
+.skeleton-day { padding-top: var(--s4); }
+.skel-card {
+  display: grid; gap: var(--s5); padding: var(--s4);
+  background: var(--surface); border: 1px solid var(--rule); border-radius: var(--r-lg);
+}
+.skel-card .skel:nth-child(2n) { width: 58%; }
+.skel-row { list-style: none; padding: var(--s3); }
+.skel-brief { display: grid; gap: var(--s3); padding-top: var(--s2); }
+.skel-brief .skel:nth-child(3n) { width: 64%; }
+.skel-brief .skel:nth-child(3n+1) { width: 92%; }
+.thread-end { height: 1px; }
+/* Desktop shows the jump button whichever "tab" the phone layout would be on (it once stayed hidden after Today). */
+@media (min-width: 1024px) { .sheet .to-latest.chat-only { display: grid; } }
+/* The search words in a snippet: a brass highlighter, not a yellow block. */
+.modal__list mark { background: var(--brass-wash); color: var(--ink); border-radius: 3px; padding: 0 1px; }
