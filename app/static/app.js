@@ -222,6 +222,12 @@ function setDayCollapsed(collapsed) {
 }
 $("#day-collapse").addEventListener("click", () => setDayCollapsed(true));
 $("#day-expand").addEventListener("click", () => setDayCollapsed(false));
+["#rail-date", "#rail-next", "#rail-needs"].forEach((id) => $(id).addEventListener("click", () => setDayCollapsed(false)));
+(() => {   // the rail's date: "MON" over "12", from the date the server rendered
+  const [weekday, rest = ""] = $("#date").textContent.split(",");
+  $("#rail-weekday").textContent = weekday.trim().slice(0, 3);
+  $("#rail-day").textContent = rest.trim().split(" ").pop();
+})();
 
 const dayMax = () => Math.max(340, Math.min(640, window.innerWidth * 0.5));
 function clampDayWidth(px) {
@@ -421,7 +427,6 @@ function renderBrief(data) {
             el("span", { class: "row__when", text: label })),
           src.meta ? el("span", { class: "row__sub", text: src.meta }) : null))))));
   }
-  content.push(el("p", { class: "card__note", text: `Prepared ${ago(data.updated_at)} from your calendar, email and the web.` }));
   $("#bs-content").replaceChildren(...content.filter(Boolean));
 }
 
@@ -430,7 +435,8 @@ async function loadBrief(event) {
   try {
     const data = await api(`/api/briefs/${encodeURIComponent(event.id)}`);
     if (openEvent !== event) return; // sheet moved on
-    $("#bs-refresh").hidden = data.status !== "ready";   // only a brief that exists can be updated
+    $("#bs-status").hidden = data.status !== "ready";   // only a brief that exists can be refreshed
+    $("#bs-age").textContent = data.updated_at ? `Prepared ${ago(data.updated_at)}` : "";
     if (data.status === "ready") {
       renderBrief(data);
       $("#bs-foot").hidden = false;
@@ -446,7 +452,7 @@ async function loadBrief(event) {
     }
   } catch (err) {
     if (openEvent !== event) return;
-    $("#bs-refresh").hidden = true;
+    $("#bs-status").hidden = true;
     target.replaceChildren(el("p", { class: "error", text: `Couldn't load the brief: ${err.message}` }));
   }
 }
@@ -470,6 +476,7 @@ function prepareButton(event, label, refresh = false) {
 
 async function prepare(event, refresh = false) {
   $("#bs-foot").hidden = true;
+  $("#bs-status").hidden = true;
   $("#bs-content").replaceChildren(el("p", { class: "thinking", text: "Preparing the brief from your calendar and email" }));
   try {
     await api(`/api/briefs/${encodeURIComponent(event.id)}/prepare${refresh ? "?refresh=true" : ""}`, { method: "POST" });
@@ -486,7 +493,9 @@ function openBrief(event) {
   $("#bs-title").textContent = event.subject;
   $("#bs-when").textContent = [whenLabel(event), event.location].filter(Boolean).join(" \u00b7 ");
   $("#bs-foot").hidden = true;
-  $("#bs-refresh").hidden = true;
+  $("#bs-status").hidden = true;
+  $("#bs-input").value = "";
+  $("#bs-send").disabled = true;
   $("#bs-content").replaceChildren(el("div", { class: "skel-brief", "aria-label": "Loading the brief" },
     ...Array.from({ length: 7 }, () => el("span", { class: "skel skel--row" }))));
   $("#briefsheet").hidden = false;
@@ -499,12 +508,24 @@ function closeBrief() {
 
 $("#bs-close").addEventListener("click", closeBrief);
 $("#bs-refresh").addEventListener("click", () => openEvent && prepare(openEvent, true));
-$("#bs-ask").addEventListener("click", () => {
+const bsInput = $("#bs-input");
+bsInput.addEventListener("input", () => {
+  bsInput.style.height = "auto";
+  bsInput.style.height = `${Math.min(bsInput.scrollHeight, 160)}px`;
+  $("#bs-send").disabled = !bsInput.value.trim();
+});
+bsInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); $("#bs-foot").requestSubmit(); }
+});
+$("#bs-foot").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const question = bsInput.value.trim();
+  if (!question || busy) return;
   const event = openEvent;
   closeBrief();
   showTab("chat");
   if (event.conversationId) {
-    openConversation(event.conversationId);
+    await openConversation(event.conversationId);
   } else {
     conversationId = null;
     writeStored(null);
@@ -513,7 +534,7 @@ $("#bs-ask").addEventListener("click", () => {
     setTopic(event.subject);
     updateEmptyState();
   }
-  input.focus();
+  send(question);
 });
 document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("#briefsheet").hidden) closeBrief(); });
 
@@ -777,6 +798,15 @@ function renderNext(events, laterDay) {
   const block = $("#next-block");
   const next = events.find((e) => !e.past && !e.all_day);
   block.hidden = !next;
+  // The collapsed day shows it too: "Next 8:30 AM" (or "Tue 8:30 AM" when it's tomorrow's first).
+  $("#rail-next").hidden = !next;
+  if (next) {
+    const [time, ampm = ""] = next.start.split(" ");
+    $("#rail-next-label").textContent = next.now ? "Now" : laterDay ? new Date(next.starts_at).toLocaleDateString(undefined, { weekday: "short" }) : "Next";
+    $("#rail-next-time").textContent = time;
+    $("#rail-next-ampm").textContent = ampm;
+    $("#rail-next").title = `${next.subject}, ${next.start}`;
+  }
   if (!next) return;
   const label = next.now ? "Now" : laterDay ? `First up ${laterDay.toLowerCase()}` : "Next";
   const meta = [next.location, next.people ? `${next.people} ${next.people === 1 ? "person" : "people"}` : ""]
@@ -842,6 +872,7 @@ function renderNeeds(pending, requests, invites) {
   $("#needs-block").hidden = !rows.length;
   $("#needs-count").textContent = active ? String(active) : "";
   $("#rail-count").textContent = active ? String(active) : "";
+  $("#rail-needs").hidden = !active;
   $("#needs").replaceChildren(...rows);
 }
 

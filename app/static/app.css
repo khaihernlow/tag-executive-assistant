@@ -215,7 +215,7 @@ input[type="checkbox"] { accent-color: var(--navy); }
 .scroll {
   flex: 1; overflow-y: auto; overscroll-behavior: contain;
   padding: 0 var(--s4) var(--s8);
-  scrollbar-width: thin; scrollbar-color: var(--rule-strong) transparent;
+ 
 }
 .scroll::-webkit-scrollbar, .composer textarea::-webkit-scrollbar { width: 8px; }
 .scroll::-webkit-scrollbar-button, .composer textarea::-webkit-scrollbar-button { display: none; height: 0; }
@@ -261,7 +261,7 @@ input[type="checkbox"] { accent-color: var(--navy); }
   border-bottom: 1px solid var(--rule);
 }
 .overlay__body { flex: 1; overflow-y: auto; padding: var(--s5) var(--s4) var(--s8);
-                 scrollbar-width: thin; scrollbar-color: var(--rule-strong) transparent; }
+                 }
 .overlay__title, .briefsheet__title { margin: 0; font: 600 22px/1.25 var(--serif); }
 
 /* ══ Today ════════════════════════════════════════════════════════════════════ */
@@ -388,7 +388,7 @@ input[type="checkbox"] { accent-color: var(--navy); }
   flex: 1; min-height: 44px; max-height: 160px;
   padding: 11px var(--s4); border-radius: 22px;
   font: 16px/1.4 var(--sans);   /* 16px stops iOS zooming on focus */
-  resize: none; overflow-y: hidden; scrollbar-width: thin;
+  resize: none; overflow-y: hidden;
 }
 .composer textarea::placeholder { color: var(--ink-ghost); }
 .send { width: 44px; height: 44px; flex: none; display: grid; place-items: center;
@@ -765,7 +765,7 @@ button.cite:hover { background: var(--rule-strong); }
 .modal__hint { margin: 0; padding: 0 var(--s4) var(--s2); font-size: 13px; color: var(--ink-faint); }
 .modal__list {
   flex: 1; min-height: 0; overflow-y: auto; margin: 0; padding: var(--s2);
-  scrollbar-width: thin; scrollbar-color: var(--rule-strong) transparent;
+ 
 }
 .modal__list .row { padding: var(--s2) var(--s3); border-top: 0; border-radius: var(--r-md); }
 .modal__list .row:hover, .modal__list .row--current { background: var(--sunken); }
@@ -805,3 +805,42 @@ body.modal-open { overflow: hidden; }
 @media (min-width: 1024px) { .sheet .to-latest.chat-only { display: grid; } }
 /* The search words in a snippet: a brass highlighter, not a yellow block. */
 .modal__list mark { background: var(--brass-wash); color: var(--ink); border-radius: 3px; padding: 0 1px; }
+
+/* ── Scrollbars: one quiet style everywhere (no Windows arrows) ── */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
+::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--rule-strong); border-radius: 6px; border: 3px solid transparent; background-clip: padding-box; }
+::-webkit-scrollbar-thumb:hover { background-color: var(--ink-ghost); }
+@supports not selector(::-webkit-scrollbar) { * { scrollbar-width: thin; scrollbar-color: var(--rule-strong) transparent; } }
+
+/* ── The brief (and an item's detail): centred like the chat, no rules ── */
+.overlay__bar { border-bottom: 0; }
+@media (min-width: 1024px) {
+  .overlay__body > * { margin-left: auto; margin-right: auto; }
+  .overlay__bar { max-width: calc(760px + 2 * var(--s6)); width: 100%; margin: 0 auto; padding: var(--s3) var(--s6) 0; box-sizing: border-box; }
+}
+.briefsheet__status { display: flex; align-items: center; gap: var(--s2); }
+.briefsheet__age { font-size: 13px; color: var(--ink-faint); }
+.briefsheet__body { padding-bottom: var(--s6); }
+/* Asking about the meeting: the same floating box as the chat's input. */
+.briefsheet__foot { border-top: 0; }
+.briefsheet__foot .composer__box { width: 100%; }
+@media (min-width: 1024px) { .sheet .briefsheet__foot { padding: 0 var(--s6) var(--s4); } }
+
+/* ── Collapsed day: a strip with the date, what's next and what needs you ── */
+@media (min-width: 1024px) {
+  .sheet.day-collapsed .day-rail { flex-basis: 64px; gap: var(--s3); padding-top: 17px; }   /* button centred on the headers' line */
+  .rail-stat {
+    display: flex; flex-direction: column; align-items: center; gap: 1px;
+    width: 52px; padding: var(--s2) 0; border: 0; border-radius: var(--r-md);
+    background: none; color: var(--ink); cursor: pointer; font: inherit;
+  }
+  .rail-stat:hover { background: var(--sunken); }
+  .rail-stat strong { font: 600 18px/1.1 var(--serif); }
+  .rail-stat__label { font-size: 10px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-faint); line-height: 1.2; text-align: center; }
+  .rail-stat--next .rail-stat__label:first-child { color: var(--brass); }
+  .rail-stat--next strong { font: 600 15px/1.2 var(--sans); }
+  .rail-stat--needs .count { margin: 0 0 2px; min-width: 22px; font-size: 12px; line-height: 20px; }
+}
+.briefsheet__foot::before { opacity: 1; }   /* the brief fades out behind the ask box */
