@@ -13,6 +13,7 @@ writes the MSAL token cache to disk (gitignored). After that,
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 
@@ -81,9 +82,27 @@ def load_cache(path: Path) -> msal.SerializableTokenCache:
 
 
 def save_cache(cache: msal.SerializableTokenCache, path: Path) -> None:
-    if cache.has_state_changed:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(cache.serialize(), encoding="utf-8")
+    """Write our tokens without dropping anyone else's.
+
+    Several processes share this file (the app, the worker, the sign-in script).
+    Writing our in-memory copy as-is once wiped a sign-in another process had
+    just added, so entries already on disk that we don't have are kept."""
+    if not cache.has_state_changed:
+        return
+    ours = json.loads(cache.serialize())
+    if path.exists():
+        try:
+            disk = json.loads(path.read_text(encoding="utf-8"))
+        except ValueError:
+            disk = {}
+        for section, entries in disk.items():
+            if isinstance(entries, dict):
+                merged = ours.setdefault(section, {})
+                for key, value in entries.items():
+                    merged.setdefault(key, value)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(ours, indent=1), encoding="utf-8")
+    cache.has_state_changed = False
 
 
 def build_app(tenant_id: str, client_id: str, cache: msal.SerializableTokenCache) -> msal.PublicClientApplication:
@@ -103,8 +122,15 @@ class DelegatedTokenProvider:
         self.cache = load_cache(self.path)
         self.app = build_app(tenant_id, client_id, self.cache)
 
+    def _accounts(self) -> list[dict]:
+        return [a for a in self.app.get_accounts() if a.get("username", "").lower() == self.account]
+
     def __call__(self) -> str:
-        accounts = [a for a in self.app.get_accounts() if a.get("username", "").lower() == self.account]
+        accounts = self._accounts()
+        if not accounts and self.path.exists():
+            # Signed in by another process since we loaded the file (the sign-in script).
+            self.cache.deserialize(self.path.read_text(encoding="utf-8"))
+            accounts = self._accounts()
         if not accounts:
             raise NotConnectedError(
                 f"No saved Microsoft sign-in for {self.account}. Run: python scripts/connect_microsoft.py"

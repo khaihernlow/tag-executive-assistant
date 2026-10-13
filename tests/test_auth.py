@@ -44,3 +44,31 @@ def test_bypass_local_dev(client, monkeypatch):
 
 def test_health(client):
     assert client.get("/health").json() == {"status": "ok"}
+
+
+def test_saving_tokens_keeps_a_sign_in_another_process_added(tmp_path):
+    """The app loaded the cache, the sign-in script then added the assistant's account,
+    and the app's next save must not wipe it (it once did)."""
+    import json
+
+    import msal
+
+    from connectors.ms_auth import load_cache, save_cache
+
+    path = tmp_path / "cache.json"
+    path.write_text(json.dumps({"Account": {"dave": {"username": "dave@tag.example"}}}), encoding="utf-8")
+    app_copy = load_cache(path)                      # the running app's copy: Dave only
+
+    disk = json.loads(path.read_text(encoding="utf-8"))
+    disk["Account"]["assistant"] = {"username": "assistant@tag.example"}
+    path.write_text(json.dumps(disk), encoding="utf-8")   # the sign-in script adds the assistant
+
+    state = json.loads(app_copy.serialize())
+    state["Account"]["dave"]["refreshed"] = True          # the app renews Dave's token...
+    app_copy.deserialize(json.dumps(state))
+    app_copy.has_state_changed = True
+    save_cache(app_copy, path)                            # ...and saves
+
+    saved = json.loads(path.read_text(encoding="utf-8"))["Account"]
+    assert set(saved) == {"dave", "assistant"} and saved["dave"]["refreshed"] is True
+    assert isinstance(app_copy, msal.SerializableTokenCache) and not app_copy.has_state_changed
