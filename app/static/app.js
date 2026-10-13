@@ -392,7 +392,11 @@ function showSource(label) {
   $("#src-meta").textContent = invite ? [whenLabel(openEvent), openEvent.location].filter(Boolean).join(" · ") : src.meta || "";
   if (invite) src.meta = $("#src-meta").textContent;
   $("#src-meta").hidden = !src.meta;
-  $("#src-excerpt").textContent = src.excerpt || "";
+  // Nothing written: say what it is rather than show a blank.
+  const calendarReply = /^(Accepted|Declined|Tentative|Canceled|Cancelled):/i.test(src.title || "");
+  $("#src-excerpt").textContent = src.excerpt
+    || (calendarReply ? "A calendar reply, with no message." : "No message text. Open it to see the whole email.");
+  $("#src-excerpt").classList.toggle("source__excerpt--none", !src.excerpt);
   $("#src-foot").hidden = !src.link;
   if (src.link) { $("#src-open").href = src.link; $("#src-open-text").textContent = src.linkText; }
   openPopover("source");

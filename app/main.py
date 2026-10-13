@@ -23,6 +23,7 @@ from agent.changes import answer_invite, pending_invites
 from agent.requests import open_requests_view, propose_booking, propose_hold, propose_nudge, propose_reply
 from agent.calendar import agenda_day, local_zone, meeting_place, parse_event
 from agent.people import internal_domain
+from agent.emailtext import excerpt as email_excerpt
 from connectors.graph import EVENT_FIELDS
 from app.auth import is_allowed, require_auth, user_email
 
@@ -285,6 +286,18 @@ def reject(aid: str, user: dict = Depends(require_auth), svc=Depends(services)):
         raise HTTPException(status_code=404, detail="Action not found")
 
 
+def clean_material(brief: dict | None) -> dict | None:
+    """Stored sources from before excerpts were cleaned read like new ones."""
+    material = (brief or {}).get("material")
+    if not material:
+        return brief
+    for e in material.get("emails") or []:
+        e["excerpt"] = email_excerpt(e.get("excerpt") or "", e.get("subject") or "")
+    if material.get("invite"):
+        material["invite"]["excerpt"] = email_excerpt(material["invite"].get("excerpt") or "")
+    return brief
+
+
 @app.get("/api/briefs/{event_id}")
 def brief(event_id: str, user: dict = Depends(require_auth), svc=Depends(services)):
     row = svc.store.get_brief(event_id)
@@ -296,7 +309,7 @@ def brief(event_id: str, user: dict = Depends(require_auth), svc=Depends(service
     return {
         "event_id": event_id,
         "status": row["status"],
-        "brief": row["brief"],
+        "brief": clean_material(row["brief"]),
         "error": row["error"],
         "updated_at": row["updated_at"],
         "conversation_id": convo["id"] if convo else None,

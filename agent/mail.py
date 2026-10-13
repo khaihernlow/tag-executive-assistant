@@ -14,6 +14,7 @@ from typing import Any, Protocol
 
 from agent.calendar import local_zone
 from agent.documents import extract_text
+from agent.emailtext import FORWARD, readable
 from agent.tools import Tool
 from llm.provider import ToolSpec
 
@@ -153,7 +154,11 @@ def search_mail(
 
 def read_email(graph: GraphSource, message_id: str) -> dict[str, Any]:
     raw = graph.get(f"/users/{graph.mailbox}/messages/{message_id}", {"$select": READ_FIELDS}, TEXT_BODY)
-    body = ((raw.get("uniqueBody") or {}).get("content") or (raw.get("body") or {}).get("content") or "").strip()
+    unique = ((raw.get("uniqueBody") or {}).get("content") or "").strip()
+    full = ((raw.get("body") or {}).get("content") or "").strip()
+    body = unique or full
+    if FORWARD.match(raw.get("subject") or "") and len(readable(unique)) < 40:
+        body = full   # uniqueBody leaves out what was forwarded
     truncated = len(body) > MAX_BODY_CHARS
     result = {
         **summarize({**raw, "bodyPreview": ""}),

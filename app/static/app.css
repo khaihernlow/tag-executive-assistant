@@ -933,3 +933,4 @@ svg.icon { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: ro
 .srcrow svg.icon { width: 15px; height: 15px; color: var(--ink-faint); }
 .srcrow__title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
 .srcrow__label { flex: none; font-size: 12px; color: var(--ink-faint); font-variant-numeric: tabular-nums; }
+.source__excerpt--none { color: var(--ink-faint); font-style: italic; }

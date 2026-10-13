@@ -16,6 +16,7 @@ import re
 from datetime import datetime, timedelta
 from typing import Any
 
+from agent.emailtext import excerpt as email_excerpt
 from agent.calendar import Event, event_detail, fmt_local, local_zone, parse_event
 from agent.factcheck import known_addresses, verify_addresses
 from agent.mail import LIST_FIELDS, read_attachment, read_email, search_mail
@@ -257,11 +258,11 @@ def write_brief(llm: Any, gathered: dict[str, Any]) -> dict[str, Any]:
 def material_record(event: Event, gathered: dict[str, Any]) -> dict[str, Any]:
     """What the app needs to open each cited source."""
     return {
-        "invite": {"label": "Invite", "excerpt": _excerpt(event.description), "web_link": None},
+        "invite": {"label": "Invite", "excerpt": email_excerpt(event.description), "web_link": None},
         "emails": [{
             "label": e["label"], "subject": e["subject"], "received": e["received"],
             "from": e["from"].get("name") or e["from"].get("email"),
-            "message_id": e["message_id"], "web_link": e["web_link"], "excerpt": _excerpt(e["body"]),
+            "message_id": e["message_id"], "web_link": e["web_link"], "excerpt": email_excerpt(e["body"], e["subject"]),
         } for e in gathered["emails"]],
         "attachments": [{
             "label": a["label"], "name": a["name"], "from_email": a["from_email"],
