@@ -133,8 +133,11 @@ def resolve(menu: Menu, llm: Any, item_name: str, wants: list[str]) -> dict[str,
         listing = "\n".join(f"{g.name}{' (required, pick one)' if g.min else ''}: " + "; ".join(
             f"{c.name}{f' +${c.price:.2f}' if c.price else ''}" for c in g.choices) for g in item.groups)
         response = llm.complete([{"role": "user", "content": f"Item: {item.name}\nOptions:\n{listing}\n\nThey asked for: {'; '.join(wants)}"}],
-                                system="Map each request to the closest option name, copied exactly. 'Extra protein' or "
-                                       "'extra chicken' on a salad is the add-meat option. Anything no option covers goes in unavailable.",
+                                system="Map each request to the option name that means it, copied exactly. 'Extra "
+                                       "protein' or 'extra chicken' on a salad is the add-meat option. 'No X' or 'without X', "
+                                       "when X is something you'd add (mayo, cheese), needs no option: just don't pick X. "
+                                       "When there's a 'No X' option (a salad's 'No Red Onion'), pick that. Never pick an "
+                                       "option they didn't ask for. Anything they want that no option covers goes in unavailable.",
                                 tools=[PICK_OPTIONS], tool_choice=PICK_OPTIONS.name, max_tokens=500)
         for call in response.tool_calls:
             options, unavailable = list(call.input.get("options") or []), list(call.input.get("unavailable") or [])
@@ -144,15 +147,27 @@ def resolve(menu: Menu, llm: Any, item_name: str, wants: list[str]) -> dict[str,
     if missing:
         group = next(g for g in item.groups if g.name == missing[0])
         line["problem"] = f"needs a choice of {group.name.lower()}: {', '.join(c.name for c in group.choices)}"
+        line["ask"] = f"The {item.name} comes with a choice of {group.name.lower()}: {', '.join(c.name for c in group.choices)}. Which would you like?"
     if unavailable + unknown:
         line["unavailable"] = unavailable + unknown
     return line
 
 
-def read_reply(menu: Menu, llm: Any, text: str) -> dict[str, Any]:
-    response = llm.complete([{"role": "user", "content": f"Menu:\n{menu.listing()}\n\nTheir reply:\n{text}"}],
-                            system="Someone was asked what they want for lunch from this deli menu. Read their reply "
-                                   "(all of it, if they wrote more than once: later messages answer your questions). "
+def transcript(talk: list[dict[str, str]] | str) -> str:
+    """The lunch conversation so far, in order: the assistant's questions and their answers."""
+    if isinstance(talk, str):
+        return f"Them: {talk}"
+    return "\n".join(f"{'You' if t['from'] == 'assistant' else 'Them'}: {t['text']}" for t in talk)
+
+
+def read_reply(menu: Menu, llm: Any, talk: list[dict[str, str]] | str) -> dict[str, Any]:
+    # Names only, no prices: the list shows about 10% under what's charged, and a question
+    # quoting one price before the confirmation gives another looks careless.
+    response = llm.complete([{"role": "user", "content": f"Menu:\n{menu.listing(prices=False)}\n\n"
+                                                         f"The conversation so far (You is the assistant):\n{transcript(talk)}"}],
+                            system="Someone was asked what they want for lunch from this deli menu. Read the whole "
+                                   "conversation: their later messages answer your questions ('from the grill is good' "
+                                   "after you offered two tuna items means the one from the grill). "
                                    "Pick the item only, copying its menu name exactly, number included. Put bread, "
                                    "dressing, sides and extras in wants in their words: they're checked against the "
                                    "item's own options later, so never say whether an option exists. It's unclear "
@@ -177,6 +192,8 @@ class Lunch:
             except Exception as e:  # noqa: BLE001
                 entry["error"] = str(e)[:200]
         plan.setdefault("messages", []).append(entry)
+        if person["name"] in plan.get("people", {}):
+            plan["people"][person["name"]].setdefault("talk", []).append({"from": "assistant", "text": text})
 
     def tick(self, now: datetime | None = None) -> dict[str, Any] | None:
         """One step of Wednesday's lunch; safe to call every few minutes."""
@@ -247,7 +264,8 @@ class Lunch:
             who["read_until"] = new[-1]["at"]
             text = "\n".join(r["text"] for r in new)
             who.setdefault("replies", []).append(text)
-            verdict = read_reply(self.menu, self.llm, "\n".join(who["replies"]))
+            who.setdefault("talk", []).append({"from": name, "text": text})
+            verdict = read_reply(self.menu, self.llm, who["talk"])
             if verdict.get("status") == "out":
                 who.update(state="out")
                 self._say(plan, people[name] | {"upn": who["upn"]}, "Got it, no lunch for you this week.", now)
@@ -255,7 +273,9 @@ class Lunch:
                 line = resolve(self.menu, self.llm, verdict["item"], verdict.get("wants") or [])
                 if line.get("problem"):
                     who.update(state="clarifying")
-                    self._say(plan, people[name] | {"upn": who["upn"]}, f"Sorry, {line['problem']}. Which would you like?", now)
+                    missing = f"{', '.join(line['unavailable'])} isn't on the menu. " if line.get("unavailable") else ""
+                    self._say(plan, people[name] | {"upn": who["upn"]},
+                              missing + (line.get("ask") or f"Sorry, {line['problem']}. Which would you like?"), now)
                 else:
                     who.update(state="ordered", line=line)
                     extra = f" ({', '.join(line['unavailable'])} isn't on the menu, so I left it off.)" if line.get("unavailable") else ""

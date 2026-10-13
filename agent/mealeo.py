@@ -164,14 +164,17 @@ class Menu:
                 out.append(i)
         return out[:limit]
 
-    def listing(self) -> str:
+    def listing(self, prices: bool = True) -> str:
         """The whole menu in a compact form, for reading someone's order against."""
-        out, section = [], None
+        out, section, seen = [], None, set()
         for i in self.items():
             if i.section != section:
                 section = i.section
                 out.append(f"## {section}")
-            out.append(f"{i.name} ${i.price:.2f}")
+            if (i.section, i.name) in seen:
+                continue
+            seen.add((i.section, i.name))
+            out.append(f"{i.name} ${i.price:.2f}" if prices else i.name)
         return "\n".join(out)
 
 

@@ -240,3 +240,28 @@ def test_a_menu_name_matches_with_or_without_its_number(setup):
     lunch.teams.inbox["dlawrence@tagsolutions.com"] = [{"text": "do the tuna salad sandwich from deli", "at": utc("09:35")}]
     plan = lunch.tick(at("09:36"))
     assert plan["people"]["Dan"]["line"]["item"] == "01 Tuna Salad Sandwich"
+
+
+def test_the_reply_is_read_with_the_question_it_answers(setup):
+    """Run 2 on Teams: 'from the grill is good' only makes sense after the question that offered two tuna items."""
+    store, menu, teams = setup
+    seen = []
+
+    class Recording(LLM):
+        def complete(self, messages, **kwargs):
+            seen.append(messages[0]["content"])
+            return super().complete(messages, **kwargs)
+
+    llm = Recording(tool("read_lunch_reply", status="unclear", question="Which tuna: 01 Tuna Salad Sandwich or the grilled melt?"),
+                    tool("read_lunch_reply", status="order", item="01 Tuna Salad Sandwich", wants=["wheat", "coleslaw"]),
+                    tool("pick_options", options=["Wheat Bread", "Coleslaw"]))
+    lunch = L.Lunch(Graph(), teams, llm, store, menu)
+    lunch.tick(at("09:30"))
+    teams.inbox["dlawrence@tagsolutions.com"] = [{"text": "tuna on wheat with coleslaw", "at": utc("09:35")}]
+    lunch.tick(at("09:36"))
+    teams.inbox["dlawrence@tagsolutions.com"].append({"text": "the first one", "at": utc("09:38")})
+    lunch.tick(at("09:39"))
+    second = seen[1]
+    assert second.index("You: Hi Dan") < second.index("Them: tuna on wheat") < second.index("You: Which tuna") \
+        < second.index("Them: the first one")
+    assert "$" not in second.split("The conversation")[0]      # menu names only, no list prices
