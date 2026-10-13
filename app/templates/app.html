@@ -138,10 +138,10 @@
           </section>
         </main>
 
-        <button class="to-latest chat-only" id="to-latest" type="button" aria-label="Jump to the latest message" hidden>
-          {{ icon('arrow-down') }}
-        </button>
         <form class="composer chat-only" id="composer" autocomplete="off">
+          <button class="to-latest chat-only" id="to-latest" type="button" aria-label="Jump to the latest message" hidden>
+            {{ icon('arrow-down') }}
+          </button>
           <div class="composer__box">
             <ul class="attach-list" id="attach-list" aria-label="Attached files" hidden></ul>
             <div class="composer__row">
@@ -198,11 +198,13 @@
           </div>
           <form class="composer briefsheet__foot" id="bs-foot" autocomplete="off" hidden>
             <div class="composer__box">
-              <label class="visually-hidden" for="bs-input">Ask about this meeting</label>
-              <textarea id="bs-input" rows="1" placeholder="Ask about this meeting…" enterkeyhint="send"></textarea>
-              <button class="send" id="bs-send" type="submit" aria-label="Ask" disabled>
-                {{ icon('arrow-up') }}
-              </button>
+              <div class="composer__row">
+                <label class="visually-hidden" for="bs-input">Ask about this meeting</label>
+                <textarea id="bs-input" rows="1" placeholder="Ask about this meeting…" enterkeyhint="send"></textarea>
+                <button class="send" id="bs-send" type="submit" aria-label="Ask" disabled>
+                  {{ icon('arrow-up') }}
+                </button>
+              </div>
             </div>
           </form>
 
