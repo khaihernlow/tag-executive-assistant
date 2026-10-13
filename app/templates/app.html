@@ -128,9 +128,12 @@
 
         <!-- One item from "Needs you", opened in full: over everything on a phone, over the assistant on desktop -->
         <div class="overlay detail" id="detail" hidden role="dialog" aria-modal="true" aria-labelledby="detail-title">
-          <div class="overlay__bar">
-            <button class="link-btn" id="detail-close" type="button">‹ Back</button>
-          </div>
+          <header class="pane-head overlay__head">
+            <div class="overlay__lead">
+              <button class="tool-btn overlay__close" id="detail-close" type="button" aria-label="Close" title="Close (Esc)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+              <span class="overlay__label" id="detail-label"></span>
+            </div>
+          </header>
           <div class="overlay__body">
             <!-- The card says what it is; these are for screen readers. -->
             <p class="visually-hidden" id="detail-kind"></p>
@@ -141,17 +144,19 @@
 
         <!-- Meeting brief: same place as a detail -->
         <div class="overlay briefsheet" id="briefsheet" hidden role="dialog" aria-modal="true" aria-labelledby="bs-title">
-          <div class="overlay__bar briefsheet__bar">
-            <button class="link-btn" id="bs-close" type="button">‹ Back</button>
+          <header class="pane-head overlay__head">
+            <div class="overlay__lead">
+              <button class="tool-btn overlay__close" id="bs-close" type="button" aria-label="Close" title="Close (Esc)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+              <span class="overlay__label">Meeting brief</span>
+            </div>
             <div class="briefsheet__status" id="bs-status" hidden>
               <span class="briefsheet__age" id="bs-age"></span>
               <button class="tool-btn" id="bs-refresh" type="button" title="Read the latest email, calendar and web again and rewrite this brief">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v4h-4"/></svg><span>Refresh</span>
               </button>
             </div>
-          </div>
+          </header>
           <div class="overlay__body briefsheet__body">
-            <p class="slip__kind">Meeting brief</p>
             <h2 class="briefsheet__title" id="bs-title"></h2>
             <p class="briefsheet__when" id="bs-when"></p>
             <div id="bs-content"></div>

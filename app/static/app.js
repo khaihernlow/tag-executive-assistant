@@ -376,11 +376,9 @@ function cited(text) {
   const out = [];
   for (const p of parts.filter(Boolean)) {
     if (!/^\[/.test(p)) { out.push(p); continue; }
-    for (const label of p.slice(1, -1).split(/,\s*/)) {
-      out.push(briefSources.has(label)
-        ? el("button", { class: "cite", type: "button", text: label, onclick: () => showSource(label) })
-        : el("span", { class: "cite cite--plain", text: label }));
-    }
+    out.push(el("span", { class: "cites" }, p.slice(1, -1).split(/,\s*/).map((label) => (briefSources.has(label)
+      ? el("button", { class: "cite", type: "button", text: label, title: "Show this source", onclick: () => showSource(label) })
+      : el("span", { class: "cite cite--plain", text: label })))));
   }
   return out;
 }
@@ -884,6 +882,7 @@ function markOpen(row) {
 function openDetail(kind, title, node) {
   closePanels("detail");
   $("#detail-kind").textContent = kind;
+  $("#detail-label").textContent = kind;
   $("#detail-title").textContent = title;
   $("#detail-body").replaceChildren(node);
   $("#detail").hidden = false;
