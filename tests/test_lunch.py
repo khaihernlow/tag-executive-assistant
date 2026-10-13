@@ -140,7 +140,7 @@ def test_a_normal_wednesday(setup):
     plan = lunch.tick(at("09:42"))
     assert plan["people"]["Dan"]["state"] == "ordered"
     assert plan["people"]["Dan"]["line"] == {"item": "01 Tuna Salad Sandwich", "options": ["Wheat Bread", "Coleslaw"], "price": 15.25}
-    assert teams.sent[-1] == ("dlawrence@tagsolutions.com", "Got it: 01 Tuna Salad Sandwich (Wheat Bread, Coleslaw), $15.25. Ordering at 11.")
+    assert teams.sent[-1] == ("dlawrence@tagsolutions.com", "Got it: 01 Tuna Salad Sandwich (Wheat Bread, Coleslaw), $15.25. Ordering at 11:00.")
 
     lunch.tick(at("10:31"))                                    # Dom is reminded, once
     lunch.tick(at("10:34"))
@@ -225,3 +225,18 @@ def test_un_skipping_picks_up_where_it_was(setup):
     L.order_anyway(store, at("09:50"))
     plan = lunch.tick(at("09:51"))
     assert plan["status"] == "collecting" and len(teams.sent) == 2      # nobody asked twice
+
+
+def test_a_menu_name_matches_with_or_without_its_number(setup):
+    store, menu, _ = setup
+    assert menu.item("Tuna Salad Sandwich").name == "01 Tuna Salad Sandwich"
+    assert menu.item("01 tuna salad sandwich").name == "01 Tuna Salad Sandwich"
+    assert menu.item("Cheeseburger") is None
+    # The reply that found this: the model named the item without its number
+    llm = LLM(tool("read_lunch_reply", status="order", item="Tuna Salad Sandwich", wants=["wheat", "coleslaw"]),
+              tool("pick_options", options=["Wheat Bread", "Coleslaw"], unavailable=[]))
+    lunch = L.Lunch(Graph(), Teams(), llm, store, menu)
+    lunch.tick(at("09:30"))
+    lunch.teams.inbox["dlawrence@tagsolutions.com"] = [{"text": "do the tuna salad sandwich from deli", "at": utc("09:35")}]
+    plan = lunch.tick(at("09:36"))
+    assert plan["people"]["Dan"]["line"]["item"] == "01 Tuna Salad Sandwich"

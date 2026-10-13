@@ -136,8 +136,15 @@ class Menu:
             {"day": date.today().isoformat(), "items": [asdict(i) for i in self._items or []]}))
 
     def item(self, name: str) -> Item | None:
-        """The item with exactly this menu name, with its options loaded."""
-        found = next((i for i in self.items() if i.name.lower() == (name or "").strip().lower()), None)
+        """The item with this menu name, with its options loaded. The number Mealeo puts in
+        front is optional ("Tuna Salad Sandwich" is "01 Tuna Salad Sandwich"), as long as
+        only one item has that name."""
+        wanted = (name or "").strip().lower()
+        found = next((i for i in self.items() if i.name.lower() == wanted), None)
+        if found is None:
+            bare = lambda n: re.sub(r"^\s*\d+\.?\s*", "", n).strip().lower()
+            same = [i for i in self.items() if bare(i.name) == bare(wanted)]
+            found = same[0] if len({i.name for i in same}) == 1 else None
         if found and not found.groups:
             base, found.groups = parse_item(self._get(SITE + found.path))
             # The list shows prices about 10% under the item's own (an online discount, it
@@ -150,7 +157,12 @@ class Menu:
         """Menu items that best match words like "grilled chicken salad"."""
         want = _words(text)
         scored = [(len(want & _words(i.name)) / max(len(want | _words(i.name)), 1), i) for i in self.items()]
-        return [i for score, i in sorted(scored, key=lambda s: -s[0]) if score > 0][:limit]
+        out, names = [], set()
+        for score, i in sorted(scored, key=lambda s: -s[0]):
+            if score > 0 and i.name not in names:     # some names appear twice (two sizes)
+                names.add(i.name)
+                out.append(i)
+        return out[:limit]
 
     def listing(self) -> str:
         """The whole menu in a compact form, for reading someone's order against."""
@@ -163,13 +175,16 @@ class Menu:
         return "\n".join(out)
 
 
-def price_line(item: Item, options: list[str]) -> tuple[float, list[str]]:
-    """The price of an item with these options, and any option names not on it."""
-    total, unknown = item.price, []
+def price_line(item: Item, options: list[str]) -> tuple[float, list[str], list[str]]:
+    """The price of an item with these options, the options by their menu names, and any
+    not on it. A price copied along with a name ("Add Grilled Chicken +$4.25") is ignored."""
+    total, named, unknown = item.price, [], []
     for wanted in options:
-        match = next((c for g in item.groups for c in g.choices if c.name.lower() == wanted.strip().lower()), None)
+        bare = re.sub(r"\s*[\[(]?\+?\$[\d.,]+[\])]?\s*$", "", wanted).strip().lower()
+        match = next((c for g in item.groups for c in g.choices if c.name.lower() == bare), None)
         if match is None:
             unknown.append(wanted)
         else:
             total += match.price
-    return round(total, 2), unknown
+            named.append(match.name)
+    return round(total, 2), named, unknown

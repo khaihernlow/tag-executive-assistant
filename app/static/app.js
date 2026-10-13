@@ -605,7 +605,7 @@ function lunchSummary(l) {
     case "no_meeting": return "The leadership meeting isn't on your calendar today, so I won't order lunch.";
     case "skipped": return "No lunch order this week.";
     case "planned": return `Ordering from Saati Deli for the leadership meeting at ${l.order_at}.`
-      + (asked.length ? ` I'll ask ${asked.join(" and ")} on Teams at 9:30.` : "");
+      + (asked.length ? ` I'll ask ${asked.join(" and ")} on Teams at ${l.ask_at}.` : "");
     case "collecting": return asked.length
       ? `Waiting on ${asked.join(" and ")} (replies by ${l.deadline}). Ordering at ${l.order_at}.`
       : `Everyone has answered. Ordering at ${l.order_at}.`;

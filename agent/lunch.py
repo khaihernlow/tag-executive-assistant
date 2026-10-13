@@ -22,7 +22,7 @@ from __future__ import annotations
 import json
 import logging
 import os
-from datetime import datetime, time, timezone
+from datetime import datetime, time, timedelta, timezone
 from typing import Any
 
 from agent.calendar import local_zone
@@ -36,6 +36,8 @@ DEFAULTS: dict[str, Any] = {
     "ask_at": "09:30", "remind_at": "10:30", "deadline": "10:45", "order_at": "11:00",
     "cap": 150.0,                          # dollars of food; above it, Dave decides
     "careful_runs": 2,                     # first orders wait for Dave's go before checkout
+    "weekday": 2,                          # Wednesday (Monday is 0)
+    "intro": "",                           # put before each message ("(Test run) ")
     "people": [
         {"name": "Dave", "upn": "dvener@tagsolutions.com", "ask": False,
          "usual": {"item": "05 Grilled Chkn Salad", "options": ["Honey Mustard"]}},
@@ -54,7 +56,9 @@ READ_REPLY = ToolSpec(
     description="Read someone's reply about what they want for lunch from the menu.",
     input_schema={"type": "object", "properties": {
         "status": {"type": "string", "enum": ["order", "out", "unclear"],
-                   "description": "order: they named something; out: no lunch for them this week; unclear: can't tell what they want"},
+                   "description": "order: they named a menu item; out: ONLY when they say they don't want lunch "
+                                  "this week; unclear: you can't tell which item, or what they named isn't on the menu "
+                                  "(then ask, suggesting the closest items)"},
         "item": {"type": "string", "description": "The exact menu name of what they want (copy it from the menu), or empty"},
         "wants": {"type": "array", "items": {"type": "string"},
                   "description": "Each change or extra in their own words: 'honey mustard', 'extra chicken', 'on wheat'"},
@@ -134,8 +138,7 @@ def resolve(menu: Menu, llm: Any, item_name: str, wants: list[str]) -> dict[str,
                                 tools=[PICK_OPTIONS], tool_choice=PICK_OPTIONS.name, max_tokens=500)
         for call in response.tool_calls:
             options, unavailable = list(call.input.get("options") or []), list(call.input.get("unavailable") or [])
-    price, unknown = price_line(item, options)
-    options = [o for o in options if o not in unknown]
+    price, options, unknown = price_line(item, options)
     line = {"item": item.name, "options": options, "price": price}
     missing = [g.name for g in item.groups if g.min and not any(o.lower() in {c.name.lower() for c in g.choices} for o in options)]
     if missing:
@@ -148,8 +151,13 @@ def resolve(menu: Menu, llm: Any, item_name: str, wants: list[str]) -> dict[str,
 
 def read_reply(menu: Menu, llm: Any, text: str) -> dict[str, Any]:
     response = llm.complete([{"role": "user", "content": f"Menu:\n{menu.listing()}\n\nTheir reply:\n{text}"}],
-                            system="Someone was asked what they want for lunch from this deli menu. Read their reply. "
-                                   "'Same as usual' or anything you can't match to the menu is unclear.",
+                            system="Someone was asked what they want for lunch from this deli menu. Read their reply "
+                                   "(all of it, if they wrote more than once: later messages answer your questions). "
+                                   "Pick the item only, copying its menu name exactly, number included. Put bread, "
+                                   "dressing, sides and extras in wants in their words: they're checked against the "
+                                   "item's own options later, so never say whether an option exists. It's unclear "
+                                   "only if you can't tell which item ('same as usual', or two items fit equally); "
+                                   "then ask which, naming the candidates.",
                             tools=[READ_REPLY], tool_choice=READ_REPLY.name, max_tokens=500)
     return next((c.input for c in response.tool_calls), {"status": "unclear", "question": "What would you like?"})
 
@@ -161,6 +169,7 @@ class Lunch:
 
     # ── messages: sent for real only when live ──
     def _say(self, plan: dict[str, Any], person: dict[str, Any], text: str, now: datetime) -> None:
+        text = text.replace("**", "")   # the model's bold shows as asterisks in a Teams message
         entry = {"to": person["name"], "text": text, "at": now.isoformat(timespec="minutes"), "sent": live()}
         if live():
             try:
@@ -172,13 +181,14 @@ class Lunch:
     def tick(self, now: datetime | None = None) -> dict[str, Any] | None:
         """One step of Wednesday's lunch; safe to call every few minutes."""
         now = now or datetime.now(local_zone())
-        if now.weekday() != 2 or now < _at(now, "07:00") or now > _at(now, "14:00"):
-            return None
         cfg = config(self.store)
+        if now.weekday() != cfg["weekday"] or now < _at(now, "07:00") or now > _at(now, cfg["order_at"]) + timedelta(hours=3):
+            return None
         plan = load(self.store, now)
         if plan is None:
             meeting = find_meeting(self.graph, now, cfg["meeting"])
             plan = {"day": now.date().isoformat(), "live": live(), "meeting": meeting,
+                    "times": {k: cfg[k] for k in ("ask_at", "remind_at", "deadline", "order_at")},
                     "status": "planned" if meeting else "no_meeting",
                     "people": {p["name"]: {"upn": p["upn"], "state": "usual" if p.get("usual") else "to_ask"}
                                for p in cfg["people"]}}
@@ -194,7 +204,7 @@ class Lunch:
             for name, who in plan["people"].items():
                 if who["state"] == "to_ask":
                     self._say(plan, {**people[name], "upn": who["upn"]},
-                              f"Hi {name}, it's Dave's assistant. Lunch for today's leadership meeting is from Saati Deli "
+                              f"{cfg['intro']}Hi {name}, it's Dave's assistant. Lunch for today's leadership meeting is from Saati Deli "
                               f"(menu: https://www.mealeo.com/restaurants/albany/saati-deli-albany). What would you like? "
                               f"I'm ordering at {cfg['order_at']}, so please reply by {cfg['deadline']}." , now)
                     # Teams stamps messages in UTC ("2026-10-14T13:31:02.5Z"); compare like with like.
@@ -219,8 +229,8 @@ class Lunch:
         item = self.menu.item(order["item"])
         if item is None:
             return {"item": order["item"], "options": order.get("options", []), "price": 0, "problem": "no longer on the menu"}
-        price, unknown = price_line(item, order.get("options", []))
-        line = {"item": item.name, "options": [o for o in order.get("options", []) if o not in unknown], "price": price}
+        price, named, unknown = price_line(item, order.get("options", []))
+        line = {"item": item.name, "options": named, "price": price}
         if unknown:
             line["unavailable"] = unknown
         return line
@@ -250,7 +260,7 @@ class Lunch:
                     who.update(state="ordered", line=line)
                     extra = f" ({', '.join(line['unavailable'])} isn't on the menu, so I left it off.)" if line.get("unavailable") else ""
                     self._say(plan, people[name] | {"upn": who["upn"]},
-                              f"Got it: {describe(line)}, ${line['price']:.2f}.{extra} Ordering at 11.", now)
+                              f"Got it: {describe(line)}, ${line['price']:.2f}.{extra} Ordering at {config(self.store)['order_at']}.", now)
             else:
                 who.update(state="clarifying")
                 self._say(plan, people[name] | {"upn": who["upn"]}, verdict.get("question") or "Which item would you like from the menu?", now)
@@ -289,7 +299,7 @@ def today_view(store: Any, now: datetime | None = None) -> dict[str, Any] | None
     plan = load(store, now)
     if plan is None:
         return None
-    cfg = config(store)
+    cfg = {**config(store), **plan.get("times", {})}   # the times this day's plan was made with
     lines = []
     for name, who in plan["people"].items():
         line = who.get("line")
@@ -298,7 +308,7 @@ def today_view(store: Any, now: datetime | None = None) -> dict[str, Any] | None
                       "price": line["price"] if line else None,
                       "note": who.get("note") or (", ".join(line.get("unavailable", [])) + " not on the menu" if line and line.get("unavailable") else None)})
     return {"status": plan["status"], "live": plan.get("live", False), "meeting": plan.get("meeting"),
-            "order_at": cfg["order_at"], "deadline": cfg["deadline"], "lines": lines,
+            "ask_at": cfg["ask_at"], "order_at": cfg["order_at"], "deadline": cfg["deadline"], "lines": lines,
             "total": plan.get("total") or round(sum(l["price"] or 0 for l in lines if l["state"] != "out"), 2),
             "reasons": plan.get("reasons", []), "messages": plan.get("messages", [])}
 
