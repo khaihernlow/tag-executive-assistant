@@ -67,6 +67,14 @@ class GraphClient:
         provider = DelegatedTokenProvider(tenant_id, client_id, signin_account())
         return cls(tenant_id, client_id, "", mailbox, token_provider=provider)
 
+    @classmethod
+    def as_account(cls, account: str) -> "GraphClient":
+        """Signed in as `account`, working in its own mailbox (the assistant acting as itself)."""
+        from connectors.ms_auth import DelegatedTokenProvider
+
+        tenant_id, client_id = os.environ.get("GRAPH_TENANT_ID", ""), os.environ.get("GRAPH_CLIENT_ID", "")
+        return cls(tenant_id, client_id, "", account, token_provider=DelegatedTokenProvider(tenant_id, client_id, account))
+
     def token(self) -> str:
         if self.token_provider:
             # MSAL caches and renews delegated tokens itself.

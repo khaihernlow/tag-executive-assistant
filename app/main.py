@@ -24,6 +24,7 @@ from agent.requests import open_requests_view, propose_booking, propose_hold, pr
 from agent.calendar import agenda_day, local_zone, meeting_place, parse_event
 from agent.people import internal_domain
 from agent.emailtext import excerpt as email_excerpt
+from agent.lunch import order_anyway, skip_week as skip_lunch, today_view as lunch_view
 from agent.uploads import MAX_BYTES as MAX_UPLOAD_BYTES, UploadError, prepare as prepare_upload
 from connectors.graph import EVENT_FIELDS
 from app.auth import is_allowed, require_auth, user_email
@@ -220,6 +221,7 @@ def today(user: dict = Depends(require_auth), svc=Depends(services)):
         "pending": pending,
         "requests": requests_view,
         "invites": invites,
+        "lunch": lunch_view(svc.store) if hasattr(svc.store, "get_state") else None,
         "junk_moved": moved_today(svc.store) if hasattr(svc.store, "actions_since") else [],
         "filed": filed_today(svc.store) if hasattr(svc.store, "actions_since") else [],
     }
@@ -265,6 +267,22 @@ async def upload(file: UploadFile = File(...), user: dict = Depends(require_auth
     name = file.filename or "file"
     uid = svc.store.add_upload(name, prepared["kind"], prepared["summary"], prepared["thumb"], prepared["blocks"])
     return {"id": uid, "name": name, "kind": prepared["kind"], "summary": prepared["summary"], "thumb": prepared["thumb"]}
+
+
+@app.post("/api/lunch/skip")
+def lunch_skip(user: dict = Depends(require_auth), svc=Depends(services)):
+    """No lunch order this Wednesday."""
+    skip_lunch(svc.store)
+    return {"lunch": lunch_view(svc.store)}
+
+
+@app.post("/api/lunch/order-anyway")
+def lunch_order_anyway(user: dict = Depends(require_auth), svc=Depends(services)):
+    """Lunch is on although the meeting isn't on the calendar (or it was skipped)."""
+    order_anyway(svc.store)
+    if getattr(svc.worker, "lunch", None) is not None:
+        svc.worker.lunch.tick()
+    return {"lunch": lunch_view(svc.store)}
 
 
 @app.get("/api/conversations")

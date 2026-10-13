@@ -313,6 +313,7 @@ async function loadToday() {
     renderNext(day.events, isToday ? "" : day.agenda_title);
     renderNeeds(day.pending.filter((a) => !["reply_email", "book_meeting"].includes(a.kind)),
                 day.requests || [], day.invites || []);
+    renderLunch(day.lunch);
     renderJunk(day.junk_moved || [], day.filed || []);
     // While the worker is preparing briefs, check back so the "Brief" buttons appear.
     clearTimeout(loadToday.timer);
@@ -590,6 +591,72 @@ function undoRow(m, path) {
       } });
   return el("li", { class: "tidy__row" },
     el("div", { class: "tidy__text" }, el("span", { class: "tidy__title", text: m.subject }), sub), action);
+}
+
+// ── Wednesday lunch ──────────────────────────────────────────────────────────
+
+const LUNCH_STATE = { usual: "usual", to_ask: "will ask", asked: "asked", clarifying: "asked again",
+                      ordered: "replied", backup: "backup order", out: "out this week", no_reply: "no reply" };
+
+function lunchSummary(l) {
+  const money = `$${(l.total || 0).toFixed(2)}`;
+  const asked = l.lines.filter((x) => ["to_ask", "asked", "clarifying"].includes(x.state)).map((x) => x.name);
+  switch (l.status) {
+    case "no_meeting": return "The leadership meeting isn't on your calendar today, so I won't order lunch.";
+    case "skipped": return "No lunch order this week.";
+    case "planned": return `Ordering from Saati Deli for the leadership meeting at ${l.order_at}.`
+      + (asked.length ? ` I'll ask ${asked.join(" and ")} on Teams at 9:30.` : "");
+    case "collecting": return asked.length
+      ? `Waiting on ${asked.join(" and ")} (replies by ${l.deadline}). Ordering at ${l.order_at}.`
+      : `Everyone has answered. Ordering at ${l.order_at}.`;
+    case "needs_dave": return `Ready: ${money} of food. Before I order:`;
+    case "ready": return `Ready to order: ${money} of food.`;
+    case "ordered": return `Ordered: ${money}.`;
+    default: return "";
+  }
+}
+
+async function lunchAction(path) {
+  try {
+    const { lunch } = await api(path, { method: "POST" });
+    renderLunch(lunch);
+  } catch (err) {
+    $("#lunch").append(el("p", { class: "error", text: err.message }));
+  }
+}
+
+function renderLunch(l) {
+  const block = $("#lunch-block");
+  block.hidden = !l;
+  if (!l) return;
+  $("#lunch-aside").textContent = l.live ? "" : "Practice run \u00b7 nothing sent";
+  const showLines = !["no_meeting", "skipped"].includes(l.status);
+  const actions = [];
+  if (["planned", "collecting", "needs_dave", "ready"].includes(l.status)) {
+    actions.push(el("button", { class: "btn", type: "button", text: "Skip this week", onclick: () => lunchAction("/api/lunch/skip") }));
+  }
+  if (["no_meeting", "skipped"].includes(l.status)) {
+    actions.push(el("button", { class: "btn", type: "button", text: l.status === "skipped" ? "Order after all" : "Order lunch anyway",
+                               onclick: () => lunchAction("/api/lunch/order-anyway") }));
+  }
+  $("#lunch").replaceChildren(...[
+    el("p", { class: "lunch__summary", text: lunchSummary(l) }),
+    l.status === "needs_dave" && l.reasons.length
+      ? el("ul", { class: "lunch__reasons" }, l.reasons.map((r) => el("li", { text: r.charAt(0).toUpperCase() + r.slice(1) }))) : null,
+    showLines ? el("ul", { class: "lunch__lines" }, l.lines.map((x) => el("li", { class: `lunch__line${x.state === "out" ? " is-out" : ""}` },
+      el("span", { class: "lunch__who", text: x.name }),
+      el("span", { class: "lunch__what" },
+        el("span", { text: x.what || (x.state === "out" ? "No lunch" : "\u2014") }),
+        x.note ? el("span", { class: "lunch__note", text: x.note }) : null),
+      el("span", { class: "lunch__state", text: LUNCH_STATE[x.state] || x.state }),
+      el("span", { class: "lunch__price", text: x.price != null && x.state !== "out" ? `$${x.price.toFixed(2)}` : "" })))) : null,
+    showLines && l.lines.some((x) => x.price) ? el("p", { class: "lunch__total" },
+      el("span", { text: "Food" }), el("span", { text: `$${(l.total || 0).toFixed(2)} + tax, delivery and tip` })) : null,
+    // Said plainly until the assistant can check out on Mealeo itself.
+    ["needs_dave", "ready"].includes(l.status)
+      ? el("p", { class: "lunch__note-line", text: "Placing the order on Mealeo isn't connected yet, so for now someone places it by hand." }) : null,
+    actions.length ? el("div", { class: "lunch__actions" }, ...actions) : null,
+  ].filter(Boolean));
 }
 
 function renderJunk(moved, filed) {

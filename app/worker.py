@@ -13,6 +13,8 @@ Jobs (each cycle):
            slip. Learns from Dave's Junk folder and filed mail once a day.
   requests one inbox read; new mail that looks like "can we meet?" is classified
            by the fast model and shown on Today with suggested times.
+  lunch    Wednesdays 7:00-14:00: the leadership lunch (agent/lunch.py) - ask Dan and
+           Dom on Teams, read replies, fill in backups, total it up for Dave.
   briefs   every BRIEF_INTERVAL (3 min): one calendar read; prepare briefs for
            new qualifying meetings (rest of today + next working day), soonest
            first, and refresh any whose invite changed. Unchanged meetings cost
@@ -41,13 +43,15 @@ BRIEF_INTERVAL = int(os.environ.get("BRIEF_INTERVAL_SECONDS", str(3 * 60)))
 
 class Worker:
     def __init__(self, graph: Any, llm: Any, store: Any, interval: int = BRIEF_INTERVAL, searcher: Any = None,
-                 fast_llm: Any = None, actions: Any = None, autotask: Any = None, linkedin: Any = None) -> None:
+                 fast_llm: Any = None, actions: Any = None, autotask: Any = None, linkedin: Any = None,
+                 lunch: Any = None) -> None:
         self.graph, self.llm, self.store = graph, llm, store
         self.searcher = searcher  # web research for briefs; None skips it
         self.fast_llm = fast_llm  # quick classification (meeting requests); None skips the inbox scan
         self.actions = actions    # lets follow-ups book a time the other person picked
         self.autotask = autotask  # an opportunities Directory; None without Autotask credentials
         self.linkedin = linkedin  # LinkedIn backgrounds for briefs; None without an Apify token
+        self.lunch = lunch        # Wednesday lunch; None without the assistant's own account
         self.interval = interval
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
@@ -101,6 +105,13 @@ class Worker:
                         log.info("meeting requests found: %s", added)
                 except Exception:  # noqa: BLE001
                     log.exception("meeting request scan failed")
+            if self.lunch is not None:
+                try:
+                    plan = self.lunch.tick()
+                    if plan:
+                        log.info("lunch: %s", plan["status"])
+                except Exception:  # noqa: BLE001
+                    log.exception("lunch step failed")
             self._stop.wait(self.interval)
 
     def queue_briefs(self) -> int:

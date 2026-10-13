@@ -28,6 +28,8 @@ from agent.people import people_tools
 from agent.scheduling import scheduling_tools
 from agent.tools import ToolRegistry
 from connectors.graph import GraphClient
+from connectors.teams import Teams
+from agent.lunch import Lunch
 from llm.hatzai import HatzAIProvider
 from app.worker import Worker
 from store.db import Store
@@ -60,6 +62,8 @@ def build_services() -> Services:
     linkedin = LinkedIn(apify, store) if apify else None
     memory = Memory(store)
     llm = HatzAIProvider()
+    # The assistant's own account (assistant@), for things it does as itself: Teams messages.
+    own = GraphClient.as_account(os.environ["ASSISTANT_ACCOUNT"]) if os.environ.get("ASSISTANT_ACCOUNT") else None
     # Quick, high-volume judgments (junk triage) use a faster, cheaper model.
     fast_llm = HatzAIProvider(model=os.environ.get("HATZAI_FAST_MODEL", "anthropic.claude-haiku-4-5"))
     registry = ToolRegistry(
@@ -79,6 +83,7 @@ def build_services() -> Services:
         + (linkedin_tools(linkedin, graph, directory) if linkedin else [])
     )
     assistant = Assistant(llm, registry, store, actions, memory)
+    lunch = Lunch(graph, Teams(own, os.environ["ASSISTANT_ACCOUNT"], store), llm, store) if own else None
     worker = Worker(graph, llm, store, searcher=llm, fast_llm=fast_llm, actions=actions, autotask=directory,
-                    linkedin=linkedin)
+                    linkedin=linkedin, lunch=lunch)
     return Services(graph, store, actions, assistant, memory, worker, llm, directory)
