@@ -36,7 +36,9 @@
   --focus: rgba(34, 54, 90, 0.40);
   --shadow: 0 1px 2px rgba(31, 42, 60, 0.04);
   --scrim: rgba(20, 23, 28, 0.28);
-  --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5l5 5 5-5' fill='none' stroke='%237D8594' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  /* Lucide chevron-down / chevron-right, for places CSS draws them (selects, summaries). */
+  --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%237D8594' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  --icon-chevron-right: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m9 18 6-6-6-6'/%3E%3C/svg%3E");
 
   --serif: "Newsreader", "Iowan Old Style", Georgia, serif;
   --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
@@ -323,7 +325,8 @@ input[type="checkbox"] { accent-color: var(--navy); }
 /* Tidied up: an FYI log, collapsed. */
 .tidy summary { cursor: pointer; font-weight: 600; color: var(--ink-soft); list-style: none; }
 .tidy summary::-webkit-details-marker { display: none; }
-.tidy summary::after { content: " \203A"; color: var(--ink-faint); }
+.tidy summary::after { content: ""; display: inline-block; width: 14px; height: 14px; margin-left: 2px; vertical-align: -2px;
+  background: var(--ink-faint); -webkit-mask: var(--icon-chevron-right) center / contain no-repeat; mask: var(--icon-chevron-right) center / contain no-repeat; }
 .tidy[open] summary::after { content: ""; }
 .tidy__group { margin-top: var(--s4); margin-bottom: var(--s1); }
 .tidy__list { list-style: none; margin: 0; padding: 0; }
@@ -889,3 +892,44 @@ button.cite:hover { background: var(--sunken); color: var(--link); text-decorati
 @media (max-width: 1023px) { .briefsheet__when { margin-left: 0; margin-right: 0; } }
 /* An opened item: the header already says what it is. */
 #detail-body .slip__kind:first-child { display: none; }
+
+/* ══ Icons: Lucide, one style ════════════════════════════════════════════════
+   Sizes come from where an icon sits (buttons set their own); this is the default. */
+:where(svg.icon) { width: 1.15em; height: 1.15em; flex: none; vertical-align: -0.2em; }
+svg.icon { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.tab svg.icon { stroke-width: 1.75; }
+.need__chevron { display: flex; align-items: center; color: var(--ink-ghost); }
+.need__chevron svg.icon { width: 18px; height: 18px; }
+/* Text marks drawn as icons: a check in "done", a triangle in a warning. */
+.stamp svg.icon, .avail svg.icon, .warn svg.icon, .block__aside svg.icon, .steps-done svg.icon,
+.memory-note svg.icon, .need__sub svg.icon { width: 1em; height: 1em; margin-right: 0.3em; vertical-align: -0.12em; }
+
+/* ── A cited source: the same pop-up as Recent ── */
+.source-modal { width: min(600px, calc(100% - 2 * var(--s4))); }
+.source__head { padding: var(--s3) var(--s3) 0 var(--s5); }
+.source__kind { display: flex; align-items: center; gap: var(--s2); margin: 0;
+                font-size: 12px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-faint); }
+.source__kind svg.icon { width: 15px; height: 15px; }
+.source__body { flex: 1; min-height: 0; overflow-y: auto; padding: var(--s2) var(--s5) var(--s4); }
+.source__title { margin: 0; font: 600 20px/1.3 var(--serif); }
+.source__meta { margin: var(--s1) 0 0; font-size: 13px; color: var(--ink-faint); }
+.source__excerpt { margin: var(--s4) 0 0; padding: 0; border: 0; font-size: 15px; line-height: 1.6; color: var(--ink-soft); white-space: pre-line; }
+.source__foot { display: flex; justify-content: flex-end; padding: var(--s3) var(--s4) var(--s4); border-top: 1px solid var(--rule-soft); }
+.source__open { display: inline-flex; align-items: center; gap: var(--s2); width: auto; flex: 0 0 auto; padding: 0 var(--s4); }
+.source__open svg.icon { width: 15px; height: 15px; }
+
+/* ── Sources in a brief: folded away, one compact line each ── */
+.bsources > summary { display: flex; align-items: center; gap: var(--s1); width: max-content; cursor: pointer; list-style: none; }
+.bsources > summary::-webkit-details-marker { display: none; }
+.bsources > summary:hover { color: var(--ink-soft); }
+.bsources > summary svg.icon { width: 14px; height: 14px; transition: transform 0.15s ease; transform: rotate(-90deg); }
+.bsources[open] > summary svg.icon { transform: none; }
+.srclist { margin: var(--s2) 0 0; padding: 0; list-style: none; }
+.srcrow {
+  display: flex; align-items: center; gap: var(--s3); width: 100%; padding: 7px var(--s2); margin: 0 calc(-1 * var(--s2));
+  box-sizing: content-box; border: 0; border-radius: var(--r-sm); background: none; color: var(--ink); text-align: left; cursor: pointer; font: inherit;
+}
+.srcrow:hover { background: var(--sunken); }
+.srcrow svg.icon { width: 15px; height: 15px; color: var(--ink-faint); }
+.srcrow__title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
+.srcrow__label { flex: none; font-size: 12px; color: var(--ink-faint); font-variant-numeric: tabular-nums; }

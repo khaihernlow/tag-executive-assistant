@@ -29,12 +29,35 @@ let conversationId = (() => {
   return Date.now() - lastActive < FRESH_AFTER_MS ? readStored() : null;
 })();
 
+const SVG_NS = "http://www.w3.org/2000/svg";
+function icon(name) {   // a Lucide icon from the page's sprite
+  const svg = document.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("class", "icon");
+  svg.setAttribute("aria-hidden", "true");
+  const use = document.createElementNS(SVG_NS, "use");
+  use.setAttribute("href", `#i-${name}`);
+  svg.append(use);
+  return svg;
+}
+
+// "✓ Sent" and "⚠ Clashes" are written as text everywhere; on screen the marks are icons.
+const MARKS = { "\u2713": "check", "\u26a0": "triangle-alert" };
+function withMarks(node, text) {
+  const parts = String(text).split(/(\u2713|\u26a0)\s?/);
+  if (parts.length === 1) { node.textContent = text; return; }
+  node.textContent = "";
+  for (const part of parts) {
+    if (!part) continue;
+    node.append(MARKS[part] ? icon(MARKS[part]) : document.createTextNode(part));
+  }
+}
+
 function el(tag, attrs = {}, ...children) {
   const node = document.createElement(tag);
   for (const [key, value] of Object.entries(attrs)) {
     if (value === undefined || value === null || value === false) continue;
     if (key === "class") node.className = value;
-    else if (key === "text") node.textContent = value;
+    else if (key === "text") withMarks(node, value);
     else if (key.startsWith("on")) node.addEventListener(key.slice(2), value);
     else node.setAttribute(key, value);
   }
@@ -145,9 +168,9 @@ function closePanels(except = "") {
 // ── Recent and Remembered: a pop-up near the top; nothing behind it moves ──
 
 function closePopovers() {
-  for (const id of ["recent", "memory"]) {
+  for (const id of ["recent", "memory", "source"]) {
     $(`#${id}`).hidden = true;
-    $(`#${id}-btn`).setAttribute("aria-expanded", "false");
+    $(`#${id}-btn`)?.setAttribute("aria-expanded", "false");
   }
   $("#scrim").hidden = true;
   document.body.classList.remove("modal-open");
@@ -156,13 +179,17 @@ function closePopovers() {
 function openPopover(id) {
   closePopovers();
   $(`#${id}`).hidden = false;
-  $(`#${id}-btn`).setAttribute("aria-expanded", "true");
+  $(`#${id}-btn`)?.setAttribute("aria-expanded", "true");
   $("#scrim").hidden = false;   // a click anywhere else closes it
   document.body.classList.add("modal-open");
 }
 
 $("#scrim").addEventListener("click", closePopovers);
-document.addEventListener("keydown", (e) => { if (e.key === "Escape") closePopovers(); });
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape" || $("#scrim").hidden) return;
+  closePopovers();
+  e.stopImmediatePropagation();
+}, true);
 
 // ── the chat's title, and edges that only show when something scrolls under them ──
 
@@ -281,7 +308,7 @@ async function loadToday() {
     $("#today-title").textContent = isToday ? "Today" : `${day.agenda_title} · ${day.agenda_date}`;
     const done = $("#done-today");
     done.hidden = !day.done_today;
-    done.textContent = `\u2713 ${day.done_today} done today`;
+    withMarks(done, `\u2713 ${day.done_today} done today`);
     renderItinerary(day.events, isToday ? "today" : day.agenda_title.toLowerCase());
     renderNext(day.events, isToday ? "" : day.agenda_title);
     renderNeeds(day.pending.filter((a) => !["reply_email", "book_meeting"].includes(a.kind)),
@@ -337,19 +364,19 @@ let briefSources = new Map();
 function sourceIndex(material) {
   const index = new Map();
   const m = material || {};
-  if (m.invite) index.set("Invite", { kind: "Calendar invite", title: "Invite", excerpt: m.invite.excerpt || "No description in the invite." });
+  if (m.invite) index.set("Invite", { kind: "Calendar invite", icon: "calendar", title: "The invite", excerpt: m.invite.excerpt || "No description in the invite." });
   for (const e of m.emails || []) {
-    index.set(e.label, { kind: e.label, title: e.subject, meta: `${e.from} \u00b7 ${e.received}`, excerpt: e.excerpt,
+    index.set(e.label, { kind: e.label, icon: "mail", title: e.subject, from: e.from, date: e.received, meta: `${e.from} \u00b7 ${e.received}`, excerpt: e.excerpt,
                          link: e.web_link, linkText: "Open in Outlook" });
   }
   for (const a of m.attachments || []) {
-    index.set(a.label, { kind: a.label, title: a.name, meta: `Attached to ${a.from_email}`, excerpt: a.excerpt,
+    index.set(a.label, { kind: a.label, icon: "paperclip", title: a.name, from: a.from_email, meta: `Attached to ${a.from_email}`, excerpt: a.excerpt,
                          link: a.web_link, linkText: "Open the email in Outlook" });
   }
   for (const w of m.web || []) {
     let host = w.url;
     try { host = new URL(w.url).hostname.replace(/^www\./, ""); } catch { /* keep raw */ }
-    index.set(w.label, { kind: w.label, title: w.about || host, meta: host, excerpt: w.fact, link: w.url, linkText: `Open ${host}` });
+    index.set(w.label, { kind: w.label, icon: "globe", title: w.about || host, from: host, meta: host, excerpt: w.fact, link: w.url, linkText: `Open ${host}` });
   }
   return index;
 }
@@ -357,18 +384,21 @@ function sourceIndex(material) {
 function showSource(label) {
   const src = briefSources.get(label);
   if (!src) return;
+  $("#src-icon").replaceChildren(icon(src.icon || "mail"));
   $("#src-kind").textContent = src.kind;
-  $("#src-title").textContent = src.title || "";
-  $("#src-meta").textContent = src.meta || "";
+  // The invite is this meeting: name it and give its time, rather than "The invite".
+  const invite = label === "Invite" && openEvent;
+  $("#src-title").textContent = invite ? openEvent.subject : src.title || "";
+  $("#src-meta").textContent = invite ? [whenLabel(openEvent), openEvent.location].filter(Boolean).join(" · ") : src.meta || "";
+  if (invite) src.meta = $("#src-meta").textContent;
+  $("#src-meta").hidden = !src.meta;
   $("#src-excerpt").textContent = src.excerpt || "";
-  const open = $("#src-open");
-  open.hidden = !src.link;
-  if (src.link) { open.href = src.link; open.textContent = src.linkText; }
-  $("#source").hidden = false;
+  $("#src-foot").hidden = !src.link;
+  if (src.link) { $("#src-open").href = src.link; $("#src-open-text").textContent = src.linkText; }
+  openPopover("source");
 }
 
-$("#src-close").addEventListener("click", () => { $("#source").hidden = true; });
-$("#source").addEventListener("click", (e) => { if (e.target.id === "source") $("#source").hidden = true; });
+$("#src-close").addEventListener("click", closePopovers);
 
 function cited(text) {
   // "[Email 2, Web 1]" becomes tappable chips that open the source; unknown labels stay plain.
@@ -416,14 +446,13 @@ function renderBrief(data) {
   ];
   const sources = [...briefSources.entries()].filter(([label]) => label !== "Invite");
   if (sources.length) {
-    content.push(el("section", { class: "bsec" },
-      el("h3", { class: "bsec__title", text: `Sources (${sources.length})` }),
-      el("ul", { class: "rows" }, sources.map(([label, src]) => el("li", {},
-        el("button", { class: "row row--tap", type: "button", onclick: () => showSource(label) },
-          el("span", { class: "row__top" },
-            el("span", { class: "row__title", text: src.title }),
-            el("span", { class: "row__when", text: label })),
-          src.meta ? el("span", { class: "row__sub", text: src.meta }) : null))))));
+    content.push(el("details", { class: "bsec bsources" },
+      el("summary", { class: "bsec__title" }, `Sources \u00b7 ${sources.length}`, icon("chevron-down")),
+      el("ul", { class: "srclist" }, sources.map(([label, src]) => el("li", {},
+        el("button", { class: "srcrow", type: "button", title: src.meta || "", onclick: () => showSource(label) },
+          icon(src.icon || "mail"),
+          el("span", { class: "srcrow__title", text: src.title }),
+          el("span", { class: "srcrow__label", text: label })))))));
   }
   $("#bs-content").replaceChildren(...content.filter(Boolean));
 }
@@ -833,7 +862,7 @@ function needsRow({ kind, title, sub, urgent, muted, open }) {
         el("span", { class: "need__kind", text: kind }),
         el("span", { class: "need__title", text: title }),
         sub ? el("span", { class: "need__sub", text: sub }) : null),
-      el("span", { class: "need__chevron", "aria-hidden": "true", text: "\u203a" })));
+      el("span", { class: "need__chevron", "aria-hidden": "true" }, icon("chevron-right"))));
 }
 
 function renderNeeds(pending, requests, invites) {

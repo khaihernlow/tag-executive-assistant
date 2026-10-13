@@ -16,7 +16,31 @@
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,500;6..72,600&display=swap">
   <link rel="stylesheet" href="/static/app.css?v={{ v }}">
 </head>
+{% macro icon(name) %}<svg class="icon" aria-hidden="true"><use href="#i-{{ name }}"/></svg>{% endmacro %}
 <body>
+  <!-- Icons: Lucide (lucide.dev, ISC). One set, drawn the same way everywhere. -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="M12 5v14"/></symbol>
+    <symbol id="i-arrow-up" viewBox="0 0 24 24"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></symbol>
+    <symbol id="i-arrow-down" viewBox="0 0 24 24"><path d="M12 5v14"/><path d="m19 12-7 7-7-7"/></symbol>
+    <symbol id="i-rotate-cw" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></symbol>
+    <symbol id="i-history" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></symbol>
+    <symbol id="i-lightbulb" viewBox="0 0 24 24"><path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5"/><path d="M9 18h6"/><path d="M10 22h4"/></symbol>
+    <symbol id="i-panel-left-open" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m14 9 3 3-3 3"/></symbol>
+    <symbol id="i-panel-left-close" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m16 15-3-3 3-3"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></symbol>
+    <symbol id="i-calendar" viewBox="0 0 24 24"><path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/></symbol>
+    <symbol id="i-message-square" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></symbol>
+    <symbol id="i-chevron-right" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+    <symbol id="i-chevron-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+    <symbol id="i-external-link" viewBox="0 0 24 24"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h3"/></symbol>
+    <symbol id="i-mail" viewBox="0 0 24 24"><rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></symbol>
+    <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></symbol>
+    <symbol id="i-paperclip" viewBox="0 0 24 24"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+    <symbol id="i-triangle-alert" viewBox="0 0 24 24"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></symbol>
+  </svg>
   <!-- Phone: Today and Chat are tabs. Desktop (wide screens): the day on the left,
        the assistant always open on the right, details open over the assistant. -->
   <div class="sheet" data-tab="today">
@@ -24,7 +48,7 @@
       <!-- Desktop: the day collapsed to a thin strip, with what still needs Dave -->
       <aside class="day-rail" id="day-rail" aria-label="Your day (hidden)">
         <button class="tool-btn" id="day-expand" type="button" title="Show the day" aria-label="Show the day">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="M9 4.5v15M13 10l2 2-2 2"/></svg>
+          {{ icon('panel-left-open') }}
         </button>
         <button class="rail-stat" id="rail-date" type="button" title="Show the day">
           <span class="rail-stat__label" id="rail-weekday"></span><strong id="rail-day"></strong>
@@ -41,7 +65,7 @@
         <header class="pane-head">
           <h1 class="pane-head__title" id="date">{{ today }}</h1>
           <button class="tool-btn desk-only" id="day-collapse" type="button" title="Hide the day" aria-label="Hide the day">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="M9 4.5v15M15 10l-2 2 2 2"/></svg>
+            {{ icon('panel-left-close') }}
           </button>
         </header>
         <div class="skeleton-day" id="today-skeleton" aria-hidden="true">
@@ -82,15 +106,15 @@
           <h2 class="pane-head__title pane-head__title--chat" id="chat-title">New chat</h2>
           <div class="pane-head__actions">
             <button class="tool-btn" id="recent-btn" type="button" aria-expanded="false" aria-controls="recent">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 7v5l3 2"/><path d="M3.5 12a8.5 8.5 0 1 0 2.5-6"/><path d="M3 4v4h4"/></svg>
+              {{ icon('history') }}
               <span>Recent</span>
             </button>
             <button class="tool-btn" id="memory-btn" type="button" aria-expanded="false" aria-controls="memory">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a6 6 0 0 0-6 6c0 2.2 1.2 3.6 2.2 4.6.6.6.8 1.2.8 1.9V17h6v-1.5c0-.7.2-1.3.8-1.9 1-1 2.2-2.4 2.2-4.6a6 6 0 0 0-6-6z"/><path d="M9.5 20.5h5"/></svg>
+              {{ icon('lightbulb') }}
               <span>Remembered</span>
             </button>
             <button class="tool-btn tool-btn--primary" id="new-chat" type="button">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+              {{ icon('plus') }}
               <span>New chat</span>
             </button>
 
@@ -114,14 +138,14 @@
         </main>
 
         <button class="to-latest chat-only" id="to-latest" type="button" aria-label="Jump to the latest message" hidden>
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M6 13l6 6 6-6"/></svg>
+          {{ icon('arrow-down') }}
         </button>
         <form class="composer chat-only" id="composer" autocomplete="off">
           <div class="composer__box">
             <label class="visually-hidden" for="input">Ask your assistant</label>
             <textarea id="input" rows="1" placeholder="Ask your assistant…" enterkeyhint="send"></textarea>
             <button class="send" id="send" type="submit" aria-label="Send" disabled>
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6"/></svg>
+              {{ icon('arrow-up') }}
             </button>
           </div>
         </form>
@@ -130,7 +154,7 @@
         <div class="overlay detail" id="detail" hidden role="dialog" aria-modal="true" aria-labelledby="detail-title">
           <header class="pane-head overlay__head">
             <div class="overlay__lead">
-              <button class="tool-btn overlay__close" id="detail-close" type="button" aria-label="Close" title="Close (Esc)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+              <button class="tool-btn overlay__close" id="detail-close" type="button" aria-label="Close" title="Close (Esc)">{{ icon('x') }}</button>
               <span class="overlay__label" id="detail-label"></span>
             </div>
           </header>
@@ -146,13 +170,13 @@
         <div class="overlay briefsheet" id="briefsheet" hidden role="dialog" aria-modal="true" aria-labelledby="bs-title">
           <header class="pane-head overlay__head">
             <div class="overlay__lead">
-              <button class="tool-btn overlay__close" id="bs-close" type="button" aria-label="Close" title="Close (Esc)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+              <button class="tool-btn overlay__close" id="bs-close" type="button" aria-label="Close" title="Close (Esc)">{{ icon('x') }}</button>
               <span class="overlay__label">Meeting brief</span>
             </div>
             <div class="briefsheet__status" id="bs-status" hidden>
               <span class="briefsheet__age" id="bs-age"></span>
               <button class="tool-btn" id="bs-refresh" type="button" title="Read the latest email, calendar and web again and rewrite this brief">
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v4h-4"/></svg><span>Refresh</span>
+                {{ icon('rotate-cw') }}<span>Refresh</span>
               </button>
             </div>
           </header>
@@ -166,35 +190,22 @@
               <label class="visually-hidden" for="bs-input">Ask about this meeting</label>
               <textarea id="bs-input" rows="1" placeholder="Ask about this meeting…" enterkeyhint="send"></textarea>
               <button class="send" id="bs-send" type="submit" aria-label="Ask" disabled>
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6"/></svg>
+                {{ icon('arrow-up') }}
               </button>
             </div>
           </form>
 
-          <!-- A cited source, opened from a citation or the Sources list -->
-          <div class="source" id="source" hidden>
-            <div class="source__panel" role="dialog" aria-labelledby="src-title">
-              <div class="recent__head">
-                <p class="slip__kind" id="src-kind"></p>
-                <button class="link-btn" id="src-close" type="button">Close</button>
-              </div>
-              <h3 class="source__title" id="src-title"></h3>
-              <p class="source__meta" id="src-meta"></p>
-              <p class="source__excerpt" id="src-excerpt"></p>
-              <a class="btn btn--sign source__open" id="src-open" target="_blank" rel="noopener" hidden></a>
-            </div>
-          </div>
         </div>
       </section>
     </div>
 
     <nav class="tabs" aria-label="Sections">
       <button class="tab" type="button" data-tab="today" aria-current="page">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4"/></svg>
+        {{ icon('calendar') }}
         Today
       </button>
       <button class="tab" type="button" data-tab="chat">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 18l-1 3 4-2h9a3 3 0 0 0 3-3V8a3 3 0 0 0-3-3H7a3 3 0 0 0-3 3v8"/></svg>
+        {{ icon('message-square') }}
         Chat
       </button>
     </nav>
@@ -204,7 +215,7 @@
   <div class="scrim" id="scrim" hidden></div>
   <div class="modal" id="recent" hidden role="dialog" aria-label="Search conversations">
     <div class="modal__search">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/></svg>
+      {{ icon('search') }}
       <label class="visually-hidden" for="recent-search">Search conversations</label>
       <input id="recent-search" type="search" placeholder="Search conversations" autocomplete="off" enterkeyhint="search">
       <button class="link-btn" id="recent-close" type="button">Close</button>
@@ -218,6 +229,21 @@
     </div>
     <p class="modal__hint">Tell me things in chat, like “Kai means Khaihern” or “no meetings before 8:30”.</p>
     <ul class="modal__list rows" id="memory-list"></ul>
+  </div>
+
+  <div class="modal source-modal" id="source" hidden role="dialog" aria-labelledby="src-title">
+    <div class="modal__head source__head">
+      <p class="source__kind"><span id="src-icon"></span><span id="src-kind"></span></p>
+      <button class="tool-btn overlay__close" id="src-close" type="button" aria-label="Close" title="Close (Esc)">{{ icon('x') }}</button>
+    </div>
+    <div class="source__body">
+      <h3 class="source__title" id="src-title"></h3>
+      <p class="source__meta" id="src-meta"></p>
+      <p class="source__excerpt" id="src-excerpt"></p>
+    </div>
+    <div class="source__foot" id="src-foot">
+      <a class="btn source__open" id="src-open" target="_blank" rel="noopener"><span id="src-open-text"></span>{{ icon('external-link') }}</a>
+    </div>
   </div>
 
   <script src="/static/app.js?v={{ v }}"></script>
