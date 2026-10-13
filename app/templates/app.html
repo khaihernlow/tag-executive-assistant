@@ -198,7 +198,12 @@
           </div>
           <form class="composer briefsheet__foot" id="bs-foot" autocomplete="off" hidden>
             <div class="composer__box">
+              <ul class="attach-list" id="bs-attach-list" aria-label="Attached files" hidden></ul>
               <div class="composer__row">
+                <button class="attach-btn" id="bs-attach-btn" type="button" aria-label="Attach files"
+                        title="Attach files: photos, screenshots, PDF, Word, Excel, PowerPoint, text">{{ icon('paperclip') }}</button>
+                <input type="file" id="bs-attach-input" multiple hidden
+                       accept="image/*,.pdf,.docx,.xlsx,.pptx,.txt,.csv,.md,.html,.htm,.ics">
                 <label class="visually-hidden" for="bs-input">Ask about this meeting</label>
                 <textarea id="bs-input" rows="1" placeholder="Ask about this meeting…" enterkeyhint="send"></textarea>
                 <button class="send" id="bs-send" type="submit" aria-label="Ask" disabled>

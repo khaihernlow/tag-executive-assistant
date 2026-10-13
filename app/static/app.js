@@ -526,7 +526,7 @@ function openBrief(event) {
   $("#bs-foot").hidden = true;
   $("#bs-status").hidden = true;
   $("#bs-input").value = "";
-  $("#bs-send").disabled = true;
+  briefFiles.clear();
   $("#bs-content").replaceChildren(el("div", { class: "skel-brief", "aria-label": "Loading the brief" },
     ...Array.from({ length: 7 }, () => el("span", { class: "skel skel--row" }))));
   $("#briefsheet").hidden = false;
@@ -543,7 +543,7 @@ const bsInput = $("#bs-input");
 bsInput.addEventListener("input", () => {
   bsInput.style.height = "auto";
   bsInput.style.height = `${Math.min(bsInput.scrollHeight, 160)}px`;
-  $("#bs-send").disabled = !bsInput.value.trim();
+  briefFiles.update();
 });
 bsInput.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); $("#bs-foot").requestSubmit(); }
@@ -551,8 +551,10 @@ bsInput.addEventListener("keydown", (e) => {
 $("#bs-foot").addEventListener("submit", async (e) => {
   e.preventDefault();
   const question = bsInput.value.trim();
-  if (!question || busy) return;
+  const files = briefFiles.ready();
+  if ((!question && !files.length) || briefFiles.uploading() || busy) return;
   const event = openEvent;
+  briefFiles.clear();
   closeBrief();
   showTab("chat");
   if (event.conversationId) {
@@ -565,7 +567,7 @@ $("#bs-foot").addEventListener("submit", async (e) => {
     setTopic(event.subject);
     updateEmptyState();
   }
-  send(question);
+  send(question, files);
 });
 document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("#briefsheet").hidden) closeBrief(); });
 
@@ -1117,7 +1119,7 @@ function emailsCard(card) {
         el("span", { class: "row__sub", text: m.from.name || m.from.email }),
         m.preview ? el("span", { class: "row__preview", text: m.preview }) : null,
         m.attachments && m.attachments.length
-          ? el("span", { class: "row__preview", text: `📎 ${m.attachments.join(", ")}` }) : null)))));
+          ? el("span", { class: "row__preview" }, icon("paperclip"), ` ${m.attachments.join(", ")}`) : null)))));
 }
 
 function personCard(card) {
@@ -1257,7 +1259,7 @@ function emailCard(card) {
         el("span", { class: "row__when", text: card.received })),
       el("span", { class: "row__sub", text: (card.from && (card.from.name || card.from.email)) || "" }),
       card.attachments && card.attachments.length
-        ? el("span", { class: "row__preview", text: `📎 ${card.attachments.join(", ")}` }) : null));
+        ? el("span", { class: "row__preview" }, icon("paperclip"), ` ${card.attachments.join(", ")}`) : null));
 }
 
 function peopleCard(card) {
@@ -1515,13 +1517,13 @@ async function* streamEvents(path, payload) {
 async function send(text, files = null) {
   text = (text || "").trim();
   if (files === null) {
-    if (attachments.some((a) => a.state === "uploading")) return;
-    files = attachments.filter((a) => a.state === "ready");
+    if (chatFiles.uploading()) return;
+    files = chatFiles.ready();
   }
   if ((!text && !files.length) || busy) return;
   busy = true;
   sendBtn.disabled = true;
-  clearAttachments();
+  chatFiles.clear();
   showTab("chat");
   if (!conversationId) setChatTitle(pendingTopic ? `Brief: ${pendingTopic.subject}` : shortTitle(text || files.map((f) => f.name).join(", ")));
   addNote(text, files);
@@ -1612,61 +1614,68 @@ input.addEventListener("input", () => { updateSend(); autosize(); });
 
 // ── attaching files: the paperclip, drag and drop, or paste ───────────────────
 // Each file is read as soon as it's added, so one that can't be read says so before sending.
+// The chat's input and a brief's "Ask about this meeting" box each have their own.
 
-const attachments = [];   // { key, id, name, kind, summary, thumb, state: uploading | ready | error, error }
 const MAX_ATTACHMENTS = 10;
 
-function updateSend() {
-  const uploading = attachments.some((a) => a.state === "uploading");
-  const ready = attachments.some((a) => a.state === "ready");
-  sendBtn.disabled = busy || uploading || (!input.value.trim() && !ready);
+function attachable({ list, button, picker, field, sendButton }) {
+  const items = [];   // { id, name, kind, summary, thumb, state: uploading | ready | error, error }
+  const box = {
+    ready: () => items.filter((a) => a.state === "ready"),
+    uploading: () => items.some((a) => a.state === "uploading"),
+    update() {
+      sendButton.disabled = busy || box.uploading() || (!field.value.trim() && !box.ready().length);
+    },
+    render() {
+      list.hidden = !items.length;
+      list.replaceChildren(...items.map((a) => fileChip(a,
+        el("button", { class: "file-chip__remove", type: "button", "aria-label": `Remove ${a.name}`, title: "Remove",
+                       onclick: () => { items.splice(items.indexOf(a), 1); box.render(); field.focus(); } },
+          icon("x")))));
+      box.update();
+    },
+    clear() {
+      items.length = 0;
+      box.render();
+    },
+    async add(fileList) {
+      for (const file of [...fileList].slice(0, MAX_ATTACHMENTS - items.length)) {
+        const entry = { name: file.name || "Pasted image", state: "uploading" };
+        items.push(entry);
+        box.render();
+        const form = new FormData();
+        form.append("file", file, entry.name === "Pasted image" ? "pasted-image.png" : file.name);
+        try {
+          const res = await fetch("/api/uploads", { method: "POST", body: form, credentials: "same-origin" });
+          if (res.status === 401) { location.href = "/auth/login"; return; }
+          const body = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(body.detail || res.statusText);
+          Object.assign(entry, body, { state: "ready" });
+        } catch (err) {
+          Object.assign(entry, { state: "error", error: err.message });
+        }
+        if (items.includes(entry)) box.render();
+      }
+    },
+  };
+  button.addEventListener("click", () => picker.click());
+  picker.addEventListener("change", (e) => { box.add(e.target.files); e.target.value = ""; field.focus(); });
+  field.addEventListener("paste", (e) => {
+    const files = [...(e.clipboardData?.files || [])];
+    if (!files.length) return;   // ordinary text paste
+    e.preventDefault();
+    box.add(files);
+  });
+  return box;
 }
 
-function renderAttachments() {
-  const list = $("#attach-list");
-  list.hidden = !attachments.length;
-  list.replaceChildren(...attachments.map((a) => fileChip(a,
-    el("button", { class: "file-chip__remove", type: "button", "aria-label": `Remove ${a.name}`, title: "Remove",
-                   onclick: () => { attachments.splice(attachments.indexOf(a), 1); renderAttachments(); input.focus(); } },
-      icon("x")))));
-  updateSend();
-}
+const chatFiles = attachable({ list: $("#attach-list"), button: $("#attach-btn"), picker: $("#attach-input"),
+                               field: input, sendButton: sendBtn });
+const briefFiles = attachable({ list: $("#bs-attach-list"), button: $("#bs-attach-btn"), picker: $("#bs-attach-input"),
+                                field: $("#bs-input"), sendButton: $("#bs-send") });
+const updateSend = () => chatFiles.update();
 
-function clearAttachments() {
-  attachments.length = 0;
-  renderAttachments();
-}
-
-async function addFiles(fileList) {
-  const files = [...fileList].slice(0, MAX_ATTACHMENTS - attachments.length);
-  for (const file of files) {
-    const entry = { name: file.name || "Pasted image", state: "uploading" };
-    attachments.push(entry);
-    renderAttachments();
-    const form = new FormData();
-    form.append("file", file, entry.name === "Pasted image" ? "pasted-image.png" : file.name);
-    try {
-      const res = await fetch("/api/uploads", { method: "POST", body: form, credentials: "same-origin" });
-      if (res.status === 401) { location.href = "/auth/login"; return; }
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(body.detail || res.statusText);
-      Object.assign(entry, body, { state: "ready" });
-    } catch (err) {
-      Object.assign(entry, { state: "error", error: err.message });
-    }
-    if (attachments.includes(entry)) renderAttachments();
-  }
-}
-
-$("#attach-btn").addEventListener("click", () => $("#attach-input").click());
-$("#attach-input").addEventListener("change", (e) => { addFiles(e.target.files); e.target.value = ""; input.focus(); });
-input.addEventListener("paste", (e) => {
-  const files = [...(e.clipboardData?.files || [])];
-  if (!files.length) return;   // ordinary text paste
-  e.preventDefault();
-  addFiles(files);
-});
-(() => {   // drop files anywhere on the assistant's side
+(() => {   // drop files anywhere on the assistant's side: into the brief's box if one is open
   const pane = $(".pane--chat");
   const zone = $("#dropzone");
   let depth = 0;
@@ -1679,9 +1688,13 @@ input.addEventListener("paste", (e) => {
     e.preventDefault();
     depth = 0;
     zone.hidden = true;
+    if (!$("#briefsheet").hidden && !$("#bs-foot").hidden) {
+      briefFiles.add(e.dataTransfer.files);
+      return;
+    }
     closePanels();
     showTab("chat");
-    addFiles(e.dataTransfer.files);
+    chatFiles.add(e.dataTransfer.files);
   });
 })();
 input.addEventListener("keydown", (e) => {
@@ -1701,7 +1714,7 @@ $("#composer").addEventListener("submit", (e) => {
 
 $("#new-chat").addEventListener("click", () => {
   closePanels();
-  clearAttachments();
+  chatFiles.clear();
   closePopovers();
   setChatTitle("");
   showTab("chat");

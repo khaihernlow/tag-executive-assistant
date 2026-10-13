@@ -992,5 +992,4 @@ svg.icon { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: ro
 /* The jump button sits just above the input, wherever its top edge is (file chips and long
    messages make the input taller; a fixed offset once put the button on top of it). */
 .composer > .to-latest { bottom: calc(100% + 12px); }
-/* Without a paperclip, the brief's ask box keeps the usual inset before the text. */
-.briefsheet__foot .composer__box { padding-left: var(--s4); }
+.row__preview svg.icon { width: 1em; height: 1em; vertical-align: -0.12em; }
