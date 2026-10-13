@@ -60,3 +60,26 @@ def test_dollar_amounts_must_come_from_the_data():
     assert "$2,000/mo (unverified)" in text        # 1,989 isn't 2,000 at full precision
     assert changes == ["$250K unverified", "$2,000/mo unverified"]
     assert verify_dollars("No money here.", known) == ("No money here.", [])
+
+
+def test_a_calculation_written_out_is_redone_in_code():
+    from agent.factcheck import known_numbers, verify_dollars
+    known = known_numbers("Managed services: 42 seats at $135 per seat per month. Onboarding fee: $2,500. Term: 36 months.")
+
+    # The answer that prompted this: the working is right there, so the total is checked, not flagged
+    text, changes = verify_dollars("Monthly total is $5,670 (42 seats x $135).", known)
+    assert changes == [] and "(unverified)" not in text
+    for reply in ("$135 \u00d7 42 = $5,670 a month", "42 seats at $135 comes to $5,670/mo",
+                  "42 * $135 = $5,670", "$135 per seat times 42 is $5,670"):
+        assert verify_dollars(reply, known)[1] == [], reply
+
+    # Chains: the first result can be used in the next step
+    assert verify_dollars("42 x $135 = $5,670, plus $5,670 + $2,500 = $8,170 the first month.", known)[1] == []
+
+    # Wrong arithmetic is still caught
+    assert verify_dollars("Monthly total is $5,760 (42 seats x $135).", known)[1] == ["$5,760 unverified"]
+    # A product of numbers that aren't in the sources proves nothing
+    assert verify_dollars("50 seats x $150 = $7,500.", known)[1] == ["$150 unverified", "$7,500 unverified"]
+    # Working not shown stays flagged: 36 x $5,670 was done silently
+    text, changes = verify_dollars("42 x $135 = $5,670 a month, about $204,000 over the term.", known)
+    assert changes == ["$204,000 unverified"]
