@@ -1,4 +1,7 @@
-"""One-time Microsoft sign-in as Dave. Saves a renewable token locally.
+"""One-time Microsoft sign-in (as the assistant's account, or as Dave). Saves a renewable token locally.
+
+Signs in as GRAPH_SIGNIN_AS (e.g. assistant@tagsolutions.com), else as GRAPH_MAILBOX,
+then checks the signed-in account can reach GRAPH_MAILBOX's mail and calendar.
 
 Usage:
   python scripts/connect_microsoft.py                # opens a browser sign-in
@@ -18,7 +21,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import requests
 from dotenv import load_dotenv
 
-from connectors.ms_auth import SCOPES, build_app, cache_path, load_cache, save_cache
+from connectors.ms_auth import SCOPES, build_app, cache_path, load_cache, save_cache, signin_account
 
 
 def main() -> int:
@@ -29,6 +32,7 @@ def main() -> int:
     load_dotenv(args.env_file, override=True)
 
     mailbox = os.environ.get("GRAPH_MAILBOX", "")
+    account = signin_account()
     path = cache_path()
     cache = load_cache(path)
     app = build_app(os.environ.get("GRAPH_TENANT_ID", ""), os.environ.get("GRAPH_CLIENT_ID", ""), cache)
@@ -42,8 +46,8 @@ def main() -> int:
         print(flow["message"])
         result = app.acquire_token_by_device_flow(flow)
     else:
-        print("Opening a browser for Microsoft sign-in. Sign in as Dave and accept the permissions.")
-        result = app.acquire_token_interactive(SCOPES, login_hint=mailbox or None, prompt="select_account")
+        print(f"Opening a browser for Microsoft sign-in. Sign in as {account}.")
+        result = app.acquire_token_interactive(SCOPES, login_hint=account or None, prompt="select_account")
 
     if "access_token" not in result:
         print(f"Sign-in failed: {result.get('error')}: {result.get('error_description')}")
@@ -60,10 +64,17 @@ def main() -> int:
     save_cache(cache, path)
     print(f"Connected as {me.get('displayName')} <{signed_in}>. Token saved to {path}")
 
-    if mailbox and signed_in != mailbox.lower():
-        print(f"WARNING: GRAPH_MAILBOX is {mailbox} but you signed in as {signed_in}. "
-              "Fix GRAPH_MAILBOX or sign in again with the right account.")
+    if account and signed_in != account:
+        print(f"WARNING: expected to sign in as {account} but signed in as {signed_in}. Sign in again with the right account.")
         return 1
+    if mailbox and signed_in != mailbox.lower():
+        # Delegate setup: prove the access Dave's mailbox needs, read-only.
+        headers = {"Authorization": f"Bearer {result['access_token']}"}
+        for label, path in (("mail", f"/users/{mailbox}/mailFolders/inbox/messages?$top=1&$select=subject"),
+                            ("calendar", f"/users/{mailbox}/calendar/events?$top=1&$select=subject"),
+                            ("people", f"/users/{mailbox}/people?$top=1")):
+            r = requests.get("https://graph.microsoft.com/v1.0" + path, headers=headers, timeout=30)
+            print(f"  {mailbox} {label}: {'ok' if r.ok else f'FAILED {r.status_code} {r.text[:200]}'}")
     return 0
 
 

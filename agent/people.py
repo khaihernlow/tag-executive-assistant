@@ -136,7 +136,7 @@ def find_people(graph: GraphSource, query: str, limit: int = 5) -> list[Person]:
             found[person.email] = person
 
     # People API is delegated-only and always about the signed-in user (Dave).
-    for raw in graph.get_all("/me/people", {"$search": f'"{query}"', "$top": 15, "$select": PEOPLE_SELECT}, limit=15):
+    for raw in graph.get_all(f"/users/{graph.mailbox}/people", {"$search": f'"{query}"', "$top": 15, "$select": PEOPLE_SELECT}, limit=15):
         add(_from_people_api(raw, domain))
     safe = query.replace('"', "")
     for raw in graph.get_all(
@@ -157,7 +157,7 @@ def find_people(graph: GraphSource, query: str, limit: int = 5) -> list[Person]:
         # for Khaihern) that Graph's prefix search can't see. Score a wider
         # pool locally: Dave's top contacts plus the whole directory.
         pool = [_from_people_api(raw, domain)
-                for raw in graph.get_all("/me/people", {"$top": 100, "$select": PEOPLE_SELECT}, limit=100)]
+                for raw in graph.get_all(f"/users/{graph.mailbox}/people", {"$top": 100, "$select": PEOPLE_SELECT}, limit=100)]
         pool += [_from_directory(raw, domain)
                  for raw in graph.get_all("/users", {"$top": 999, "$select": DIRECTORY_SELECT}, limit=2000)
                  if raw.get("accountEnabled", True)]
@@ -179,7 +179,7 @@ def is_known_address(graph: GraphSource, email: str) -> bool:
     """Exact check: is this address in TAG's directory or among people Dave
     deals with? (Name matching is fuzzy on purpose; this must not be.)"""
     email = email.strip().lower()
-    for raw in graph.get_all("/me/people", {"$search": f'"{email}"', "$top": 5, "$select": PEOPLE_SELECT}, limit=5):
+    for raw in graph.get_all(f"/users/{graph.mailbox}/people", {"$search": f'"{email}"', "$top": 5, "$select": PEOPLE_SELECT}, limit=5):
         if any((e.get("address") or "").lower() == email for e in raw.get("scoredEmailAddresses") or []):
             return True
     odata = email.replace("'", "''")

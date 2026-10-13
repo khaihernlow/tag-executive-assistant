@@ -1,8 +1,11 @@
 """Microsoft Graph access to Dave's mailbox and calendar.
 
 Two auth modes (GRAPH_AUTH_MODE):
-- "delegated" (default): Dave signed in once via scripts/connect_microsoft.py;
-  tokens renew silently from the saved MSAL cache. See connectors/ms_auth.py.
+- "delegated" (default): one sign-in via scripts/connect_microsoft.py, as Dave or
+  as the assistant's own account with delegate access to his mailbox
+  (GRAPH_SIGNIN_AS); tokens renew silently from the saved MSAL cache. Calls
+  always name the mailbox (/users/{GRAPH_MAILBOX}/...), never /me.
+  See connectors/ms_auth.py.
 - "app": client credentials, admin-granted and scoped to Dave's mailbox with
   Exchange RBAC for Applications. No user sign-in to keep alive.
 """
@@ -59,9 +62,9 @@ class GraphClient:
         if os.environ.get("GRAPH_AUTH_MODE", "delegated").lower() == "app":
             return cls(tenant_id, client_id, os.environ.get("GRAPH_CLIENT_SECRET", ""), mailbox)
 
-        from connectors.ms_auth import DelegatedTokenProvider
+        from connectors.ms_auth import DelegatedTokenProvider, signin_account
 
-        provider = DelegatedTokenProvider(tenant_id, client_id, mailbox)
+        provider = DelegatedTokenProvider(tenant_id, client_id, signin_account())
         return cls(tenant_id, client_id, "", mailbox, token_provider=provider)
 
     def token(self) -> str:

@@ -44,7 +44,7 @@ class FakeGraph:
         self.posts, self.inbox_filters = [], []
 
     def get(self, path, params=None, headers=None):
-        if path == "/me":
+        if path == f"/users/{DAVE}":
             return {"displayName": "Dave Vener"}
         name = path.rsplit("/", 1)[-1]
         if name not in FOLDERS:
@@ -54,7 +54,7 @@ class FakeGraph:
     def get_all(self, path, params=None, limit=500, headers=None):
         if path.endswith("/sentitems/messages"):
             return [{"toRecipients": [{"emailAddress": {"address": "Client@client.example"}}]}]
-        if path == "/me/people":
+        if path == f"/users/{DAVE}/people":
             return []
         if path.endswith("/inbox/messages"):
             self.inbox_filters.append(params["$filter"])

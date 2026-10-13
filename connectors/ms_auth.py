@@ -1,4 +1,10 @@
-"""Delegated Microsoft sign-in: Dave signs in once, the app keeps a refresh token.
+"""Delegated Microsoft sign-in: one interactive sign-in, then a renewable token.
+
+Who signs in (GRAPH_SIGNIN_AS) can differ from whose mailbox the assistant
+works in (GRAPH_MAILBOX). The assistant's own account (assistant@) has
+delegate access to Dave's mailbox and calendar, so it signs in as itself and
+every call names Dave's mailbox (/users/{Dave}/...). Left unset, it signs in
+as the mailbox owner (the original setup, Dave himself).
 
 `scripts/connect_microsoft.py` does the one-time interactive sign-in and
 writes the MSAL token cache to disk (gitignored). After that,
@@ -24,6 +30,7 @@ SCOPES = [
     "User.Read",
     "User.Read.All",
     "People.Read",
+    "People.Read.All",   # Dave's people list when signed in as the assistant
     "GroupMember.Read.All",
     "Presence.Read.All",
     "Place.Read.All",
@@ -57,6 +64,11 @@ class NotConnectedError(RuntimeError):
     pass
 
 
+def signin_account() -> str:
+    """The account that signs in: GRAPH_SIGNIN_AS, else the mailbox owner."""
+    return (os.environ.get("GRAPH_SIGNIN_AS") or os.environ.get("GRAPH_MAILBOX") or "").lower()
+
+
 def cache_path() -> Path:
     return Path(os.environ.get("MSAL_CACHE_PATH", ".secrets/msal_token_cache.json"))
 
@@ -85,17 +97,17 @@ def build_app(tenant_id: str, client_id: str, cache: msal.SerializableTokenCache
 
 
 class DelegatedTokenProvider:
-    def __init__(self, tenant_id: str, client_id: str, mailbox: str, path: Path | None = None) -> None:
-        self.mailbox = mailbox.lower()
+    def __init__(self, tenant_id: str, client_id: str, account: str, path: Path | None = None) -> None:
+        self.account = account.lower()
         self.path = path or cache_path()
         self.cache = load_cache(self.path)
         self.app = build_app(tenant_id, client_id, self.cache)
 
     def __call__(self) -> str:
-        accounts = [a for a in self.app.get_accounts() if a.get("username", "").lower() == self.mailbox]
+        accounts = [a for a in self.app.get_accounts() if a.get("username", "").lower() == self.account]
         if not accounts:
             raise NotConnectedError(
-                f"No saved Microsoft sign-in for {self.mailbox}. Run: python scripts/connect_microsoft.py"
+                f"No saved Microsoft sign-in for {self.account}. Run: python scripts/connect_microsoft.py"
             )
         result = self.app.acquire_token_silent(SCOPES, account=accounts[0])
         # MSAL may have rotated the refresh token; persist it either way.

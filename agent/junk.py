@@ -86,7 +86,7 @@ def _scan_correspondents(graph: Any, days: int) -> set[str]:
             address = ((r.get("emailAddress") or {}).get("address") or "").lower()
             if address:
                 known.add(address)
-    for p in graph.get_all("/me/people", {"$top": 300, "$select": "scoredEmailAddresses"}, limit=300):
+    for p in graph.get_all(f"/users/{graph.mailbox}/people", {"$top": 300, "$select": "scoredEmailAddresses"}, limit=300):
         for e in p.get("scoredEmailAddresses") or []:
             if e.get("address"):
                 known.add(e["address"].lower())
@@ -254,7 +254,7 @@ def owner_name(graph: Any) -> str:
     """Dave's display name, lowercased (looked up once)."""
     if graph.mailbox not in _owner:
         try:
-            _owner[graph.mailbox] = (graph.get("/me", {"$select": "displayName"}).get("displayName") or "").strip().lower()
+            _owner[graph.mailbox] = (graph.get(f"/users/{graph.mailbox}", {"$select": "displayName"}).get("displayName") or "").strip().lower()
         except Exception:  # noqa: BLE001 - without it, only the address checks apply
             _owner[graph.mailbox] = ""
     return _owner[graph.mailbox]

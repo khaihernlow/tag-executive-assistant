@@ -56,7 +56,7 @@ def test_name_score_prefers_exact_and_first_name_matches():
 
 def test_find_people_merges_sources_and_marks_internal():
     graph = FakeGraph({
-        ("/me/people", '"Kai"'): [people_entry("Kai Low", "KLow@tag.example", jobTitle="Engineer")],
+        ("/users/dave@tag.example/people", '"Kai"'): [people_entry("Kai Low", "KLow@tag.example", jobTitle="Engineer")],
         ("/users", '"displayName:Kai" OR "mail:Kai"'): [
             {"displayName": "Kai Low", "mail": "klow@tag.example"},
             {"displayName": "Kai Smith", "mail": "ksmith@tag.example", "accountEnabled": False},
@@ -70,7 +70,7 @@ def test_find_people_merges_sources_and_marks_internal():
 
 def test_nickname_beats_short_prefix_and_relay_addresses_are_dropped():
     graph = FakeGraph({
-        ("/me/people", '"Kai"'): [people_entry("Kaitlyn Ward", "kaitlyn.ward@vendor.example"),
+        ("/users/dave@tag.example/people", '"Kai"'): [people_entry("Kaitlyn Ward", "kaitlyn.ward@vendor.example"),
                                   people_entry("Kai Relay", "kai=tag.example@hs-send.com")],
         ("/users", None): [{"displayName": "Khaihern Low", "mail": "klow@tag.example"}],
     })
@@ -90,7 +90,7 @@ def test_match_note_only_flags_real_ties():
 
 def test_find_people_falls_back_to_fuzzy_for_misspellings():
     graph = FakeGraph({
-        ("/me/people", None): [people_entry("Kai Low", "klow@tag.example"),
+        ("/users/dave@tag.example/people", None): [people_entry("Kai Low", "klow@tag.example"),
                                people_entry("Joe Brownt", "joe@cpa.com")],
     })
     people = find_people(graph, "Khai")
