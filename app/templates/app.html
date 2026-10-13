@@ -20,6 +20,7 @@
 <body>
   <!-- Icons: Lucide (lucide.dev, ISC). One set, drawn the same way everywhere. -->
   <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <symbol id="i-file-text" viewBox="0 0 24 24"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/></symbol>
     <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
     <symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="M12 5v14"/></symbol>
     <symbol id="i-arrow-up" viewBox="0 0 24 24"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></symbol>
@@ -142,13 +143,23 @@
         </button>
         <form class="composer chat-only" id="composer" autocomplete="off">
           <div class="composer__box">
-            <label class="visually-hidden" for="input">Ask your assistant</label>
-            <textarea id="input" rows="1" placeholder="Ask your assistant…" enterkeyhint="send"></textarea>
-            <button class="send" id="send" type="submit" aria-label="Send" disabled>
-              {{ icon('arrow-up') }}
-            </button>
+            <ul class="attach-list" id="attach-list" aria-label="Attached files" hidden></ul>
+            <div class="composer__row">
+              <button class="attach-btn" id="attach-btn" type="button" aria-label="Attach files"
+                      title="Attach files: photos, screenshots, PDF, Word, Excel, PowerPoint, text">{{ icon('paperclip') }}</button>
+              <input type="file" id="attach-input" multiple hidden
+                     accept="image/*,.pdf,.docx,.xlsx,.pptx,.txt,.csv,.md,.html,.htm,.ics">
+              <label class="visually-hidden" for="input">Ask your assistant</label>
+              <textarea id="input" rows="1" placeholder="Ask your assistant…" enterkeyhint="send"></textarea>
+              <button class="send" id="send" type="submit" aria-label="Send" disabled>
+                {{ icon('arrow-up') }}
+              </button>
+            </div>
           </div>
         </form>
+        <div class="dropzone" id="dropzone" hidden aria-hidden="true">
+          <div class="dropzone__inner">{{ icon('paperclip') }}<span>Drop to attach</span></div>
+        </div>
 
         <!-- One item from "Needs you", opened in full: over everything on a phone, over the assistant on desktop -->
         <div class="overlay detail" id="detail" hidden role="dialog" aria-modal="true" aria-labelledby="detail-title">

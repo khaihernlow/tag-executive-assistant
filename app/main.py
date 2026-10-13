@@ -6,7 +6,7 @@ from pathlib import Path
 
 from authlib.integrations.starlette_client import OAuth, OAuthError
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -24,6 +24,7 @@ from agent.requests import open_requests_view, propose_booking, propose_hold, pr
 from agent.calendar import agenda_day, local_zone, meeting_place, parse_event
 from agent.people import internal_domain
 from agent.emailtext import excerpt as email_excerpt
+from agent.uploads import MAX_BYTES as MAX_UPLOAD_BYTES, UploadError, prepare as prepare_upload
 from connectors.graph import EVENT_FIELDS
 from app.auth import is_allowed, require_auth, user_email
 
@@ -148,8 +149,9 @@ async def service_worker():
 # ── API ───────────────────────────────────────────────────────────────────────
 
 class ChatIn(BaseModel):
-    message: str
+    message: str = ""
     conversation_id: str | None = None
+    attachments: list[str] = []  # ids from /api/uploads
     brief_event_id: str | None = None  # start a conversation about this meeting's brief
 
 
@@ -227,7 +229,7 @@ def today(user: dict = Depends(require_auth), svc=Depends(services)):
 def chat(body: ChatIn, user: dict = Depends(require_auth), svc=Depends(services)):
     try:
         topic = {"brief": body.brief_event_id} if body.brief_event_id else None
-        return svc.assistant.chat(body.message, body.conversation_id, topic=topic)
+        return svc.assistant.chat(body.message, body.conversation_id, topic=topic, attachments=body.attachments)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -236,19 +238,33 @@ def chat(body: ChatIn, user: dict = Depends(require_auth), svc=Depends(services)
 def chat_stream(body: ChatIn, user: dict = Depends(require_auth), svc=Depends(services)):
     """Same as /api/chat, streamed as one JSON object per line: start, step, text,
     discard_text, then done (or error)."""
-    if not body.message.strip():
+    if not body.message.strip() and not body.attachments:
         raise HTTPException(status_code=400, detail="Empty message")
     topic = {"brief": body.brief_event_id} if body.brief_event_id else None
 
     def lines():
         try:
-            for event in svc.assistant.chat_stream(body.message, body.conversation_id, topic=topic):
+            for event in svc.assistant.chat_stream(body.message, body.conversation_id, topic=topic,
+                                                   attachments=body.attachments):
                 yield json.dumps(event, default=str) + "\n"
         except Exception as e:  # noqa: BLE001 - the app shows this and offers a retry
             yield json.dumps({"type": "error", "message": f"{type(e).__name__}: {e}"[:300]}) + "\n"
 
     return StreamingResponse(lines(), media_type="application/x-ndjson",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+@app.post("/api/uploads")
+async def upload(file: UploadFile = File(...), user: dict = Depends(require_auth), svc=Depends(services)):
+    """A file attached in chat: read now (so a problem shows before sending), used when sent."""
+    data = await file.read(MAX_UPLOAD_BYTES + 1)
+    try:
+        prepared = prepare_upload(data, file.filename or "file", file.content_type or "")
+    except UploadError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    name = file.filename or "file"
+    uid = svc.store.add_upload(name, prepared["kind"], prepared["summary"], prepared["thumb"], prepared["blocks"])
+    return {"id": uid, "name": name, "kind": prepared["kind"], "summary": prepared["summary"], "thumb": prepared["thumb"]}
 
 
 @app.get("/api/conversations")

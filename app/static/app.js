@@ -1315,8 +1315,20 @@ function renderCard(card) {
 
 // ── thread ─────────────────────────────────────────────────────────────────────
 
-function addNote(text) {
-  thread.append(el("div", { class: "note", text }));
+function fileChip(f, extra = null) {
+  const visual = f.thumb ? el("img", { class: "file-chip__thumb", src: f.thumb, alt: "" })
+    : el("span", { class: "file-chip__icon" }, icon(f.kind === "image" ? "paperclip" : "file-text"));
+  return el("li", { class: `file-chip${f.state === "error" ? " file-chip--error" : ""}${f.state === "uploading" ? " file-chip--busy" : ""}` },
+    visual,
+    el("span", { class: "file-chip__text" },
+      el("span", { class: "file-chip__name", text: f.name, title: f.name }),
+      el("span", { class: "file-chip__sub", text: f.state === "uploading" ? "Reading\u2026" : f.state === "error" ? f.error : f.summary })),
+    extra);
+}
+
+function addNote(text, files = []) {
+  if (files && files.length) thread.append(el("ul", { class: "note-files" }, files.map((f) => fileChip(f))));
+  if (text) thread.append(el("div", { class: "note", text }));
 }
 
 function addBrief(text, cards = [], did = []) {
@@ -1335,7 +1347,7 @@ async function openConversation(id) {
     pendingTopic = null;
     setTopic((convo.title || "").startsWith("Brief: ") ? convo.title.slice(7) : "");
     for (const m of convo.messages) {
-      if (m.role === "user") addNote(m.text); else addBrief(m.text, m.cards || []);
+      if (m.role === "user") addNote(m.text, m.files); else addBrief(m.text, m.cards || []);
     }
     conversationId = id;
     writeStored(id);
@@ -1500,14 +1512,19 @@ async function* streamEvents(path, payload) {
   if (buffer.trim()) yield JSON.parse(buffer.trim());
 }
 
-async function send(text) {
+async function send(text, files = null) {
   text = (text || "").trim();
-  if (!text || busy) return;
+  if (files === null) {
+    if (attachments.some((a) => a.state === "uploading")) return;
+    files = attachments.filter((a) => a.state === "ready");
+  }
+  if ((!text && !files.length) || busy) return;
   busy = true;
   sendBtn.disabled = true;
+  clearAttachments();
   showTab("chat");
-  if (!conversationId) setChatTitle(pendingTopic ? `Brief: ${pendingTopic.subject}` : shortTitle(text));
-  addNote(text);
+  if (!conversationId) setChatTitle(pendingTopic ? `Brief: ${pendingTopic.subject}` : shortTitle(text || files.map((f) => f.name).join(", ")));
+  addNote(text, files);
   updateEmptyState();
 
   // Live area: what the assistant is doing, then its answer as it's written.
@@ -1536,6 +1553,7 @@ async function send(text) {
     let finished = null;
     for await (const event of streamEvents("/api/chat/stream", {
       message: text,
+      attachments: files.map((f) => f.id),
       conversation_id: conversationId,
       brief_event_id: !conversationId && pendingTopic ? pendingTopic.eventId : null,
     })) {
@@ -1571,12 +1589,12 @@ async function send(text) {
     if (finished.cards.some((c) => c.type === "action")) loadToday();
   } catch (err) {
     live.remove();
-    const retry = el("button", { class: "btn", type: "button", text: "Try again", onclick: () => { errorNode.remove(); thread.lastChild?.remove(); busy = false; send(text); } });
+    const retry = el("button", { class: "btn", type: "button", text: "Try again", onclick: () => { errorNode.remove(); thread.lastChild?.remove(); if (files.length) thread.lastChild?.remove(); busy = false; send(text, files); } });
     const errorNode = el("div", { class: "error" }, `Something went wrong: ${err.message}`, retry);
     thread.append(errorNode);
   } finally {
     busy = false;
-    sendBtn.disabled = !input.value.trim();
+    updateSend();
     scrollToEnd();
   }
 }
@@ -1590,7 +1608,82 @@ function autosize() {
   input.style.overflowY = full > 160 ? "auto" : "hidden";
 }
 
-input.addEventListener("input", () => { sendBtn.disabled = busy || !input.value.trim(); autosize(); });
+input.addEventListener("input", () => { updateSend(); autosize(); });
+
+// ── attaching files: the paperclip, drag and drop, or paste ───────────────────
+// Each file is read as soon as it's added, so one that can't be read says so before sending.
+
+const attachments = [];   // { key, id, name, kind, summary, thumb, state: uploading | ready | error, error }
+const MAX_ATTACHMENTS = 10;
+
+function updateSend() {
+  const uploading = attachments.some((a) => a.state === "uploading");
+  const ready = attachments.some((a) => a.state === "ready");
+  sendBtn.disabled = busy || uploading || (!input.value.trim() && !ready);
+}
+
+function renderAttachments() {
+  const list = $("#attach-list");
+  list.hidden = !attachments.length;
+  list.replaceChildren(...attachments.map((a) => fileChip(a,
+    el("button", { class: "file-chip__remove", type: "button", "aria-label": `Remove ${a.name}`, title: "Remove",
+                   onclick: () => { attachments.splice(attachments.indexOf(a), 1); renderAttachments(); input.focus(); } },
+      icon("x")))));
+  updateSend();
+}
+
+function clearAttachments() {
+  attachments.length = 0;
+  renderAttachments();
+}
+
+async function addFiles(fileList) {
+  const files = [...fileList].slice(0, MAX_ATTACHMENTS - attachments.length);
+  for (const file of files) {
+    const entry = { name: file.name || "Pasted image", state: "uploading" };
+    attachments.push(entry);
+    renderAttachments();
+    const form = new FormData();
+    form.append("file", file, entry.name === "Pasted image" ? "pasted-image.png" : file.name);
+    try {
+      const res = await fetch("/api/uploads", { method: "POST", body: form, credentials: "same-origin" });
+      if (res.status === 401) { location.href = "/auth/login"; return; }
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.detail || res.statusText);
+      Object.assign(entry, body, { state: "ready" });
+    } catch (err) {
+      Object.assign(entry, { state: "error", error: err.message });
+    }
+    if (attachments.includes(entry)) renderAttachments();
+  }
+}
+
+$("#attach-btn").addEventListener("click", () => $("#attach-input").click());
+$("#attach-input").addEventListener("change", (e) => { addFiles(e.target.files); e.target.value = ""; input.focus(); });
+input.addEventListener("paste", (e) => {
+  const files = [...(e.clipboardData?.files || [])];
+  if (!files.length) return;   // ordinary text paste
+  e.preventDefault();
+  addFiles(files);
+});
+(() => {   // drop files anywhere on the assistant's side
+  const pane = $(".pane--chat");
+  const zone = $("#dropzone");
+  let depth = 0;
+  const hasFiles = (e) => [...(e.dataTransfer?.types || [])].includes("Files");
+  pane.addEventListener("dragenter", (e) => { if (!hasFiles(e)) return; e.preventDefault(); depth += 1; zone.hidden = false; });
+  pane.addEventListener("dragover", (e) => { if (hasFiles(e)) e.preventDefault(); });
+  pane.addEventListener("dragleave", () => { depth = Math.max(0, depth - 1); if (!depth) zone.hidden = true; });
+  pane.addEventListener("drop", (e) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    depth = 0;
+    zone.hidden = true;
+    closePanels();
+    showTab("chat");
+    addFiles(e.dataTransfer.files);
+  });
+})();
 input.addEventListener("keydown", (e) => {
   // Enter sends on a keyboard; Shift+Enter for a new line.
   if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
@@ -1608,6 +1701,7 @@ $("#composer").addEventListener("submit", (e) => {
 
 $("#new-chat").addEventListener("click", () => {
   closePanels();
+  clearAttachments();
   closePopovers();
   setChatTitle("");
   showTab("chat");

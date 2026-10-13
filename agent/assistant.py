@@ -49,7 +49,7 @@ def trim_history(messages: list[dict[str, Any]], max_turns: int = MAX_USER_TURNS
     placeholder: the model keeps the thread of the conversation but has to
     re-check facts instead of trusting stale data (it once re-answered from
     an old result instead of searching again)."""
-    starts = [i for i, m in enumerate(messages) if m["role"] == "user" and isinstance(m["content"], str)]
+    starts = [i for i, m in enumerate(messages) if is_dave(m)]
     if len(starts) > max_turns:
         cut = starts[-max_turns]
         messages, starts = messages[cut:], [s - cut for s in starts[-max_turns:]]
@@ -57,6 +57,14 @@ def trim_history(messages: list[dict[str, Any]], max_turns: int = MAX_USER_TURNS
         return messages
     stale_before = starts[-fresh_turns]
     return [_without_results(m) if i < stale_before else m for i, m in enumerate(messages)]
+
+
+def is_dave(message: dict[str, Any]) -> bool:
+    """Dave's own message (text, perhaps with attached files), not tool results coming back."""
+    if message["role"] != "user":
+        return False
+    content = message["content"]
+    return isinstance(content, str) or not any(b.get("type") == "tool_result" for b in content)
 
 
 def _without_results(message: dict[str, Any]) -> dict[str, Any]:
@@ -77,56 +85,70 @@ class Assistant:
         self.store = store
         self.actions = actions
 
-    def _begin(self, text: str, conversation_id: str | None, topic: dict | None):
+    def _begin(self, text: str, conversation_id: str | None, topic: dict | None, attachments: list[str] | None = None):
         text = text.strip()
-        if not text:
+        files = [self.store.get_upload(a) for a in attachments or []]
+        if any(f is None for f in files):
+            raise ValueError("An attached file is no longer available. Attach it again.")
+        if not text and not files:
             raise ValueError("Empty message")
+        if not text:
+            text = "What's in this?" if len(files) == 1 else "What's in these?"
         conversation = self.store.get_conversation(conversation_id) if conversation_id else None
         if conversation is None:
             # Cut at a word, not mid-word ("...meeting from Christ").
             title = text if len(text) <= 80 else text[:80].rsplit(" ", 1)[0].rstrip(",.;:") + "…"
+            if files and text in ("What's in this?", "What's in these?"):
+                title = ", ".join(f["name"] for f in files)[:80]
             if topic and topic.get("brief"):
                 row = self.store.get_brief(topic["brief"])
                 title = f"Brief: {row['subject']}" if row else title
             conversation_id = self.store.create_conversation(title=title, topic=topic)
             conversation = self.store.get_conversation(conversation_id)
-        history = trim_history(conversation["llm_messages"]) + [{"role": "user", "content": text}]
+        # Files first, then the question about them.
+        content: Any = text if not files else [b for f in files for b in f["blocks"]] + [{"type": "text", "text": text}]
+        history = trim_history(conversation["llm_messages"]) + [{"role": "user", "content": content}]
         extra = self.memory.prompt_section() if self.memory else ""
         extra = "\n\n".join(filter(None, [extra, self._topic_section(conversation.get("topic"))]))
-        return text, conversation, history, system_prompt(datetime.now(local_zone()), extra)
+        shown = [{"name": f["name"], "kind": f["kind"], "summary": f["summary"], "thumb": f["thumb"]} for f in files]
+        return text, conversation, history, system_prompt(datetime.now(local_zone()), extra), shown
 
-    def _finish(self, text: str, conversation: dict[str, Any], result: Any) -> dict[str, Any]:
+    def _finish(self, text: str, conversation: dict[str, Any], result: Any, files: list | None = None) -> dict[str, Any]:
         truth = _ground_truth(result.messages)
         reply, fixes = verify_addresses(result.text, known_addresses(*truth))
         reply, name_fixes = verify_names(reply, _staff_names(result.trace))
-        reply, money_fixes = verify_dollars(reply, known_numbers(*truth))
+        # Amounts read off a picture Dave attached can't be checked against any text, so with an
+        # image in the conversation the dollar check would only mislabel them "(unverified)".
+        reply, money_fixes = (reply, []) if _has_image(result.messages) else verify_dollars(reply, known_numbers(*truth))
         fixes += name_fixes + money_fixes
         reply = no_long_dashes(reply)
         if fixes:
             print(f"factcheck corrected reply in {conversation['id']}: {fixes}")
         cards = build_cards(result.trace)
         display = conversation["display"] + [
-            {"role": "user", "text": text},
+            {"role": "user", "text": text, **({"files": files} if files else {})},
             {"role": "assistant", "text": reply, "cards": cards},
         ]
         self.store.save_conversation(conversation["id"], result.messages, display)
         return {"conversation_id": conversation["id"], "text": reply, "cards": cards}
 
-    def chat(self, text: str, conversation_id: str | None = None, topic: dict | None = None) -> dict[str, Any]:
-        text, conversation, history, system = self._begin(text, conversation_id, topic)
+    def chat(self, text: str, conversation_id: str | None = None, topic: dict | None = None,
+             attachments: list[str] | None = None) -> dict[str, Any]:
+        text, conversation, history, system, files = self._begin(text, conversation_id, topic, attachments)
         token = current_conversation.set(conversation["id"])
         try:
             result = run_turn(self.llm, self.registry, history, system)
         finally:
             current_conversation.reset(token)
-        return self._finish(text, conversation, result)
+        return self._finish(text, conversation, result, files)
 
-    def chat_stream(self, text: str, conversation_id: str | None = None, topic: dict | None = None):
+    def chat_stream(self, text: str, conversation_id: str | None = None, topic: dict | None = None,
+                    attachments: list[str] | None = None):
         """Events for the app while the turn runs; the last is {"type": "done", ...}.
 
         The streamed text is a preview: the final text in "done" is the
         fact-checked version and replaces it."""
-        text, conversation, history, system = self._begin(text, conversation_id, topic)
+        text, conversation, history, system, files = self._begin(text, conversation_id, topic, attachments)
         yield {"type": "start", "conversation_id": conversation["id"]}
 
         def run_tools(calls):
@@ -144,7 +166,7 @@ class Assistant:
                 result = event["result"]
             else:
                 yield event
-        yield {"type": "done", **self._finish(text, conversation, result)}
+        yield {"type": "done", **self._finish(text, conversation, result, files)}
 
     def _topic_section(self, topic: dict | None) -> str:
         """A conversation opened from a brief starts with that brief in view."""
@@ -163,6 +185,11 @@ def _brief_text(brief: dict[str, Any]) -> str:
                                                  "gaps", "material")}, ensure_ascii=False)
 
 
+def _has_image(messages: list[dict[str, Any]]) -> bool:
+    return any(is_dave(m) and not isinstance(m["content"], str) and any(b.get("type") == "image" for b in m["content"])
+               for m in messages)
+
+
 def _ground_truth(messages: list[dict[str, Any]]) -> list[str]:
     """Text that came from Dave or from tools, never the model's own words
     (an earlier slip in its own reply must not vouch for itself)."""
@@ -175,4 +202,5 @@ def _ground_truth(messages: list[dict[str, Any]]) -> list[str]:
         else:
             texts += [b["content"] if isinstance(b.get("content"), str) else json.dumps(b.get("content"))
                       for b in m["content"] if b.get("type") == "tool_result"]
+            texts += [b["text"] for b in m["content"] if b.get("type") == "text"]   # attached documents
     return texts

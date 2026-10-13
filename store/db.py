@@ -89,6 +89,16 @@ CREATE TABLE IF NOT EXISTS filing_seen (
     decided_at  TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS uploads (
+    id          TEXT PRIMARY KEY,
+    name        TEXT NOT NULL,
+    kind        TEXT NOT NULL,          -- image | document
+    summary     TEXT NOT NULL,          -- "PDF · 1,240 words", shown on the chip
+    thumb       TEXT,                   -- small data: URL for images
+    blocks      TEXT NOT NULL,          -- JSON: the content blocks the model receives
+    created_at  TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS state (
     key         TEXT PRIMARY KEY,       -- small bits of worker state, e.g. the junk sweep checkpoint
     value       TEXT NOT NULL
@@ -149,6 +159,22 @@ class Store:
             cursor = self._conn.execute(sql, params)
             self._conn.commit()
             return cursor
+
+    # ── files attached in chat ──────────────────────────────────────────────
+
+    def add_upload(self, name: str, kind: str, summary: str, thumb: str | None, blocks: list) -> str:
+        uid = uuid.uuid4().hex
+        self._execute("INSERT INTO uploads (id, name, kind, summary, thumb, blocks, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                      (uid, name, kind, summary, thumb, json.dumps(blocks), now_iso()))
+        return uid
+
+    def get_upload(self, uid: str) -> dict[str, Any] | None:
+        row = self._execute("SELECT * FROM uploads WHERE id = ?", (uid,)).fetchone()
+        if row is None:
+            return None
+        item = dict(row)
+        item["blocks"] = json.loads(item["blocks"])
+        return item
 
     # ── conversations ────────────────────────────────────────────────────────
 
