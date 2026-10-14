@@ -26,7 +26,7 @@ from datetime import datetime, time, timedelta, timezone
 from typing import Any
 
 from agent.calendar import local_zone
-from agent.mealeo import Menu, price_line
+from agent.mealeo import SAATI, Menu, price_line
 from llm.provider import ToolSpec
 
 log = logging.getLogger("assistant.lunch")
@@ -39,15 +39,17 @@ DEFAULTS: dict[str, Any] = {
     "weekday": 2,                          # Wednesday (Monday is 0)
     "intro": "",                           # put before each message ("(Test run) ")
     "people": [
+        # Maria's notes, in the Latham menu's own names. Extra protein ("- Add 6oz Grilled Chicken")
+        # she adds only sometimes, so it isn't in the standing order.
         {"name": "Dave", "upn": "dvener@tagsolutions.com", "ask": False,
-         "usual": {"item": "05 Grilled Chkn Salad", "options": ["Honey Mustard"]}},
+         "usual": {"item": "13. Grilled Chicken Salad", "options": ["With Honey Mustard Dressing"]}},
         {"name": "Joe", "upn": "jyetto@tagsolutions.com", "ask": False,
-         "usual": {"item": "05 Grilled Chkn Salad", "options": ["Balsamic"]}},
+         "usual": {"item": "13. Grilled Chicken Salad", "options": ["With Balsamic Dressing"]}},
         {"name": "Dan", "upn": "dlawrence@tagsolutions.com", "ask": True},
         {"name": "Dom", "upn": "dpetersen@tagsolutions.com", "ask": True,
-         "backup": {"item": "06 BLT", "options": ["Wheat Bread", "Macaroni Salad", "Lettuce", "Tomato", "Onion",
-                                                  "Mayo", "Add Swiss Cheese", "Add Avocado"],
-                    "note": "Maria also added a side of French fries, which isn't on Saati's menu."}},
+         "backup": {"item": "7. B.L.T. Sandwich", "options": [
+             "On Wheat Bread", "Add Lettuce", "Add Tomato", "Add Onion", "Add Avocado", "Add Swiss Cheese",
+             "With Mayo", "With Macaroni Salad", "Add Side Of French Fries"]}},
     ],
 }
 
@@ -244,7 +246,7 @@ class Lunch:
                 if who["state"] == "to_ask":
                     self._say(plan, {**people[name], "upn": who["upn"]},
                               f"{cfg['intro']}Hi {name}, it's Dave's assistant. Lunch for today's leadership meeting is from Saati Deli "
-                              f"(menu: https://www.mealeo.com/restaurants/albany/saati-deli-albany). What would you like? "
+                              f"(menu: {SAATI}). What would you like? "
                               f"I'm ordering at {cfg['order_at']}, so please reply by {cfg['deadline']}." , now)
                     # Teams stamps messages in UTC ("2026-10-14T13:31:02.5Z"); compare like with like.
                     who.update(state="asked", asked_at=now.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z"))

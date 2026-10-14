@@ -18,7 +18,9 @@ from typing import Any
 import requests
 
 SITE = "https://www.mealeo.com"
-SAATI_ALBANY = f"{SITE}/restaurants/albany/saati-deli-albany"   # 518 Broadway, the one near the office
+# Saati Deli Latham (586 Loudon Rd): the one that delivers to the office (12 Elmwood Rd, Menands is
+# outside the Albany location's zone), and the menu Maria's orders come from ("#13 Grilled Chicken Salad").
+SAATI = f"{SITE}/restaurants/latham/saati-deli-latham"
 HEADERS = {"User-Agent": "Mozilla/5.0 (TAG Solutions assistant)"}
 
 
@@ -109,7 +111,7 @@ def _words(text: str) -> set[str]:
 class Menu:
     """The day's menu, read from Mealeo and kept in the store until tomorrow."""
 
-    def __init__(self, store: Any, url: str = SAATI_ALBANY, session: requests.Session | None = None) -> None:
+    def __init__(self, store: Any, url: str = SAATI, session: requests.Session | None = None) -> None:
         self.store, self.url = store, url
         self.session = session or requests.Session()
         self._items: list[Item] | None = None

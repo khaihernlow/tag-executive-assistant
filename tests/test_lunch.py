@@ -1,3 +1,4 @@
+import json
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -100,10 +101,21 @@ def utc(hhmm):
     return at(hhmm).astimezone(ZoneInfo("UTC")).strftime("%Y-%m-%dT%H:%M:%S.500Z")
 
 
+PEOPLE = [
+    {"name": "Dave", "upn": "dvener@tagsolutions.com", "ask": False, "usual": {"item": "05 Grilled Chkn Salad", "options": ["Honey Mustard"]}},
+    {"name": "Joe", "upn": "jyetto@tagsolutions.com", "ask": False, "usual": {"item": "05 Grilled Chkn Salad", "options": ["Balsamic"]}},
+    {"name": "Dan", "upn": "dlawrence@tagsolutions.com", "ask": True},
+    {"name": "Dom", "upn": "dpetersen@tagsolutions.com", "ask": True,
+     "backup": {"item": "06 BLT", "options": ["Wheat Bread", "Macaroni Salad", "Lettuce", "Tomato", "Onion", "Mayo",
+                                             "Add Swiss Cheese", "Add Avocado"]}},
+]
+
+
 @pytest.fixture
 def setup(monkeypatch):
     monkeypatch.setenv("LUNCH_LIVE", "1")
     store = Store(":memory:")
+    store.set_state("lunch:config", json.dumps({"people": PEOPLE}))
     menu = Menu(store, url="https://www.mealeo.com/restaurants/x", session=Session())
     return store, menu, Teams()
 
