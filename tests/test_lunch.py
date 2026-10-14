@@ -129,7 +129,7 @@ def test_a_normal_wednesday(setup):
 
     plan = lunch.tick(at("08:00"))
     assert plan["status"] == "planned" and plan["meeting"]["subject"] == "Weekly Leadership Team Meeting"
-    assert plan["people"]["Dave"]["line"] == {"item": "05 Grilled Chkn Salad", "options": ["Honey Mustard"], "price": 18.5}
+    assert plan["people"]["Dave"]["lines"][0] == {"item": "05 Grilled Chkn Salad", "options": ["Honey Mustard"], "price": 18.5}
     assert teams.sent == []                                    # nobody asked before 9:30
 
     lunch.tick(at("09:31"))
@@ -139,7 +139,7 @@ def test_a_normal_wednesday(setup):
     teams.inbox["dlawrence@tagsolutions.com"] = [{"text": "tuna on wheat with coleslaw please", "at": utc("09:40")}]
     plan = lunch.tick(at("09:42"))
     assert plan["people"]["Dan"]["state"] == "ordered"
-    assert plan["people"]["Dan"]["line"] == {"item": "01 Tuna Salad Sandwich", "options": ["Wheat Bread", "Coleslaw"], "price": 15.25}
+    assert plan["people"]["Dan"]["lines"][0] == {"item": "01 Tuna Salad Sandwich", "options": ["Wheat Bread", "Coleslaw"], "price": 15.25}
     assert teams.sent[-1] == ("dlawrence@tagsolutions.com", "Got it: 01 Tuna Salad Sandwich (Wheat Bread, Coleslaw), $15.25. Ordering at 11:00.")
 
     lunch.tick(at("10:31"))                                    # Dom is reminded, once
@@ -148,7 +148,7 @@ def test_a_normal_wednesday(setup):
 
     plan = lunch.tick(at("10:46"))                             # deadline: Dom gets his backup
     dom = plan["people"]["Dom"]
-    assert dom["state"] == "backup" and dom["line"]["price"] == 14.0 + 1.25 + 2.5
+    assert dom["state"] == "backup" and dom["lines"][0]["price"] == 14.0 + 1.25 + 2.5
     assert plan["total"] == round(18.5 + 18.5 + 15.25 + 17.75, 2)
     # Everything's in order, but the first orders wait for Dave's go before checkout
     assert plan["status"] == "needs_dave"
@@ -239,7 +239,7 @@ def test_a_menu_name_matches_with_or_without_its_number(setup):
     lunch.tick(at("09:30"))
     lunch.teams.inbox["dlawrence@tagsolutions.com"] = [{"text": "do the tuna salad sandwich from deli", "at": utc("09:35")}]
     plan = lunch.tick(at("09:36"))
-    assert plan["people"]["Dan"]["line"]["item"] == "01 Tuna Salad Sandwich"
+    assert plan["people"]["Dan"]["lines"][0]["item"] == "01 Tuna Salad Sandwich"
 
 
 def test_the_reply_is_read_with_the_question_it_answers(setup):
@@ -292,5 +292,5 @@ def test_orders_stay_open_until_the_deadline_and_the_latest_wish_wins(setup):
     assert plan["people"]["Dan"]["state"] == "clarifying"          # the BLT needs a side
     assert teams.sent[-1][1].startswith("The 06 BLT comes with a choice of sandwich sides")
     plan = lunch.tick(at("10:46"))                                  # no answer about the side by the deadline
-    assert plan["people"]["Dan"]["state"] == "ordered" and plan["people"]["Dan"]["line"]["item"] == "01 Tuna Salad Sandwich"
+    assert plan["people"]["Dan"]["state"] == "ordered" and plan["people"]["Dan"]["lines"][0]["item"] == "01 Tuna Salad Sandwich"
     assert "Kept their first order" in plan["people"]["Dan"]["note"]

@@ -59,9 +59,12 @@ READ_REPLY = ToolSpec(
                    "description": "order: they named a menu item; out: ONLY when they say they don't want lunch "
                                   "this week; unclear: you can't tell which item, or what they named isn't on the menu "
                                   "(then ask, suggesting the closest items)"},
-        "item": {"type": "string", "description": "The exact menu name of what they want (copy it from the menu), or empty"},
-        "wants": {"type": "array", "items": {"type": "string"},
-                  "description": "Each change or extra in their own words: 'honey mustard', 'extra chicken', 'on wheat'"},
+        "items": {"type": "array", "description": "Each menu item they want (a sandwich and a soup are two)",
+                  "items": {"type": "object", "properties": {
+                      "item": {"type": "string", "description": "The exact menu name, copied from the menu, number included"},
+                      "wants": {"type": "array", "items": {"type": "string"},
+                                "description": "Each change or extra for this item in their own words: 'honey mustard', 'extra chicken', 'on wheat'"},
+                  }, "required": ["item"]}},
         "question": {"type": "string", "description": "When unclear: one short question to ask them back"},
     }, "required": ["status"]},
 )
@@ -120,8 +123,17 @@ def describe(line: dict[str, Any]) -> str:
     return f"{line['item']}{f' ({opts})' if opts else ''}"
 
 
-def _same(a: dict[str, Any] | None, b: dict[str, Any] | None) -> bool:
-    return bool(a and b) and a["item"] == b["item"] and sorted(a.get("options", [])) == sorted(b.get("options", []))
+def describe_all(lines: list[dict[str, Any]]) -> str:
+    return " + ".join(describe(line) for line in lines)
+
+
+def total_of(lines: list[dict[str, Any]] | None) -> float:
+    return round(sum(line.get("price") or 0 for line in lines or []), 2)
+
+
+def _same(a: list[dict[str, Any]] | None, b: list[dict[str, Any]] | None) -> bool:
+    key = lambda lines: sorted((line["item"], tuple(sorted(line.get("options", [])))) for line in lines or [])
+    return bool(a and b) and key(a) == key(b)
 
 
 def resolve(menu: Menu, llm: Any, item_name: str, wants: list[str]) -> dict[str, Any]:
@@ -172,15 +184,19 @@ def read_reply(menu: Menu, llm: Any, talk: list[dict[str, str]] | str) -> dict[s
                             system="Someone was asked what they want for lunch from this deli menu. Read the whole "
                                    "conversation: their later messages answer your questions ('from the grill is good' "
                                    "after you offered two tuna items means the one from the grill). "
-                                   "Pick the item only, copying its menu name exactly, number included. Put bread, "
-                                   "dressing, sides and extras in wants in their words: they're checked against the "
-                                   "item's own options later, so never say whether an option exists. It's unclear "
-                                   "only if you can't tell which item ('same as usual', or two items fit equally); "
+                                   "List each item they want (a sandwich and a soup are two items), copying its menu "
+                                   "name exactly, number included. Put bread, dressing, sides and extras in that item's "
+                                   "wants in their words: they're checked against the item's own options later, so never "
+                                   "say whether an option exists. It's unclear only if you can't tell which item "
+                                   "('same as usual', or two items fit equally, like a soup's bowl or quart); "
                                    "then ask which, naming the candidates. Their latest wish wins: if they change "
                                    "their mind after you confirmed, return the new order; if their latest message "
                                    "doesn't change anything ('thanks', 'perfect'), return the order you confirmed.",
                             tools=[READ_REPLY], tool_choice=READ_REPLY.name, max_tokens=500)
-    return next((c.input for c in response.tool_calls), {"status": "unclear", "question": "What would you like?"})
+    verdict = next((c.input for c in response.tool_calls), {"status": "unclear", "question": "What would you like?"})
+    if verdict.get("item") and not verdict.get("items"):          # a single item, the older shape
+        verdict["items"] = [{"item": verdict["item"], "wants": verdict.get("wants") or []}]
+    return verdict
 
 
 class Lunch:
@@ -217,7 +233,7 @@ class Lunch:
                                for p in cfg["people"]}}
             for p in cfg["people"]:
                 if p.get("usual"):
-                    plan["people"][p["name"]]["line"] = self._line(p["usual"])
+                    plan["people"][p["name"]]["lines"] = [self._line(p["usual"])]
             save(self.store, now, plan)
         if plan["status"] in ("no_meeting", "skipped", "ordered", "ready", "needs_dave"):
             return plan
@@ -276,20 +292,25 @@ class Lunch:
             if verdict.get("status") == "out":
                 who.update(state="out")
                 self._say(plan, people[name] | {"upn": who["upn"]}, "Got it, no lunch for you this week.", now)
-            elif verdict.get("status") == "order" and verdict.get("item"):
-                line = resolve(self.menu, self.llm, verdict["item"], verdict.get("wants") or [])
-                if line.get("problem"):
+            elif verdict.get("status") == "order" and verdict.get("items"):
+                lines = [resolve(self.menu, self.llm, i.get("item", ""), i.get("wants") or []) for i in verdict["items"]]
+                stuck = [line for line in lines if line.get("problem")]
+                unavailable = [u for line in lines for u in line.get("unavailable", [])]
+                if stuck:
+                    # Ask about the first thing that needs an answer; what was clear is remembered on the next read.
                     who.update(state="clarifying")
-                    missing = f"{', '.join(line['unavailable'])} isn't on the menu. " if line.get("unavailable") else ""
+                    missing = f"{', '.join(unavailable)} isn't on the menu. " if unavailable else ""
                     self._say(plan, people[name] | {"upn": who["upn"]},
-                              missing + (line.get("ask") or f"Sorry, {line['problem']}. Which would you like?"), now)
+                              missing + (stuck[0].get("ask") or f"Sorry, {stuck[0]['problem']}. Which would you like?"), now)
                 else:
-                    unchanged = who["state"] == "ordered" and _same(who.get("line"), line)
-                    who.update(state="ordered", line=line)
+                    unchanged = who["state"] == "ordered" and _same(who.get("lines"), lines)
+                    who.update(state="ordered", lines=lines)
                     if not unchanged:   # "thanks!" after a confirmation needs no second one
-                        extra = f" ({', '.join(line['unavailable'])} isn't on the menu, so I left it off.)" if line.get("unavailable") else ""
+                        extra = f" ({', '.join(unavailable)} isn't on the menu, so I left it off.)" if unavailable else ""
+                        each = "; ".join(f"{describe(line)}, ${line['price']:.2f}" for line in lines)
+                        total = f" ${total_of(lines):.2f} in all." if len(lines) > 1 else ""
                         self._say(plan, people[name] | {"upn": who["upn"]},
-                                  f"Got it: {describe(line)}, ${line['price']:.2f}.{extra} Ordering at {config(self.store)['order_at']}.", now)
+                                  f"Got it: {each}.{total}{extra} Ordering at {config(self.store)['order_at']}.", now)
             else:
                 who.update(state="clarifying")
                 self._say(plan, people[name] | {"upn": who["upn"]}, verdict.get("question") or "Which item would you like from the menu?", now)
@@ -297,16 +318,16 @@ class Lunch:
     def _close(self, plan: dict[str, Any], people: dict[str, Any], cfg: dict[str, Any]) -> None:
         """Deadline: fill in backups and decide whether Dave needs to look."""
         for name, who in plan["people"].items():
-            if who["state"] == "clarifying" and who.get("line"):
+            if who["state"] == "clarifying" and who.get("lines"):
                 # They had an order, then started changing it and didn't finish: keep the one they confirmed.
                 who.update(state="ordered", note="Kept their first order: the change wasn't finished by the deadline.")
             elif who["state"] in ("asked", "clarifying"):
                 backup = people[name].get("backup")
                 if backup:
-                    who.update(state="backup", line=self._line(backup), note=backup.get("note"))
+                    who.update(state="backup", lines=[self._line(backup)], note=backup.get("note"))
                 else:
                     who.update(state="no_reply")
-        total = round(sum(w["line"]["price"] for w in plan["people"].values() if w.get("line") and w["state"] != "out"), 2)
+        total = round(sum(total_of(w.get("lines")) for w in plan["people"].values() if w["state"] != "out"), 2)
         plan["total"] = total
         reasons = []
         if plan.get("meeting") is None and not plan.get("override"):
@@ -316,8 +337,9 @@ class Lunch:
         for name, who in plan["people"].items():
             if who["state"] == "no_reply":
                 reasons.append(f"{name} didn't reply (left off)")
-            if (who.get("line") or {}).get("problem"):
-                reasons.append(f"{name}'s order: {who['line']['problem']}")
+            for line in who.get("lines") or []:
+                if line.get("problem"):
+                    reasons.append(f"{name}'s order: {line['problem']}")
         careful = int(json.loads(self.store.get_state("lunch:orders_placed") or "0")) < cfg["careful_runs"]
         if careful:
             reasons.append("one of the first orders, so it waits for your go before checkout")
@@ -334,11 +356,12 @@ def today_view(store: Any, now: datetime | None = None) -> dict[str, Any] | None
     cfg = {**config(store), **plan.get("times", {})}   # the times this day's plan was made with
     lines = []
     for name, who in plan["people"].items():
-        line = who.get("line")
+        theirs = who.get("lines") or []
+        unavailable = [u for line in theirs for u in line.get("unavailable", [])]
         lines.append({"name": name, "state": who["state"],
-                      "what": describe(line) if line else None,
-                      "price": line["price"] if line else None,
-                      "note": who.get("note") or (", ".join(line.get("unavailable", [])) + " not on the menu" if line and line.get("unavailable") else None)})
+                      "what": describe_all(theirs) if theirs else None,
+                      "price": total_of(theirs) if theirs else None,
+                      "note": who.get("note") or (", ".join(unavailable) + " not on the menu" if unavailable else None)})
     return {"status": plan["status"], "live": plan.get("live", False), "meeting": plan.get("meeting"),
             "ask_at": cfg["ask_at"], "order_at": cfg["order_at"], "deadline": cfg["deadline"], "lines": lines,
             "total": plan.get("total") or round(sum(l["price"] or 0 for l in lines if l["state"] != "out"), 2),
