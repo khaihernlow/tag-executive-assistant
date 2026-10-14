@@ -265,3 +265,32 @@ def test_the_reply_is_read_with_the_question_it_answers(setup):
     assert second.index("You: Hi Dan") < second.index("Them: tuna on wheat") < second.index("You: Which tuna") \
         < second.index("Them: the first one")
     assert "$" not in second.split("The conversation")[0]      # menu names only, no list prices
+
+
+def test_orders_stay_open_until_the_deadline_and_the_latest_wish_wins(setup):
+    store, menu, teams = setup
+    llm = LLM(
+        tool("read_lunch_reply", status="order", item="01 Tuna Salad Sandwich", wants=["wheat", "coleslaw"]),
+        tool("pick_options", options=["Wheat Bread", "Coleslaw"]),
+        tool("read_lunch_reply", status="order", item="01 Tuna Salad Sandwich", wants=["wheat", "coleslaw"]),  # "thanks!"
+        tool("pick_options", options=["Wheat Bread", "Coleslaw"]),
+        tool("read_lunch_reply", status="order", item="06 BLT", wants=["white", "no mayo", "potato salad"]),
+        tool("pick_options", options=["White Bread"]),            # (potato salad isn't in this fake menu's sides)
+    )
+    lunch = L.Lunch(Graph(), teams, llm, store, menu)
+    lunch.tick(at("09:30"))
+    dan = "dlawrence@tagsolutions.com"
+    teams.inbox[dan] = [{"text": "tuna on wheat with coleslaw", "at": utc("09:35")}]
+    lunch.tick(at("09:36"))
+    teams.inbox[dan].append({"text": "thanks!", "at": utc("09:37")})
+    plan = lunch.tick(at("09:38"))
+    assert plan["status"] == "collecting"                           # still open: Dom hasn't answered, and nothing closes early
+    assert [t for u, t in teams.sent if u == dan and t.startswith("Got it")] == \
+        ["Got it: 01 Tuna Salad Sandwich (Wheat Bread, Coleslaw), $15.25. Ordering at 11:00."]   # no second confirmation
+    teams.inbox[dan].append({"text": "actually a BLT on white, no mayo", "at": utc("10:15")})
+    plan = lunch.tick(at("10:16"))
+    assert plan["people"]["Dan"]["state"] == "clarifying"          # the BLT needs a side
+    assert teams.sent[-1][1].startswith("The 06 BLT comes with a choice of sandwich sides")
+    plan = lunch.tick(at("10:46"))                                  # no answer about the side by the deadline
+    assert plan["people"]["Dan"]["state"] == "ordered" and plan["people"]["Dan"]["line"]["item"] == "01 Tuna Salad Sandwich"
+    assert "Kept their first order" in plan["people"]["Dan"]["note"]

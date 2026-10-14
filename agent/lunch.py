@@ -120,6 +120,10 @@ def describe(line: dict[str, Any]) -> str:
     return f"{line['item']}{f' ({opts})' if opts else ''}"
 
 
+def _same(a: dict[str, Any] | None, b: dict[str, Any] | None) -> bool:
+    return bool(a and b) and a["item"] == b["item"] and sorted(a.get("options", [])) == sorted(b.get("options", []))
+
+
 def resolve(menu: Menu, llm: Any, item_name: str, wants: list[str]) -> dict[str, Any]:
     """A priced order line from a menu name and wishes in plain words. Code checks
     every name against the menu; the model only maps words to option names."""
@@ -172,7 +176,9 @@ def read_reply(menu: Menu, llm: Any, talk: list[dict[str, str]] | str) -> dict[s
                                    "dressing, sides and extras in wants in their words: they're checked against the "
                                    "item's own options later, so never say whether an option exists. It's unclear "
                                    "only if you can't tell which item ('same as usual', or two items fit equally); "
-                                   "then ask which, naming the candidates.",
+                                   "then ask which, naming the candidates. Their latest wish wins: if they change "
+                                   "their mind after you confirmed, return the new order; if their latest message "
+                                   "doesn't change anything ('thanks', 'perfect'), return the order you confirmed.",
                             tools=[READ_REPLY], tool_choice=READ_REPLY.name, max_tokens=500)
     return next((c.input for c in response.tool_calls), {"status": "unclear", "question": "What would you like?"})
 
@@ -236,8 +242,8 @@ class Lunch:
                         self._say(plan, {**people[name], "upn": who["upn"]},
                                   f"Quick reminder: I'm ordering lunch at {cfg['order_at']}. What would you like?", now)
                 plan["reminded"] = True
-            waiting = [n for n, w in plan["people"].items() if w["state"] in ("asked", "clarifying")]
-            if not waiting or now >= _at(now, cfg["deadline"]):
+            # Open until the deadline even when everyone has answered: "actually make it a BLT" counts.
+            if now >= _at(now, cfg["deadline"]):
                 self._close(plan, people, cfg)
         save(self.store, now, plan)
         return plan
@@ -256,7 +262,8 @@ class Lunch:
         if not live():
             return   # dry run: nobody was asked
         for name, who in plan["people"].items():
-            if who["state"] not in ("asked", "clarifying"):
+            # Everyone who was asked, answered or not: a later message can change their order.
+            if who["state"] not in ("asked", "clarifying", "ordered", "out"):
                 continue
             new = self.teams.replies(who["upn"], who.get("read_until") or who["asked_at"])
             if not new:
@@ -277,18 +284,23 @@ class Lunch:
                     self._say(plan, people[name] | {"upn": who["upn"]},
                               missing + (line.get("ask") or f"Sorry, {line['problem']}. Which would you like?"), now)
                 else:
+                    unchanged = who["state"] == "ordered" and _same(who.get("line"), line)
                     who.update(state="ordered", line=line)
-                    extra = f" ({', '.join(line['unavailable'])} isn't on the menu, so I left it off.)" if line.get("unavailable") else ""
-                    self._say(plan, people[name] | {"upn": who["upn"]},
-                              f"Got it: {describe(line)}, ${line['price']:.2f}.{extra} Ordering at {config(self.store)['order_at']}.", now)
+                    if not unchanged:   # "thanks!" after a confirmation needs no second one
+                        extra = f" ({', '.join(line['unavailable'])} isn't on the menu, so I left it off.)" if line.get("unavailable") else ""
+                        self._say(plan, people[name] | {"upn": who["upn"]},
+                                  f"Got it: {describe(line)}, ${line['price']:.2f}.{extra} Ordering at {config(self.store)['order_at']}.", now)
             else:
                 who.update(state="clarifying")
                 self._say(plan, people[name] | {"upn": who["upn"]}, verdict.get("question") or "Which item would you like from the menu?", now)
 
     def _close(self, plan: dict[str, Any], people: dict[str, Any], cfg: dict[str, Any]) -> None:
-        """Deadline (or everyone answered): fill in backups and decide whether Dave needs to look."""
+        """Deadline: fill in backups and decide whether Dave needs to look."""
         for name, who in plan["people"].items():
-            if who["state"] in ("asked", "clarifying"):
+            if who["state"] == "clarifying" and who.get("line"):
+                # They had an order, then started changing it and didn't finish: keep the one they confirmed.
+                who.update(state="ordered", note="Kept their first order: the change wasn't finished by the deadline.")
+            elif who["state"] in ("asked", "clarifying"):
                 backup = people[name].get("backup")
                 if backup:
                     who.update(state="backup", line=self._line(backup), note=backup.get("note"))
