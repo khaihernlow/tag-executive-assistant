@@ -1019,3 +1019,6 @@ svg.icon { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: ro
   .lunch__state { display: none; }
 }
 .lunch__note-line { margin: var(--s3) 0 0; font-size: 13px; color: var(--ink-faint); }
+.lunch__mealeo { margin-top: var(--s3); padding-top: var(--s3); border-top: 1px solid var(--rule); }
+.lunch__mealeo-total { display: flex; justify-content: space-between; margin: 0; font-size: 15px; }
+.lunch__mealeo .lunch__note-line { margin-top: var(--s1); }

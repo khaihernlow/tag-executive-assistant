@@ -30,6 +30,7 @@ from agent.tools import ToolRegistry
 from connectors.graph import GraphClient
 from connectors.teams import Teams
 from agent.lunch import Lunch
+from agent.mealeo_order import fill_checkout
 from llm.hatzai import HatzAIProvider
 from app.worker import Worker
 from store.db import Store
@@ -83,7 +84,7 @@ def build_services() -> Services:
         + (linkedin_tools(linkedin, graph, directory) if linkedin else [])
     )
     assistant = Assistant(llm, registry, store, actions, memory)
-    lunch = Lunch(graph, Teams(own, os.environ["ASSISTANT_ACCOUNT"], store), llm, store) if own else None
+    lunch = Lunch(graph, Teams(own, os.environ["ASSISTANT_ACCOUNT"], store), llm, store, checkout=fill_checkout) if own else None
     worker = Worker(graph, llm, store, searcher=llm, fast_llm=fast_llm, actions=actions, autotask=directory,
                     linkedin=linkedin, lunch=lunch)
     return Services(graph, store, actions, assistant, memory, worker, llm, directory)

@@ -7,6 +7,8 @@ ENV PYTHONUNBUFFERED=1
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+# Chromium for the Mealeo checkout (agent/mealeo_order.py)
+RUN playwright install --with-deps chromium
 
 COPY . .
 

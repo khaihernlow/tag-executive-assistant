@@ -20,6 +20,8 @@ Placing the order on Mealeo comes later (it needs the assistant's Mealeo login).
 from __future__ import annotations
 
 import json
+import re
+from dataclasses import asdict
 import logging
 import os
 from datetime import datetime, time, timedelta, timezone
@@ -35,6 +37,10 @@ DEFAULTS: dict[str, Any] = {
     "meeting": "leadership",               # the Wednesday meeting's title contains this
     "ask_at": "09:30", "remind_at": "10:30", "deadline": "10:45", "order_at": "11:00",
     "cap": 150.0,                          # dollars of food; above it, Dave decides
+    "delivery_window": "11:45 AM",         # Mealeo's 11:45 AM-12:15 PM slot (Maria aims for 11:50-12:15)
+    "tip_percent": 20,
+    "fill_mealeo": True,                   # at the deadline, fill the Mealeo checkout (never pays or submits)
+    "order_day": "Today",                  # Mealeo's date choice ("Tomorrow" only for tests run after hours)
     "careful_runs": 2,                     # first orders wait for Dave's go before checkout
     "weekday": 2,                          # Wednesday (Monday is 0)
     "intro": "",                           # put before each message ("(Test run) ")
@@ -164,8 +170,13 @@ def resolve(menu: Menu, llm: Any, item_name: str, wants: list[str]) -> dict[str,
     missing = [g.name for g in item.groups if g.min and not any(o.lower() in {c.name.lower() for c in g.choices} for o in options)]
     if missing:
         group = next(g for g in item.groups if g.name == missing[0])
-        line["problem"] = f"needs a choice of {group.name.lower()}: {', '.join(c.name for c in group.choices)}"
-        line["ask"] = f"The {item.name} comes with a choice of {group.name.lower()}: {', '.join(c.name for c in group.choices)}. Which would you like?"
+        # In people's words: Latham's "Choose Your Side" with "With Potato Salad" -> "a side: Potato Salad".
+        what = re.sub(r"^(choose|select|pick)( your)?\s+", "", group.name, flags=re.I).lower()
+        what = re.sub(r"^sandwich\s+", "", what)
+        plain = [re.sub(r"^(with|on|add)\s+", "", c.name, flags=re.I) for c in group.choices]
+        options_text = ", ".join(plain[:-1]) + f" or {plain[-1]}" if len(plain) > 1 else plain[0]
+        line["problem"] = f"needs a choice of {what}: {', '.join(c.name for c in group.choices)}"
+        line["ask"] = f"The {item.name} comes with a {what.rstrip('s')}: {options_text}. Which would you like?"
     if unavailable + unknown:
         line["unavailable"] = unavailable + unknown
     return line
@@ -202,9 +213,11 @@ def read_reply(menu: Menu, llm: Any, talk: list[dict[str, str]] | str) -> dict[s
 
 
 class Lunch:
-    def __init__(self, graph: Any, teams: Any, llm: Any, store: Any, menu: Menu | None = None) -> None:
+    def __init__(self, graph: Any, teams: Any, llm: Any, store: Any, menu: Menu | None = None,
+                 checkout: Any = None) -> None:
         self.graph, self.teams, self.llm, self.store = graph, teams, llm, store
         self.menu = menu or Menu(store)
+        self.checkout = checkout   # fills Mealeo's checkout (agent.mealeo_order.fill_checkout); None skips it
 
     # ── messages: sent for real only when live ──
     def _say(self, plan: dict[str, Any], person: dict[str, Any], text: str, now: datetime) -> None:
@@ -328,9 +341,11 @@ class Lunch:
                 if backup:
                     who.update(state="backup", lines=[self._line(backup)], note=backup.get("note"))
                 else:
-                    who.update(state="no_reply")
+                    # Replied but never settled (a question left unanswered) is not the same as silence.
+                    who.update(state="unfinished" if who.get("replies") else "no_reply")
         total = round(sum(total_of(w.get("lines")) for w in plan["people"].values() if w["state"] != "out"), 2)
         plan["total"] = total
+        mealeo_problems = self._fill_mealeo(plan, cfg, total)
         reasons = []
         if plan.get("meeting") is None and not plan.get("override"):
             reasons.append("the leadership meeting isn't on the calendar")
@@ -339,14 +354,40 @@ class Lunch:
         for name, who in plan["people"].items():
             if who["state"] == "no_reply":
                 reasons.append(f"{name} didn't reply (left off)")
+            elif who["state"] == "unfinished":
+                reasons.append(f"{name}'s order wasn't finished by the deadline (left off)")
             for line in who.get("lines") or []:
                 if line.get("problem"):
                     reasons.append(f"{name}'s order: {line['problem']}")
         careful = int(json.loads(self.store.get_state("lunch:orders_placed") or "0")) < cfg["careful_runs"]
         if careful:
             reasons.append("one of the first orders, so it waits for your go before checkout")
+        reasons += mealeo_problems
         plan["reasons"] = reasons
         plan["status"] = "needs_dave" if reasons else "ready"
+
+    def _fill_mealeo(self, plan: dict[str, Any], cfg: dict[str, Any], total: float) -> list[str]:
+        """Fill Mealeo's checkout with the settled order and keep its totals for Dave's card.
+        Stops before payment: nothing is paid or submitted. Returns problems worth his look."""
+        lines = [line for w in plan["people"].values() if w["state"] != "out" for line in w.get("lines") or []]
+        if not (self.checkout and cfg.get("fill_mealeo") and lines):
+            return []
+        try:
+            result = asdict(self.checkout(lines, window=cfg["delivery_window"], day=cfg["order_day"], tip_percent=cfg["tip_percent"]))
+        except Exception as e:  # noqa: BLE001
+            log.exception("filling the Mealeo checkout failed")
+            plan["mealeo"] = {"problems": [str(e)[:200]]}
+            return [f"couldn't fill the Mealeo order ({str(e)[:120]})"]
+        plan["mealeo"] = _mealeo_summary(result)
+        problems = [f"Mealeo: {p}" for p in result.get("problems") or []]
+        if result.get("subtotal") and abs(result["subtotal"] - total) > 0.05:
+            problems.append(f"Mealeo's food total (${result['subtotal']:.2f}) isn't the ${total:.2f} worked out here")
+        return problems
+
+
+def _mealeo_summary(result: dict[str, Any]) -> dict[str, Any]:
+    keep = ("subtotal", "delivery", "tax", "tip", "total", "when", "address", "problems")
+    return {k: result.get(k) for k in keep}
 
 
 def today_view(store: Any, now: datetime | None = None) -> dict[str, Any] | None:
@@ -367,7 +408,8 @@ def today_view(store: Any, now: datetime | None = None) -> dict[str, Any] | None
     return {"status": plan["status"], "live": plan.get("live", False), "meeting": plan.get("meeting"),
             "ask_at": cfg["ask_at"], "order_at": cfg["order_at"], "deadline": cfg["deadline"], "lines": lines,
             "total": plan.get("total") or round(sum(l["price"] or 0 for l in lines if l["state"] != "out"), 2),
-            "reasons": plan.get("reasons", []), "messages": plan.get("messages", [])}
+            "reasons": plan.get("reasons", []), "messages": plan.get("messages", []),
+            "mealeo": plan.get("mealeo")}
 
 
 def skip_week(store: Any, now: datetime | None = None) -> dict[str, Any] | None:

@@ -302,7 +302,61 @@ def test_orders_stay_open_until_the_deadline_and_the_latest_wish_wins(setup):
     teams.inbox[dan].append({"text": "actually a BLT on white, no mayo", "at": utc("10:15")})
     plan = lunch.tick(at("10:16"))
     assert plan["people"]["Dan"]["state"] == "clarifying"          # the BLT needs a side
-    assert teams.sent[-1][1].startswith("The 06 BLT comes with a choice of sandwich sides")
+    assert teams.sent[-1][1] == "The 06 BLT comes with a side: Macaroni Salad or Coleslaw. Which would you like?"
     plan = lunch.tick(at("10:46"))                                  # no answer about the side by the deadline
     assert plan["people"]["Dan"]["state"] == "ordered" and plan["people"]["Dan"]["lines"][0]["item"] == "01 Tuna Salad Sandwich"
     assert "Kept their first order" in plan["people"]["Dan"]["note"]
+
+
+def test_at_the_deadline_the_mealeo_checkout_is_filled_and_its_totals_kept(setup):
+    from agent.mealeo_order import Checkout
+    store, menu, teams = setup
+    seen = {}
+
+    def fake_checkout(lines, window, day, tip_percent):
+        seen.update(lines=lines, window=window, day=day, tip=tip_percent)
+        return Checkout(subtotal=round(sum(l["price"] for l in lines), 2), delivery=4.99, tax=8.0, tip=11.0, total=99.0,
+                        when="11:45 AM-12:15 PM", address="12 Elmwood Rd, Suite 1, Menands, NY 12204")
+
+    lunch = L.Lunch(Graph(), teams, LLM(), store, menu, checkout=fake_checkout)
+    lunch.tick(at("09:30"))
+    plan = lunch.tick(at("10:46"))           # nobody replied: Dave, Joe, and Dom's backup
+    assert [l["item"] for l in seen["lines"]] == ["05 Grilled Chkn Salad", "05 Grilled Chkn Salad", "06 BLT"]
+    assert (seen["window"], seen["day"], seen["tip"]) == ("11:45 AM", "Today", 20)
+    assert plan["mealeo"]["total"] == 99.0 and plan["mealeo"]["address"].startswith("12 Elmwood Rd, Suite 1")
+    assert not any("Mealeo" in r for r in plan["reasons"])
+    assert L.today_view(store, at("10:47"))["mealeo"]["total"] == 99.0
+
+
+def test_mealeo_trouble_is_put_to_dave(setup):
+    from agent.mealeo_order import Checkout
+    store, menu, teams = setup
+
+    def off_by_a_dollar(lines, **kw):
+        return Checkout(subtotal=round(sum(l["price"] for l in lines), 2) + 1, total=80.0,
+                        problems=["no 11:45 AM delivery window"])
+
+    def broken(lines, **kw):
+        raise RuntimeError("browser crashed")
+
+    for checkout, expect in ((off_by_a_dollar, ["Mealeo: no 11:45 AM delivery window", "Mealeo's food total"]),
+                             (broken, ["couldn't fill the Mealeo order (browser crashed)"])):
+        store.set_state("lunch:2026-10-14", "")
+        store._execute("DELETE FROM state WHERE key = 'lunch:2026-10-14'")
+        lunch = L.Lunch(Graph(), teams, LLM(), store, menu, checkout=checkout)
+        lunch.tick(at("09:30"))
+        reasons = " | ".join(lunch.tick(at("10:46"))["reasons"])
+        assert all(e in reasons for e in expect), reasons
+
+
+def test_a_reply_left_unfinished_is_not_called_silence(setup):
+    store, menu, teams = setup
+    llm = LLM(tool("read_lunch_reply", status="order", item="06 BLT", wants=["wheat"]),
+              tool("pick_options", options=["Wheat Bread"]))
+    lunch = L.Lunch(Graph(), teams, llm, store, menu)
+    lunch.tick(at("09:30"))
+    teams.inbox["dlawrence@tagsolutions.com"] = [{"text": "BLT on wheat", "at": utc("09:35")}]
+    lunch.tick(at("09:36"))                    # asked which side; never answers
+    plan = lunch.tick(at("10:46"))
+    assert plan["people"]["Dan"]["state"] == "unfinished"
+    assert "Dan's order wasn't finished by the deadline (left off)" in plan["reasons"]

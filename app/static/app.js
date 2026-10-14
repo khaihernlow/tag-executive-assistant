@@ -596,7 +596,8 @@ function undoRow(m, path) {
 // ── Wednesday lunch ──────────────────────────────────────────────────────────
 
 const LUNCH_STATE = { usual: "usual", to_ask: "will ask", asked: "asked", clarifying: "asked again",
-                      ordered: "replied", backup: "backup order", out: "out this week", no_reply: "no reply" };
+                      ordered: "replied", backup: "backup order", out: "out this week", no_reply: "no reply",
+                      unfinished: "didn't finish" };
 
 function lunchSummary(l) {
   const money = `$${(l.total || 0).toFixed(2)}`;
@@ -652,9 +653,16 @@ function renderLunch(l) {
       el("span", { class: "lunch__price", text: x.price != null && x.state !== "out" ? `$${x.price.toFixed(2)}` : "" })))) : null,
     showLines && l.lines.some((x) => x.price) ? el("p", { class: "lunch__total" },
       el("span", { text: "Food" }), el("span", { text: `$${(l.total || 0).toFixed(2)} + tax, delivery and tip` })) : null,
-    // Said plainly until the assistant can check out on Mealeo itself.
-    ["needs_dave", "ready"].includes(l.status)
-      ? el("p", { class: "lunch__note-line", text: "Placing the order on Mealeo isn't connected yet, so for now someone places it by hand." }) : null,
+    // Mealeo's own numbers once the checkout is filled; what's left is said plainly.
+    ["needs_dave", "ready"].includes(l.status) && l.mealeo && l.mealeo.total
+      ? el("div", { class: "lunch__mealeo" },
+          el("p", { class: "lunch__mealeo-total" }, el("span", { text: "Mealeo checkout" }), el("strong", { text: `$${l.mealeo.total.toFixed(2)}` })),
+          el("p", { class: "lunch__note-line", text:
+            `Food $${l.mealeo.subtotal.toFixed(2)} + delivery $${l.mealeo.delivery.toFixed(2)} + tax & service $${l.mealeo.tax.toFixed(2)}`
+            + ` + tip $${l.mealeo.tip.toFixed(2)}. ${l.mealeo.when}, to ${l.mealeo.address}.` }),
+          el("p", { class: "lunch__note-line", text: "Filled in on Mealeo up to payment. Paying needs the assistant's Mealeo login, so for now someone places it by hand." }))
+      : ["needs_dave", "ready"].includes(l.status)
+        ? el("p", { class: "lunch__note-line", text: "Placing the order on Mealeo isn't connected yet, so for now someone places it by hand." }) : null,
     actions.length ? el("div", { class: "lunch__actions" }, ...actions) : null,
   ].filter(Boolean));
 }
