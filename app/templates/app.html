@@ -139,6 +139,21 @@
 
           </div>
         </header>
+        <!-- While a meeting is being recorded: a band under the header (it pushes the chat down) -->
+        <div class="recbar chat-only" id="recbar" hidden role="status" aria-live="polite">
+          <div class="recbar__inner">
+            <div class="recbar__row">
+              <span class="recbar__live"><span class="recbar__dot" aria-hidden="true"></span><span class="recbar__word">Recording</span></span>
+              <span class="recbar__time" id="rec-time">0:00</span>
+              <span class="recbar__spacer"></span>
+              <button class="link-btn recbar__discard" id="rec-discard" type="button">Discard</button>
+              <button class="btn btn--sign recbar__stop" id="rec-stop" type="button">{{ icon('square') }}<span>Stop &amp; save</span></button>
+            </div>
+            <label class="recbar__for"><span>For</span>
+              <select id="rec-meeting" class="slip__field-input"></select>
+            </label>
+          </div>
+        </div>
         <main class="scroll view" id="view-chat" aria-label="Chat" hidden>
           <section class="block block--thread" aria-label="Conversation">
             <p class="topic" id="topic" hidden></p>
@@ -196,14 +211,6 @@
         </div>
 
         <!-- While a meeting is being recorded -->
-        <div class="recbar" id="recbar" hidden role="status" aria-live="polite">
-          <span class="recbar__dot" aria-hidden="true"></span>
-          <span class="recbar__time" id="rec-time">0:00</span>
-          <label class="visually-hidden" for="rec-meeting">Meeting</label>
-          <select id="rec-meeting" class="recbar__meeting"></select>
-          <button class="btn recbar__discard" id="rec-discard" type="button">Discard</button>
-          <button class="btn btn--sign recbar__stop" id="rec-stop" type="button">{{ icon('square') }}<span>Stop &amp; save</span></button>
-        </div>
 
         <!-- Meeting notes: same place as a brief -->
         <div class="overlay notesheet" id="notesheet" hidden role="dialog" aria-modal="true" aria-labelledby="ns-title">
@@ -300,20 +307,30 @@
       <input id="notes-search" type="search" placeholder="Search notes" autocomplete="off" enterkeyhint="search">
       <button class="link-btn" id="notes-close" type="button">Close</button>
     </div>
-    <div class="notes-modal__actions">
-      <button class="tool-btn" id="notes-upload" type="button">{{ icon('upload') }}<span>Upload a recording</span></button>
-      <button class="tool-btn" id="notes-paste" type="button">{{ icon('clipboard') }}<span>Paste notes or a transcript</span></button>
+    <div class="notes-choices">
+      <button class="notes-choice" id="notes-upload" type="button">
+        <span class="notes-choice__icon">{{ icon('upload') }}</span>
+        <span class="notes-choice__text"><span class="notes-choice__title">Upload a recording</span>
+          <span class="notes-choice__sub">From your phone: m4a, mp3, wav</span></span>
+      </button>
+      <button class="notes-choice" id="notes-paste" type="button" aria-expanded="false" aria-controls="notes-paste-form">
+        <span class="notes-choice__icon">{{ icon('clipboard') }}</span>
+        <span class="notes-choice__text"><span class="notes-choice__title">Paste notes</span>
+          <span class="notes-choice__sub">A transcript or your own notes</span></span>
+      </button>
       <input type="file" id="notes-upload-input" accept="audio/*,video/mp4,.m4a,.mp3,.wav,.webm" hidden>
     </div>
     <form class="notes-paste" id="notes-paste-form" hidden>
       <label class="visually-hidden" for="notes-paste-text">Notes or transcript</label>
-      <textarea id="notes-paste-text" rows="6" placeholder="Paste a transcript or your notes from the meeting"></textarea>
+      <textarea id="notes-paste-text" class="slip__field-input" rows="6" placeholder="Paste a transcript or your notes from the meeting"></textarea>
       <div class="notes-paste__row">
-        <label class="visually-hidden" for="notes-paste-meeting">Meeting</label>
-        <select id="notes-paste-meeting"></select>
+        <label class="recbar__for"><span>For</span>
+          <select id="notes-paste-meeting" class="slip__field-input"></select>
+        </label>
         <button class="btn btn--sign" type="submit">Write up</button>
       </div>
     </form>
+    <p class="notes-list-title" id="notes-list-title">Notes</p>
     <ul class="modal__list rows" id="notes-list"></ul>
   </div>
   <div class="modal" id="memory" hidden role="dialog" aria-labelledby="memory-title">

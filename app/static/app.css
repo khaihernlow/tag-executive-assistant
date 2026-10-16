@@ -1026,36 +1026,60 @@ svg.icon { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: ro
 /* ══ Meeting notes ════════════════════════════════════════════════════════════ */
 .pill--notes { background: var(--sage-wash); color: var(--sage); }
 
-/* Recording: a bar under the assistant's header, red only for the live dot */
+/* Recording: a band under the assistant's header, red only for the live dot */
 #record-btn.is-recording { color: var(--pencil); background: var(--pencil-wash); }
-.recbar {
-  position: absolute; top: 64px; left: 50%; transform: translateX(-50%); z-index: 6;
-  display: flex; align-items: center; gap: var(--s3); width: min(760px, calc(100% - 2 * var(--s4)));
-  padding: var(--s2) var(--s2) var(--s2) var(--s4); box-sizing: border-box;
-  background: var(--surface); border: 1px solid var(--rule); border-radius: var(--r-lg);
-  box-shadow: 0 6px 20px rgba(20, 23, 28, 0.10);
+.recbar { flex: none; padding: var(--s2) var(--s4) 0; }
+@media (min-width: 1024px) {
+  .recbar { padding: var(--s2) var(--s6) 0; }
+  .sheet .recbar.chat-only { display: block; }
+  .sheet .recbar.chat-only[hidden] { display: none; }
 }
-.recbar__dot { flex: none; width: 10px; height: 10px; border-radius: 50%; background: var(--pencil); animation: rec-pulse 1.4s ease-in-out infinite; }
+.recbar__inner {
+  max-width: 760px; margin: 0 auto; padding: var(--s3) var(--s3) var(--s3) var(--s4);
+  display: grid; gap: var(--s2);
+  background: var(--surface); border: 1px solid var(--rule); border-radius: var(--r-lg);
+}
+.recbar__row { display: flex; align-items: center; gap: var(--s3); }
+.recbar__live { display: inline-flex; align-items: center; gap: var(--s2); font-size: 13px; font-weight: 600; color: var(--pencil); }
+.recbar__dot { width: 10px; height: 10px; border-radius: 50%; background: var(--pencil); animation: rec-pulse 1.4s ease-in-out infinite; }
 @keyframes rec-pulse { 50% { opacity: 0.35; } }
 @media (prefers-reduced-motion: reduce) { .recbar__dot { animation: none; } }
-.recbar__time { font-variant-numeric: tabular-nums; font-weight: 600; min-width: 3.2em; }
-.recbar__meeting { flex: 1; min-width: 0; }
-.recbar .btn { flex: none; padding: 0 var(--s3); }
-.recbar__stop { display: inline-flex; align-items: center; gap: 6px; }
-.recbar__stop svg.icon { width: 12px; height: 12px; fill: currentColor; stroke: none; }
+.recbar__time { font: 600 20px/1 var(--sans); font-variant-numeric: tabular-nums; color: var(--ink); }
+.recbar__spacer { flex: 1; }
+.recbar__discard { color: var(--ink-faint); font-weight: 500; }
+.recbar__discard:hover { color: var(--pencil); }
+.recbar__stop { flex: none; min-height: 38px; padding: 0 var(--s4); }
+.recbar__stop svg.icon { width: 11px; height: 11px; fill: currentColor; stroke: none; }
+/* "For [meeting]": a label beside one of the app's own fields */
+.recbar__for { display: flex; align-items: center; gap: var(--s2); min-width: 0; flex: 1; }
+.recbar__for > span { flex: none; font-size: 13px; color: var(--ink-faint); }
+.recbar__for select { flex: 1; min-width: 0; min-height: 38px; padding-left: var(--s3); font-size: 14px; }
 @media (max-width: 480px) {
-  .recbar { flex-wrap: wrap; }
-  .recbar__meeting { order: 5; flex-basis: 100%; }
-  .recbar__discard { margin-left: auto; }
+  .recbar__word { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  .recbar__row { gap: var(--s2); }
 }
 
-/* The notes list (a pop-up like Recent) */
-.notes-modal__actions { display: flex; flex-wrap: wrap; gap: var(--s1); padding: var(--s2) var(--s3) 0; }
-.notes-paste { display: grid; gap: var(--s2); padding: var(--s2) var(--s4) var(--s1); }
-.notes-paste textarea { width: 100%; box-sizing: border-box; resize: vertical; min-height: 120px; }
-.notes-paste__row { display: flex; gap: var(--s2); }
-.notes-paste__row select { flex: 1; min-width: 0; }
-.notes-paste__row .btn { flex: none; }
+/* The notes pop-up: two clear choices, then the list */
+.notes-choices { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s2); padding: var(--s3) var(--s3) 0; }
+.notes-choice {
+  display: flex; align-items: center; gap: var(--s3); padding: var(--s3); text-align: left; cursor: pointer;
+  border: 1px solid var(--rule); border-radius: var(--r-md); background: var(--paper); color: var(--ink); font: inherit;
+}
+.notes-choice:hover, .notes-choice[aria-expanded="true"] { background: var(--sunken); border-color: var(--rule-strong); }
+.notes-choice:disabled { opacity: 0.6; cursor: progress; }
+.notes-choice__icon { flex: none; display: grid; place-items: center; width: 34px; height: 34px; border-radius: var(--r-sm);
+                      background: var(--surface); color: var(--ink-soft); border: 1px solid var(--rule-soft); }
+.notes-choice__icon svg.icon { width: 17px; height: 17px; }
+.notes-choice__text { display: flex; flex-direction: column; min-width: 0; }
+.notes-choice__title { font-size: 14px; font-weight: 600; }
+.notes-choice__sub { font-size: 12px; color: var(--ink-faint); }
+@media (max-width: 480px) { .notes-choices { grid-template-columns: 1fr; } }
+.notes-paste { display: grid; gap: var(--s2); padding: var(--s3) var(--s3) 0; }
+.notes-paste textarea { box-sizing: border-box; resize: vertical; min-height: 130px; padding: var(--s3); font-size: 14px; line-height: 1.5; }
+.notes-paste__row { display: flex; gap: var(--s2); align-items: center; }
+.notes-paste__row .btn { flex: none; min-height: 38px; }
+.notes-list-title { margin: var(--s4) var(--s4) 0; font-size: 11px; font-weight: 600; letter-spacing: 0.08em;
+                    text-transform: uppercase; color: var(--ink-faint); }
 
 /* The notes page */
 .notes-actions > li { display: flex; flex-direction: column; gap: 2px; }

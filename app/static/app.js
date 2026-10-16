@@ -1700,7 +1700,7 @@ async function loadNotesList(query) {
     if (seq !== notesSeq) return;
     if (!notes.length) {
       list.replaceChildren(el("li", { class: "itinerary__empty",
-        text: query ? `No notes mention \u201c${query}\u201d.` : "No notes yet. Record a meeting, upload a recording or paste a transcript." }));
+        text: query ? `No notes mention \u201c${query}\u201d.` : "No notes yet. Tap Record during a meeting, or use one of the options above." }));
       return;
     }
     list.replaceChildren(...notes.map((n) => el("li", {},
@@ -1718,6 +1718,7 @@ function showNotes() {
   openPopover("notes");
   $("#notes-search").value = "";
   $("#notes-paste-form").hidden = true;
+  $("#notes-paste").setAttribute("aria-expanded", "false");
   $("#notes-list").replaceChildren();
   loadNotesList("");
 }
@@ -1731,6 +1732,7 @@ $("#notes-search").addEventListener("input", (e) => {
 $("#notes-paste").addEventListener("click", () => {
   const form = $("#notes-paste-form");
   form.hidden = !form.hidden;
+  $("#notes-paste").setAttribute("aria-expanded", String(!form.hidden));
   if (!form.hidden) { meetingOptions($("#notes-paste-meeting"), false); $("#notes-paste-text").focus(); }
 });
 $("#notes-paste-form").addEventListener("submit", async (e) => {
@@ -1766,7 +1768,7 @@ $("#notes-upload-input").addEventListener("change", async (e) => {
   if (!file) return;
   const button = $("#notes-upload");
   button.disabled = true;
-  button.querySelector("span").textContent = "Uploading\u2026";
+  button.querySelector(".notes-choice__title").textContent = "Uploading\u2026";
   try {
     const note = await uploadRecording(file, file.name, "");
     openNote(note.id);
@@ -1774,7 +1776,7 @@ $("#notes-upload-input").addEventListener("change", async (e) => {
     $("#notes-list").prepend(el("li", { class: "error", text: `Couldn't upload: ${err.message}` }));
   } finally {
     button.disabled = false;
-    button.querySelector("span").textContent = "Upload a recording";
+    button.querySelector(".notes-choice__title").textContent = "Upload a recording";
   }
 });
 
