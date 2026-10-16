@@ -31,6 +31,8 @@ from connectors.graph import GraphClient
 from connectors.teams import Teams
 from agent.lunch import Lunch
 from agent.mealeo_order import fill_checkout
+from agent.notes import notes_tools
+from connectors.azure_speech import AzureSpeech
 from llm.hatzai import HatzAIProvider
 from app.worker import Worker
 from store.db import Store
@@ -73,6 +75,7 @@ def build_services() -> Services:
         + mail_tools(graph)
         + scheduling_tools(graph, memory)
         + memory_tools(memory)
+        + notes_tools(store)
         + junk_tools(graph, fast_llm, actions, store)
         + [create_event_tool(graph, actions)]
         + change_tools(graph, actions)
@@ -86,5 +89,5 @@ def build_services() -> Services:
     assistant = Assistant(llm, registry, store, actions, memory)
     lunch = Lunch(graph, Teams(own, os.environ["ASSISTANT_ACCOUNT"], store), llm, store, checkout=fill_checkout) if own else None
     worker = Worker(graph, llm, store, searcher=llm, fast_llm=fast_llm, actions=actions, autotask=directory,
-                    linkedin=linkedin, lunch=lunch)
+                    linkedin=linkedin, lunch=lunch, speech=AzureSpeech.from_env())
     return Services(graph, store, actions, assistant, memory, worker, llm, directory)

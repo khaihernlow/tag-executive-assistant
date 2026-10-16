@@ -103,6 +103,9 @@ class Assistant:
             if topic and topic.get("brief"):
                 row = self.store.get_brief(topic["brief"])
                 title = f"Brief: {row['subject']}" if row else title
+            if topic and topic.get("note"):
+                note = self.store.get_note(topic["note"])
+                title = f"Notes: {note['title']}" if note else title
             conversation_id = self.store.create_conversation(title=title, topic=topic)
             conversation = self.store.get_conversation(conversation_id)
         # Files first, then the question about them.
@@ -169,7 +172,17 @@ class Assistant:
         yield {"type": "done", **self._finish(text, conversation, result, files)}
 
     def _topic_section(self, topic: dict | None) -> str:
-        """A conversation opened from a brief starts with that brief in view."""
+        """A conversation opened from a brief (or a meeting's notes) starts with it in view."""
+        if topic and topic.get("note"):
+            note = self.store.get_note(topic["note"])
+            if not note:
+                return ""
+            return ("This conversation is about one meeting's notes. Its write-up and transcript are below; "
+                    "[L12]-style labels are transcript lines. Answer from them first; use tools for anything "
+                    "they don't cover (to draft the follow-up email, check the calendar, and so on).\n"
+                    + json.dumps({"title": note["title"], "when": note.get("started_at"), "people": note.get("people"),
+                                  "notes": note.get("digest")}, ensure_ascii=False)
+                    + "\nTranscript:\n" + (note.get("transcript") or "")[:60000])
         if not topic or not topic.get("brief"):
             return ""
         row = self.store.get_brief(topic["brief"])

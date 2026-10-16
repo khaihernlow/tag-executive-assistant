@@ -21,6 +21,11 @@
   <!-- Icons: Lucide (lucide.dev, ISC). One set, drawn the same way everywhere. -->
   <svg width="0" height="0" style="position:absolute" aria-hidden="true">
     <symbol id="i-file-text" viewBox="0 0 24 24"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/></symbol>
+    <symbol id="i-mic" viewBox="0 0 24 24"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><path d="M12 19v3"/></symbol>
+    <symbol id="i-notebook-pen" viewBox="0 0 24 24"><path d="M13.4 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7.4"/><path d="M2 6h4"/><path d="M2 10h4"/><path d="M2 14h4"/><path d="M2 18h4"/><path d="M21.378 5.626a1 1 0 1 0-3.004-3.004l-5.01 5.012a2 2 0 0 0-.506.854l-.837 2.87a.5.5 0 0 0 .62.62l2.87-.837a2 2 0 0 0 .854-.506z"/></symbol>
+    <symbol id="i-upload" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m17 8-5-5-5 5"/><path d="M12 3v12"/></symbol>
+    <symbol id="i-square" viewBox="0 0 24 24"><rect width="14" height="14" x="5" y="5" rx="2"/></symbol>
+    <symbol id="i-clipboard" viewBox="0 0 24 24"><rect width="8" height="4" x="8" y="2" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/></symbol>
     <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
     <symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="M12 5v14"/></symbol>
     <symbol id="i-arrow-up" viewBox="0 0 24 24"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></symbol>
@@ -111,6 +116,14 @@
         <header class="pane-head pane-head--chat chat-only">
           <h2 class="pane-head__title pane-head__title--chat" id="chat-title">New chat</h2>
           <div class="pane-head__actions">
+            <button class="tool-btn" id="record-btn" type="button" title="Record a meeting: notes are written up afterwards">
+              {{ icon('mic') }}
+              <span>Record</span>
+            </button>
+            <button class="tool-btn" id="notes-btn" type="button" aria-expanded="false" aria-controls="notes">
+              {{ icon('notebook-pen') }}
+              <span>Notes</span>
+            </button>
             <button class="tool-btn" id="recent-btn" type="button" aria-expanded="false" aria-controls="recent">
               {{ icon('history') }}
               <span>Recent</span>
@@ -182,6 +195,41 @@
           </div>
         </div>
 
+        <!-- While a meeting is being recorded -->
+        <div class="recbar" id="recbar" hidden role="status" aria-live="polite">
+          <span class="recbar__dot" aria-hidden="true"></span>
+          <span class="recbar__time" id="rec-time">0:00</span>
+          <label class="visually-hidden" for="rec-meeting">Meeting</label>
+          <select id="rec-meeting" class="recbar__meeting"></select>
+          <button class="btn recbar__discard" id="rec-discard" type="button">Discard</button>
+          <button class="btn btn--sign recbar__stop" id="rec-stop" type="button">{{ icon('square') }}<span>Stop &amp; save</span></button>
+        </div>
+
+        <!-- Meeting notes: same place as a brief -->
+        <div class="overlay notesheet" id="notesheet" hidden role="dialog" aria-modal="true" aria-labelledby="ns-title">
+          <header class="pane-head overlay__head">
+            <div class="overlay__lead">
+              <button class="tool-btn overlay__close" id="ns-close" type="button" aria-label="Close" title="Close (Esc)">{{ icon('x') }}</button>
+              <span class="overlay__label">Meeting notes</span>
+            </div>
+            <span class="briefsheet__age" id="ns-source"></span>
+          </header>
+          <div class="overlay__body briefsheet__body">
+            <h2 class="briefsheet__title" id="ns-title"></h2>
+            <p class="briefsheet__when" id="ns-when"></p>
+            <div id="ns-content"></div>
+          </div>
+          <form class="composer briefsheet__foot" id="ns-foot" autocomplete="off" hidden>
+            <div class="composer__box">
+              <div class="composer__row">
+                <label class="visually-hidden" for="ns-input">Ask about this meeting</label>
+                <textarea id="ns-input" rows="1" placeholder="Ask about this meeting…" enterkeyhint="send"></textarea>
+                <button class="send" id="ns-send" type="submit" aria-label="Ask" disabled>{{ icon('arrow-up') }}</button>
+              </div>
+            </div>
+          </form>
+        </div>
+
         <!-- Meeting brief: same place as a detail -->
         <div class="overlay briefsheet" id="briefsheet" hidden role="dialog" aria-modal="true" aria-labelledby="bs-title">
           <header class="pane-head overlay__head">
@@ -244,6 +292,29 @@
       <button class="link-btn" id="recent-close" type="button">Close</button>
     </div>
     <ul class="modal__list rows" id="recent-list"></ul>
+  </div>
+  <div class="modal notes-modal" id="notes" hidden role="dialog" aria-label="Meeting notes">
+    <div class="modal__search">
+      {{ icon('search') }}
+      <label class="visually-hidden" for="notes-search">Search notes</label>
+      <input id="notes-search" type="search" placeholder="Search notes" autocomplete="off" enterkeyhint="search">
+      <button class="link-btn" id="notes-close" type="button">Close</button>
+    </div>
+    <div class="notes-modal__actions">
+      <button class="tool-btn" id="notes-upload" type="button">{{ icon('upload') }}<span>Upload a recording</span></button>
+      <button class="tool-btn" id="notes-paste" type="button">{{ icon('clipboard') }}<span>Paste notes or a transcript</span></button>
+      <input type="file" id="notes-upload-input" accept="audio/*,video/mp4,.m4a,.mp3,.wav,.webm" hidden>
+    </div>
+    <form class="notes-paste" id="notes-paste-form" hidden>
+      <label class="visually-hidden" for="notes-paste-text">Notes or transcript</label>
+      <textarea id="notes-paste-text" rows="6" placeholder="Paste a transcript or your notes from the meeting"></textarea>
+      <div class="notes-paste__row">
+        <label class="visually-hidden" for="notes-paste-meeting">Meeting</label>
+        <select id="notes-paste-meeting"></select>
+        <button class="btn btn--sign" type="submit">Write up</button>
+      </div>
+    </form>
+    <ul class="modal__list rows" id="notes-list"></ul>
   </div>
   <div class="modal" id="memory" hidden role="dialog" aria-labelledby="memory-title">
     <div class="modal__head">

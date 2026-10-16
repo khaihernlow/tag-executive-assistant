@@ -1022,3 +1022,47 @@ svg.icon { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: ro
 .lunch__mealeo { margin-top: var(--s3); padding-top: var(--s3); border-top: 1px solid var(--rule); }
 .lunch__mealeo-total { display: flex; justify-content: space-between; margin: 0; font-size: 15px; }
 .lunch__mealeo .lunch__note-line { margin-top: var(--s1); }
+
+/* ══ Meeting notes ════════════════════════════════════════════════════════════ */
+.pill--notes { background: var(--sage-wash); color: var(--sage); }
+
+/* Recording: a bar under the assistant's header, red only for the live dot */
+#record-btn.is-recording { color: var(--pencil); background: var(--pencil-wash); }
+.recbar {
+  position: absolute; top: 64px; left: 50%; transform: translateX(-50%); z-index: 6;
+  display: flex; align-items: center; gap: var(--s3); width: min(760px, calc(100% - 2 * var(--s4)));
+  padding: var(--s2) var(--s2) var(--s2) var(--s4); box-sizing: border-box;
+  background: var(--surface); border: 1px solid var(--rule); border-radius: var(--r-lg);
+  box-shadow: 0 6px 20px rgba(20, 23, 28, 0.10);
+}
+.recbar__dot { flex: none; width: 10px; height: 10px; border-radius: 50%; background: var(--pencil); animation: rec-pulse 1.4s ease-in-out infinite; }
+@keyframes rec-pulse { 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) { .recbar__dot { animation: none; } }
+.recbar__time { font-variant-numeric: tabular-nums; font-weight: 600; min-width: 3.2em; }
+.recbar__meeting { flex: 1; min-width: 0; }
+.recbar .btn { flex: none; padding: 0 var(--s3); }
+.recbar__stop { display: inline-flex; align-items: center; gap: 6px; }
+.recbar__stop svg.icon { width: 12px; height: 12px; fill: currentColor; stroke: none; }
+@media (max-width: 480px) {
+  .recbar { flex-wrap: wrap; }
+  .recbar__meeting { order: 5; flex-basis: 100%; }
+  .recbar__discard { margin-left: auto; }
+}
+
+/* The notes list (a pop-up like Recent) */
+.notes-modal__actions { display: flex; flex-wrap: wrap; gap: var(--s1); padding: var(--s2) var(--s3) 0; }
+.notes-paste { display: grid; gap: var(--s2); padding: var(--s2) var(--s4) var(--s1); }
+.notes-paste textarea { width: 100%; box-sizing: border-box; resize: vertical; min-height: 120px; }
+.notes-paste__row { display: flex; gap: var(--s2); }
+.notes-paste__row select { flex: 1; min-width: 0; }
+.notes-paste__row .btn { flex: none; }
+
+/* The notes page */
+.notes-actions > li { display: flex; flex-direction: column; gap: 2px; }
+.notes-actions__meta { display: flex; gap: var(--s2); font-size: 13px; color: var(--ink-faint); }
+.notes-due { color: var(--brass); font-weight: 600; }
+.transcript { list-style: none; margin: var(--s2) 0 0; padding: 0; font-size: 14px; line-height: 1.55; }
+.transcript li { display: grid; grid-template-columns: 3.2em 1fr; column-gap: var(--s2); padding: 3px 0; }
+.transcript__time { grid-row: span 2; color: var(--ink-ghost); font-variant-numeric: tabular-nums; font-size: 12px; padding-top: 2px; }
+.transcript__who { font-weight: 600; font-size: 13px; color: var(--ink-soft); }
+.transcript li > span:last-child { grid-column: 2; }

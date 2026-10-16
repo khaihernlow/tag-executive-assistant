@@ -135,6 +135,14 @@ class GraphClient:
         if not resp.ok:
             raise GraphError(f"DELETE {url} failed ({resp.status_code}): {_error_text(resp)}", resp.status_code)
 
+    def get_text(self, path: str, params: dict[str, Any] | None = None) -> str:
+        """A text body (e.g. a Teams transcript as WebVTT)."""
+        url = f"{GRAPH_URL}{path}"
+        resp = self.session.get(url, params=params, headers=self._headers(None), timeout=self.timeout * 2)
+        if not resp.ok:
+            raise GraphError(f"GET {url} failed ({resp.status_code}): {_error_text(resp)}", resp.status_code)
+        return resp.text
+
     def get_bytes(self, path: str, max_bytes: int = 15_000_000) -> bytes:
         """Raw content (e.g. an attachment's `$value`), refusing anything huge."""
         url = f"{GRAPH_URL}{path}"

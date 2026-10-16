@@ -99,6 +99,24 @@ CREATE TABLE IF NOT EXISTS uploads (
     created_at  TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS notes (
+    id          TEXT PRIMARY KEY,
+    kind        TEXT NOT NULL,          -- meeting (a transcript, summarised) | quick (a line Dave asked to keep)
+    title       TEXT NOT NULL,
+    event_id    TEXT,                   -- the calendar meeting it belongs to, when known
+    started_at  TEXT,                   -- ISO, when the meeting (or note) happened
+    people      TEXT,                   -- JSON [{"name", "email"}]: who was there / who it's about
+    source      TEXT NOT NULL,          -- teams | recording | pasted | typed
+    audio_path  TEXT,                   -- a recording waiting to be (or that was) transcribed
+    transcript  TEXT,                   -- numbered lines "[L12] Speaker: text", what the summary cites
+    status      TEXT NOT NULL,          -- waiting_transcript | transcribing | summarizing | ready | failed
+    digest      TEXT,                   -- JSON: headline, summary, decisions, action items, open questions
+    error       TEXT,
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_notes_status ON notes(status, created_at);
+
 CREATE TABLE IF NOT EXISTS state (
     key         TEXT PRIMARY KEY,       -- small bits of worker state, e.g. the junk sweep checkpoint
     value       TEXT NOT NULL
@@ -112,7 +130,7 @@ CREATE TABLE IF NOT EXISTS memory (
 );
 """
 
-_JSON_FIELDS = {"llm_messages", "display", "payload", "result", "value", "brief", "topic", "request"}
+_JSON_FIELDS = {"llm_messages", "display", "payload", "result", "value", "brief", "topic", "request", "people", "digest"}
 
 
 def now_iso() -> str:
@@ -159,6 +177,66 @@ class Store:
             cursor = self._conn.execute(sql, params)
             self._conn.commit()
             return cursor
+
+    # ── notes (meetings and quick notes) ────────────────────────────────────
+
+    _NOTE_FIELDS = ("kind", "title", "event_id", "started_at", "people", "source", "audio_path", "transcript",
+                    "status", "digest", "error")
+
+    def add_note(self, **fields: Any) -> str:
+        nid = uuid.uuid4().hex
+        stamp = now_iso()
+        row = {k: fields.get(k) for k in self._NOTE_FIELDS}
+        row["people"] = json.dumps(row["people"] or [])
+        row["digest"] = json.dumps(row["digest"]) if row["digest"] is not None else None
+        self._execute(f"INSERT INTO notes (id, {', '.join(self._NOTE_FIELDS)}, created_at, updated_at) "
+                      f"VALUES (?, {', '.join('?' for _ in self._NOTE_FIELDS)}, ?, ?)",
+                      (nid, *row.values(), stamp, stamp))
+        return nid
+
+    def update_note(self, nid: str, **fields: Any) -> None:
+        sets = {k: (json.dumps(v) if k in ("people", "digest") and v is not None else v)
+                for k, v in fields.items() if k in self._NOTE_FIELDS}
+        if sets:
+            self._execute(f"UPDATE notes SET {', '.join(f'{k} = ?' for k in sets)}, updated_at = ? WHERE id = ?",
+                          (*sets.values(), now_iso(), nid))
+
+    def get_note(self, nid: str) -> dict[str, Any] | None:
+        return self._row(self._execute("SELECT * FROM notes WHERE id = ?", (nid,)).fetchone())
+
+    def notes_waiting(self, statuses: tuple[str, ...]) -> list[dict[str, Any]]:
+        marks = ", ".join("?" for _ in statuses)
+        rows = self._execute(f"SELECT * FROM notes WHERE status IN ({marks}) ORDER BY created_at", statuses).fetchall()
+        return [self._row(r) for r in rows]
+
+    def note_for_event(self, event_id: str) -> dict[str, Any] | None:
+        return self._row(self._execute("SELECT * FROM notes WHERE event_id = ? AND kind = 'meeting' ORDER BY created_at DESC",
+                                       (event_id,)).fetchone())
+
+    def list_notes(self, query: str = "", limit: int = 50) -> list[dict[str, Any]]:
+        """Newest first; with a query, notes whose title, people, digest or transcript mention it."""
+        if not query.strip():
+            rows = self._execute("SELECT * FROM notes ORDER BY COALESCE(started_at, created_at) DESC LIMIT ?", (limit,)).fetchall()
+        else:
+            needle = query.strip()
+            like = "%" + needle.replace("!", "!!").replace("%", "!%").replace("_", "!_") + "%"
+            rows = self._execute(
+                "SELECT * FROM notes WHERE title LIKE ? ESCAPE '!' OR people LIKE ? ESCAPE '!' OR digest LIKE ? ESCAPE '!' "
+                "OR transcript LIKE ? ESCAPE '!' ORDER BY COALESCE(started_at, created_at) DESC LIMIT ?",
+                (like, like, like, like, limit)).fetchall()
+        return [self._row(r) for r in rows]
+
+    def notes_with_people(self, emails: list[str], limit: int = 5) -> list[dict[str, Any]]:
+        """Ready notes that involved any of these people, newest first (for a brief: "last time...")."""
+        wanted = {e.lower() for e in emails if e}
+        out = []
+        for row in self._execute("SELECT * FROM notes WHERE status = 'ready' ORDER BY COALESCE(started_at, created_at) DESC").fetchall():
+            note = self._row(row)
+            if wanted & {(p.get("email") or "").lower() for p in note.get("people") or []}:
+                out.append(note)
+                if len(out) >= limit:
+                    break
+        return out
 
     # ── files attached in chat ──────────────────────────────────────────────
 

@@ -154,7 +154,7 @@ function updateEmptyState() {
 
 // ── the right side (desktop) / full screen (phone): one panel at a time ───────
 
-const PANELS = ["detail", "briefsheet"];
+const PANELS = ["detail", "briefsheet", "notesheet"];
 
 function closePanels(except = "") {
   for (const id of PANELS) {
@@ -162,13 +162,14 @@ function closePanels(except = "") {
     $(`#${id}`).hidden = true;
     if (id === "detail") { $("#detail-body").replaceChildren(); markOpen(null); }
     if (id === "briefsheet") { openEvent = null; $("#source").hidden = true; }
+    if (id === "notesheet") { openNoteId = null; clearTimeout(notePoll); }
   }
 }
 
 // ── Recent and Remembered: a pop-up near the top; nothing behind it moves ──
 
 function closePopovers() {
-  for (const id of ["recent", "memory", "source"]) {
+  for (const id of ["recent", "memory", "source", "notes"]) {
     $(`#${id}`).hidden = true;
     $(`#${id}-btn`)?.setAttribute("aria-expanded", "false");
   }
@@ -309,6 +310,7 @@ async function loadToday() {
     const done = $("#done-today");
     done.hidden = !day.done_today;
     withMarks(done, `\u2713 ${day.done_today} done today`);
+    todayEvents = day.events;
     renderItinerary(day.events, isToday ? "today" : day.agenda_title.toLowerCase());
     renderNext(day.events, isToday ? "" : day.agenda_title);
     renderNeeds(day.pending.filter((a) => !["reply_email", "book_meeting"].includes(a.kind)),
@@ -337,15 +339,16 @@ function renderItinerary(events, when) {
     if (e.now) classes.push("stop--now");
     if (e.show_as === "tentative") classes.push("stop--tentative");
     const meta = [e.location, e.show_as === "tentative" ? "tentative" : ""].filter(Boolean).join(" · ");
-    const pill = e.brief === "ready" ? el("span", { class: "pill pill--brief", text: "Brief" })
+    const pill = e.note ? el("span", { class: "pill pill--notes", text: e.note.status === "ready" ? "Notes" : "Notes\u2026" })
+      : e.brief === "ready" ? el("span", { class: "pill pill--brief", text: "Brief" })
       : e.brief === "preparing" ? el("span", { class: "pill", text: "Preparing…" }) : null;
     const join = joinable(e)
       ? el("a", { class: "join", href: e.join_url, target: "_blank", rel: "noopener", text: "Join",
                   onclick: (ev) => ev.stopPropagation() })
       : null;
     return el("li", { class: classes.join(" ") },
-      el("button", { class: "stop__open", type: "button", "aria-label": `${e.subject}, ${e.start}. Open brief`,
-                     onclick: () => openBrief(e) },
+      el("button", { class: "stop__open", type: "button", "aria-label": `${e.subject}, ${e.start}. ${e.note ? "Open notes" : "Open brief"}`,
+                     onclick: () => (e.note ? openNote(e.note.id) : openBrief(e)) },
         el("span", { class: "stop__time", text: e.start }),
         el("span", { class: "stop__what" },
           el("span", { class: "stop__subject", text: e.subject }),
@@ -374,6 +377,11 @@ function sourceIndex(material) {
     index.set(a.label, { kind: a.label, icon: "paperclip", title: a.name, from: a.from_email, meta: `Attached to ${a.from_email}`, excerpt: a.excerpt,
                          link: a.web_link, linkText: "Open the email in Outlook" });
   }
+  for (const n of m.notes || []) {
+    index.set(n.label, { kind: n.label, icon: "notebook-pen", title: n.title, meta: `Meeting notes \u00b7 ${n.when}`,
+                         excerpt: [n.headline, ...(n.points || []).map((p) => `\u2022 ${p}`)].filter(Boolean).join("\n"),
+                         noteId: n.id, linkText: "Open the notes" });
+  }
   for (const w of m.web || []) {
     let host = w.url;
     try { host = new URL(w.url).hostname.replace(/^www\./, ""); } catch { /* keep raw */ }
@@ -383,7 +391,7 @@ function sourceIndex(material) {
 }
 
 function showSource(label) {
-  const src = briefSources.get(label);
+  const src = briefSources.get(label) || lineSource(label);
   if (!src) return;
   $("#src-icon").replaceChildren(icon(src.icon || "mail"));
   $("#src-kind").textContent = src.kind;
@@ -398,8 +406,19 @@ function showSource(label) {
   $("#src-excerpt").textContent = src.excerpt
     || (calendarReply ? "A calendar reply, with no message." : "No message text. Open it to see the whole email.");
   $("#src-excerpt").classList.toggle("source__excerpt--none", !src.excerpt);
-  $("#src-foot").hidden = !src.link;
-  if (src.link) { $("#src-open").href = src.link; $("#src-open-text").textContent = src.linkText; }
+  $("#src-foot").hidden = !src.link && !src.noteId;
+  const open = $("#src-open");
+  open.onclick = null;
+  if (src.noteId) {   // notes open here, not in another tab
+    open.href = "#";
+    open.removeAttribute("target");
+    open.onclick = (ev) => { ev.preventDefault(); closePopovers(); openNote(src.noteId); };
+    $("#src-open-text").textContent = src.linkText;
+  } else if (src.link) {
+    open.href = src.link;
+    open.setAttribute("target", "_blank");
+    $("#src-open-text").textContent = src.linkText;
+  }
   openPopover("source");
 }
 
@@ -407,11 +426,12 @@ $("#src-close").addEventListener("click", closePopovers);
 
 function cited(text) {
   // "[Email 2, Web 1]" becomes tappable chips that open the source; unknown labels stay plain.
-  const parts = String(text).split(/(\[(?:Invite|Email \d+|Attachment \d+|Web \d+)(?:,\s*(?:Invite|Email \d+|Attachment \d+|Web \d+))*\])/g);
+  const label = "(?:Invite|Email \\d+|Attachment \\d+|Web \\d+|Notes \\d+|L\\d+(?:\\s*-\\s*L?\\d+)?)";
+  const parts = String(text).split(new RegExp(`(\\[${label}(?:,\\s*${label})*\\])`, "g"));
   const out = [];
   for (const p of parts.filter(Boolean)) {
     if (!/^\[/.test(p)) { out.push(p); continue; }
-    out.push(el("span", { class: "cites" }, p.slice(1, -1).split(/,\s*/).map((label) => (briefSources.has(label)
+    out.push(el("span", { class: "cites" }, p.slice(1, -1).split(/,\s*/).map((label) => (briefSources.has(label) || lineSource(label)
       ? el("button", { class: "cite", type: "button", text: label, title: "Show this source", onclick: () => showSource(label) })
       : el("span", { class: "cite cite--plain", text: label })))));
   }
@@ -1512,6 +1532,333 @@ $("#recent-search").addEventListener("input", (e) => {
   searchTimer = setTimeout(() => loadRecent(e.target.value.trim()), 200);
 });
 
+// ── meeting notes ───────────────────────────────────────────────────────────────
+// Recorded in the app, uploaded, pasted, or (once allowed) from Teams; written up by the
+// assistant with every point citing the transcript line it came from.
+
+let todayEvents = [];
+let openNoteId = null;
+let openNote_ = null;
+let notePoll = null;
+
+const NOTE_STATUS = {
+  waiting_transcript: "Waiting to be transcribed",
+  transcribing: "Transcribing\u2026",
+  summarizing: "Writing up\u2026",
+  failed: "Couldn't write these up",
+};
+
+function noteStatusText(n) {
+  if (n.status === "waiting_transcript" && /speech-to-text key/.test(n.error || "")) {
+    return "Saved. It'll be transcribed once the speech-to-text service is set up.";
+  }
+  return NOTE_STATUS[n.status] || "";
+}
+
+// "L12" or "L18-L20": the transcript lines a note's point came from.
+function lineSource(label) {
+  const m = /^L(\d+)(?:\s*-\s*L?(\d+))?$/.exec(label || "");
+  if (!m || !openNote_ || !openNote_.transcript) return null;
+  const lines = openNote_.transcript.split("\n");
+  const from = Number(m[1]), to = Number(m[2] || m[1]);
+  if (from < 1 || to > lines.length || to < from) return null;
+  const strip = (l) => l.replace(/^\[L\d+\]\s*/, "");
+  return { kind: "Transcript", icon: "notebook-pen", title: from === to ? `Line ${from}` : `Lines ${from}\u2013${to}`,
+           meta: openNote_.title, excerpt: lines.slice(from - 1, to).map(strip).join("\n") };
+}
+
+function meetingOptions(select, preferNow = true) {
+  // Today's meetings, the one happening now (or next) chosen; or none.
+  const timed = todayEvents.filter((e) => !e.all_day);
+  const now = timed.find((e) => e.now) || (preferNow ? timed.find((e) => !e.past) : null) || null;
+  select.replaceChildren(el("option", { value: "", text: "Not a calendar meeting" }),
+    ...timed.map((e) => el("option", { value: e.id, text: `${e.start} \u00b7 ${e.subject}` })));
+  select.value = now ? now.id : "";
+}
+
+async function openNote(id) {
+  closePanels("notesheet");
+  closePopovers();
+  openNoteId = id;
+  $("#ns-title").textContent = "";
+  $("#ns-when").textContent = "";
+  $("#ns-source").textContent = "";
+  $("#ns-foot").hidden = true;
+  $("#ns-content").replaceChildren(el("div", { class: "skel-brief", "aria-label": "Loading the notes" },
+    ...Array.from({ length: 7 }, () => el("span", { class: "skel skel--row" }))));
+  $("#notesheet").hidden = false;
+  showTab("chat");
+  await loadNote(id);
+}
+
+async function loadNote(id) {
+  clearTimeout(notePoll);
+  let n;
+  try {
+    n = await api(`/api/notes/${encodeURIComponent(id)}`);
+  } catch (err) {
+    if (openNoteId === id) $("#ns-content").replaceChildren(el("p", { class: "error", text: `Couldn't load the notes: ${err.message}` }));
+    return;
+  }
+  if (openNoteId !== id) return;
+  // The agenda marks meetings that have notes: refresh it when a note is new or just finished.
+  if (n.event_id && (!openNote_ || openNote_.id !== n.id || openNote_.status !== n.status)) loadToday();
+  openNote_ = n;
+  briefSources = new Map();
+  renderNote(n);
+  if (["waiting_transcript", "transcribing", "summarizing"].includes(n.status) && !/speech-to-text key/.test(n.error || "")) {
+    notePoll = setTimeout(() => openNoteId === id && loadNote(id), 4000);
+  }
+}
+
+function dueLabel(iso) {
+  const d = new Date(`${iso}T12:00:00`);
+  return d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+}
+
+function renderNote(n) {
+  $("#ns-title").textContent = n.title;
+  const when = n.when ? new Date(n.when).toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "";
+  $("#ns-when").textContent = [when, (n.people || []).join(", ")].filter(Boolean).join(" \u00b7 ");
+  $("#ns-source").textContent = { teams: "From the Teams transcript", recording: "From a recording", pasted: "From pasted notes", typed: "Saved note" }[n.source] || "";
+  const content = [];
+  if (n.kind === "quick") {
+    content.push(el("p", { class: "bs-headline", text: n.text }));
+  } else if (n.status !== "ready") {
+    content.push(el("div", { class: "empty" },
+      el("p", { class: "empty__title", text: noteStatusText(n) }),
+      n.status === "failed" ? el("p", { class: "empty__text", text: n.error || "" }) : null,
+      n.status === "failed" ? el("div", { class: "empty__actions" }, el("button", { class: "btn btn--sign", type: "button", text: "Try again",
+        onclick: async () => { await api(`/api/notes/${encodeURIComponent(n.id)}/retry`, { method: "POST" }); loadNote(n.id); } })) : null));
+  } else {
+    content.push(el("p", { class: "bs-headline" }, ...cited(n.headline || "")));
+    const mine = (n.action_items || []).filter((a) => a.dave);
+    const others = (n.action_items || []).filter((a) => !a.dave);
+    const actions = (title, items) => items.length ? el("section", { class: "bsec" },
+      el("h3", { class: "bsec__title", text: title }),
+      el("ul", { class: "bsec__list notes-actions" }, items.map((a) => el("li", {},
+        el("span", {}, ...cited(a.what)),
+        el("span", { class: "notes-actions__meta" },
+          a.owner && !a.dave ? el("span", { text: a.owner }) : null,
+          a.due ? el("span", { class: "notes-due", text: `Due ${dueLabel(a.due)}` }) : a.due_text ? el("span", { text: a.due_text }) : null))))) : null;
+    content.push(actions("For you", mine), actions("Others' to-dos", others));
+    content.push(briefSection("Decisions", n.decisions), briefSection("Discussed", n.summary),
+                 briefSection("Still open", n.open_questions));
+  }
+  if (n.transcript) {
+    content.push(el("details", { class: "bsec bsources" },
+      el("summary", { class: "bsec__title" }, `Transcript \u00b7 ${n.transcript.split("\n").length} lines`, icon("chevron-down")),
+      el("ol", { class: "transcript" }, n.transcript.split("\n").map((line) => {
+        const m = /^\[L(\d+)\]\s*(?:(\d\d:\d\d)\s+)?(?:([^:]{1,40}):\s)?(.*)$/.exec(line) || [];
+        return el("li", { id: `line-${m[1]}` },
+          m[2] ? el("span", { class: "transcript__time", text: m[2] }) : null,
+          m[3] ? el("span", { class: "transcript__who", text: m[3] }) : null,
+          el("span", { text: m[4] || line }));
+      }))));
+  }
+  $("#ns-content").replaceChildren(...content.filter(Boolean));
+  $("#ns-foot").hidden = n.kind === "quick" || n.status !== "ready";
+}
+
+$("#ns-close").addEventListener("click", () => closePanels());
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("#notesheet").hidden) closePanels(); });
+
+// Asking about a meeting's notes: a conversation that starts with those notes in view.
+const nsInput = $("#ns-input");
+nsInput.addEventListener("input", () => {
+  nsInput.style.height = "auto";
+  nsInput.style.height = `${Math.min(nsInput.scrollHeight, 160)}px`;
+  $("#ns-send").disabled = !nsInput.value.trim();
+});
+nsInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); $("#ns-foot").requestSubmit(); }
+});
+$("#ns-foot").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const question = nsInput.value.trim();
+  if (!question || busy || !openNote_) return;
+  const note = openNote_;
+  nsInput.value = "";
+  closePanels();
+  conversationId = null;
+  writeStored(null);
+  thread.replaceChildren();
+  pendingTopic = { noteId: note.id, subject: note.title };
+  setTopic(note.title);
+  updateEmptyState();
+  send(question);
+});
+
+// The list: search, upload a recording, paste notes
+let notesSeq = 0;
+async function loadNotesList(query) {
+  const seq = ++notesSeq;
+  const list = $("#notes-list");
+  if (!list.children.length || !query) list.replaceChildren(...skeletonRows(4));
+  try {
+    const { notes } = await api(`/api/notes${query ? `?q=${encodeURIComponent(query)}` : ""}`);
+    if (seq !== notesSeq) return;
+    if (!notes.length) {
+      list.replaceChildren(el("li", { class: "itinerary__empty",
+        text: query ? `No notes mention \u201c${query}\u201d.` : "No notes yet. Record a meeting, upload a recording or paste a transcript." }));
+      return;
+    }
+    list.replaceChildren(...notes.map((n) => el("li", {},
+      el("button", { class: "row row--tap", type: "button", onclick: () => openNote(n.id) },
+        el("span", { class: "row__top" },
+          el("span", { class: "row__title", text: n.title }),
+          el("span", { class: "row__when", text: n.when ? ago(n.when) : "" })),
+        el("span", { class: "row__sub" }, ...marked(n.status === "ready" ? (n.headline || n.text || "") : noteStatusText(n), query))))));
+  } catch (err) {
+    if (seq === notesSeq) list.replaceChildren(el("li", { class: "error", text: `Couldn't load: ${err.message}` }));
+  }
+}
+
+function showNotes() {
+  openPopover("notes");
+  $("#notes-search").value = "";
+  $("#notes-paste-form").hidden = true;
+  $("#notes-list").replaceChildren();
+  loadNotesList("");
+}
+$("#notes-btn").addEventListener("click", () => ($("#notes").hidden ? showNotes() : closePopovers()));
+$("#notes-close").addEventListener("click", closePopovers);
+let notesTimer = null;
+$("#notes-search").addEventListener("input", (e) => {
+  clearTimeout(notesTimer);
+  notesTimer = setTimeout(() => loadNotesList(e.target.value.trim()), 200);
+});
+$("#notes-paste").addEventListener("click", () => {
+  const form = $("#notes-paste-form");
+  form.hidden = !form.hidden;
+  if (!form.hidden) { meetingOptions($("#notes-paste-meeting"), false); $("#notes-paste-text").focus(); }
+});
+$("#notes-paste-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const text = $("#notes-paste-text").value.trim();
+  if (!text) return;
+  const button = e.currentTarget.querySelector("button[type=submit]");
+  button.disabled = true;
+  try {
+    const note = await api("/api/notes", { method: "POST", body: JSON.stringify({ text, event_id: $("#notes-paste-meeting").value || null }) });
+    $("#notes-paste-text").value = "";
+    openNote(note.id);
+  } catch (err) {
+    e.currentTarget.append(el("p", { class: "error", text: err.message }));
+  } finally {
+    button.disabled = false;
+  }
+});
+
+async function uploadRecording(blob, name, eventId) {
+  const form = new FormData();
+  form.append("file", blob, name);
+  form.append("event_id", eventId || "");
+  const res = await fetch("/api/recordings", { method: "POST", body: form, credentials: "same-origin" });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.detail || res.statusText);
+  return body;
+}
+$("#notes-upload").addEventListener("click", () => $("#notes-upload-input").click());
+$("#notes-upload-input").addEventListener("change", async (e) => {
+  const file = e.target.files[0];
+  e.target.value = "";
+  if (!file) return;
+  const button = $("#notes-upload");
+  button.disabled = true;
+  button.querySelector("span").textContent = "Uploading\u2026";
+  try {
+    const note = await uploadRecording(file, file.name, "");
+    openNote(note.id);
+  } catch (err) {
+    $("#notes-list").prepend(el("li", { class: "error", text: `Couldn't upload: ${err.message}` }));
+  } finally {
+    button.disabled = false;
+    button.querySelector("span").textContent = "Upload a recording";
+  }
+});
+
+// Recording in the app: the phone (or laptop) mic, saved when Dave stops.
+let recorder = null;
+let recChunks = [];
+let recStarted = 0;
+let recTick = null;
+let recDiscarded = false;
+
+function recordingType() {
+  for (const t of ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg"]) {
+    if (window.MediaRecorder && MediaRecorder.isTypeSupported(t)) return t;
+  }
+  return "";
+}
+
+async function startRecording() {
+  if (!navigator.mediaDevices || !window.MediaRecorder) {
+    alert("This browser can't record audio. Upload a recording from Notes instead.");
+    return;
+  }
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch {
+    alert("The microphone isn't available. Allow microphone access for this site and try again.");
+    return;
+  }
+  const type = recordingType();
+  recorder = new MediaRecorder(stream, type ? { mimeType: type } : undefined);
+  recChunks = [];
+  recDiscarded = false;
+  recorder.ondataavailable = (e) => { if (e.data && e.data.size) recChunks.push(e.data); };
+  recorder.onstop = finishRecording;
+  recorder.start(10000);   // a chunk every 10s, so a long meeting isn't one huge buffer
+  recStarted = Date.now();
+  meetingOptions($("#rec-meeting"));
+  $("#recbar").hidden = false;
+  $("#record-btn").classList.add("is-recording");
+  $("#record-btn").setAttribute("aria-pressed", "true");
+  const tick = () => {
+    const s = Math.floor((Date.now() - recStarted) / 1000);
+    $("#rec-time").textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+  };
+  tick();
+  recTick = setInterval(tick, 1000);
+}
+
+function stopRecording(discard) {
+  if (!recorder) return;
+  recDiscarded = discard;
+  recorder.stop();
+  recorder.stream.getTracks().forEach((t) => t.stop());
+  clearInterval(recTick);
+}
+
+async function finishRecording() {
+  const type = recorder.mimeType || "audio/webm";
+  const eventId = $("#rec-meeting").value;
+  recorder = null;
+  $("#recbar").hidden = true;
+  $("#record-btn").classList.remove("is-recording");
+  $("#record-btn").removeAttribute("aria-pressed");
+  if (recDiscarded || !recChunks.length) return;
+  const blob = new Blob(recChunks, { type });
+  const ext = type.includes("mp4") ? "m4a" : type.includes("ogg") ? "ogg" : "webm";
+  try {
+    const note = await uploadRecording(blob, `recording.${ext}`, eventId);
+    openNote(note.id);
+  } catch (err) {
+    alert(`The recording couldn't be saved: ${err.message}`);
+  }
+}
+
+$("#record-btn").addEventListener("click", () => (recorder ? stopRecording(false) : startRecording()));
+$("#rec-stop").addEventListener("click", () => stopRecording(false));
+$("#rec-discard").addEventListener("click", () => {
+  if (confirm("Discard this recording?")) stopRecording(true);
+});
+window.addEventListener("beforeunload", (e) => {   // closing the page mid-meeting would lose it
+  if (recorder) { e.preventDefault(); e.returnValue = ""; }
+});
+
 // ── what the assistant remembers ───────────────────────────────────────────────────────────
 
 function closeMemory() {
@@ -1600,7 +1947,7 @@ async function send(text, files = null) {
   sendBtn.disabled = true;
   chatFiles.clear();
   showTab("chat");
-  if (!conversationId) setChatTitle(pendingTopic ? `Brief: ${pendingTopic.subject}` : shortTitle(text || files.map((f) => f.name).join(", ")));
+  if (!conversationId) setChatTitle(pendingTopic ? `${pendingTopic.noteId ? "Notes" : "Brief"}: ${pendingTopic.subject}` : shortTitle(text || files.map((f) => f.name).join(", ")));
   addNote(text, files);
   updateEmptyState();
 
@@ -1632,7 +1979,8 @@ async function send(text, files = null) {
       message: text,
       attachments: files.map((f) => f.id),
       conversation_id: conversationId,
-      brief_event_id: !conversationId && pendingTopic ? pendingTopic.eventId : null,
+      brief_event_id: !conversationId && pendingTopic ? pendingTopic.eventId || null : null,
+      note_id: !conversationId && pendingTopic ? pendingTopic.noteId || null : null,
     })) {
       if (event.type === "start") {
         conversationId = event.conversation_id;

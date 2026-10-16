@@ -13,6 +13,8 @@ Jobs (each cycle):
            slip. Learns from Dave's Junk folder and filed mail once a day.
   requests one inbox read; new mail that looks like "can we meet?" is classified
            by the fast model and shown on Today with suggested times.
+  notes    recordings transcribed (once there's an Azure Speech key), transcripts made into
+           meeting notes; also straight away when a recording or transcript arrives.
   lunch    its own loop (every 30s while waiting on Teams replies, else 2 min); Wednesdays
            7:00-14:00: the leadership lunch (agent/lunch.py) - ask Dan and
            Dom on Teams, read replies, fill in backups, total it up for Dave.
@@ -36,6 +38,7 @@ from agent.people import internal_domain
 from agent.filing import file_read_mail, learn_filing, learning_is_stale, suggest_rules
 from agent.junk import history_is_stale, learn_history, sweep_new
 from agent.requests import scan as scan_requests
+from agent.notes import process as notes_process
 
 log = logging.getLogger("assistant.worker")
 
@@ -46,7 +49,7 @@ LUNCH_REPLY_SECONDS = int(os.environ.get("LUNCH_REPLY_SECONDS", "30"))
 class Worker:
     def __init__(self, graph: Any, llm: Any, store: Any, interval: int = BRIEF_INTERVAL, searcher: Any = None,
                  fast_llm: Any = None, actions: Any = None, autotask: Any = None, linkedin: Any = None,
-                 lunch: Any = None) -> None:
+                 lunch: Any = None, speech: Any = None) -> None:
         self.graph, self.llm, self.store = graph, llm, store
         self.searcher = searcher  # web research for briefs; None skips it
         self.fast_llm = fast_llm  # quick classification (meeting requests); None skips the inbox scan
@@ -54,6 +57,7 @@ class Worker:
         self.autotask = autotask  # an opportunities Directory; None without Autotask credentials
         self.linkedin = linkedin  # LinkedIn backgrounds for briefs; None without an Apify token
         self.lunch = lunch        # Wednesday lunch; None without the assistant's own account
+        self.speech = speech      # Azure Speech for recordings; None until there's a key
         self.interval = interval
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
@@ -121,7 +125,22 @@ class Worker:
                         log.info("meeting requests found: %s", added)
                 except Exception:  # noqa: BLE001
                     log.exception("meeting request scan failed")
+            self.process_notes()
             self._stop.wait(self.interval)
+
+    def process_notes(self) -> int:
+        try:
+            done = notes_process(self.store, self.llm, self.speech)
+            if done:
+                log.info("meeting notes written: %s", done)
+            return done
+        except Exception:  # noqa: BLE001
+            log.exception("notes step failed")
+            return 0
+
+    def process_notes_now(self) -> None:
+        """A recording or transcript just arrived: don't make Dave wait for the next cycle."""
+        self._pool.submit(self.process_notes)
 
     def queue_briefs(self) -> int:
         """Queue every upcoming meeting that should have a brief; returns how many qualified."""

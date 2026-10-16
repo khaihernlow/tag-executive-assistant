@@ -190,8 +190,10 @@ BRIEF_PROMPT = """You prepare short meeting briefs for Dave, CEO of TAG Solution
 in Albany, NY). He reads them on his phone minutes before the meeting.
 
 Content
-- Use ONLY the material: the invite, emails, attachments and web findings. Never invent facts.
-- End each bullet with its source label(s) in brackets, e.g. "[Email 2]", "[Web 1]", "[Invite]".
+- Use ONLY the material: the invite, emails, attachments, web findings and earlier meeting notes. Never invent facts.
+- End each bullet with its source label(s) in brackets, e.g. "[Email 2]", "[Web 1]", "[Invite]", "[Notes 1]".
+- Earlier meeting notes ("Notes n") are what was said the last time Dave met these people. Use them for context,
+  and put anything still open from them (a promise, a question, a deadline) in prep.
 - Never tell Dave what he already knows: what TAG Solutions is or does, his own title, his own
   staff's roles, that he accepted the invite, which vendors TAG already uses. Background is ONLY about
   the outside people and companies, and only what matters for THIS meeting: skip generic facts about
@@ -212,8 +214,9 @@ _DASH = re.compile(r"\s*[—–]\s*|\s+-\s+")
 _RANGE = re.compile(r"(\d)\s*[–—]\s*(\d)")
 
 
-_GROUPED_CITE = re.compile(r"\[(Emails?|Attachments?|Web)\s+([\d,\s&and]+)\]")
-_CITE_KIND = {"emails": "Email", "email": "Email", "attachments": "Attachment", "attachment": "Attachment", "web": "Web"}
+_GROUPED_CITE = re.compile(r"\[(Emails?|Attachments?|Web|Notes)\s+([\d,\s&and]+)\]")
+_CITE_KIND = {"emails": "Email", "email": "Email", "attachments": "Attachment", "attachment": "Attachment", "web": "Web",
+              "notes": "Notes"}
 
 
 def _expand_citation(match: re.Match) -> str:
@@ -269,6 +272,8 @@ def material_record(event: Event, gathered: dict[str, Any]) -> dict[str, Any]:
             "web_link": a["web_link"], "excerpt": _excerpt(a["text"], 400),
         } for a in gathered["attachments"]],
         "web": [{"label": w["label"], "about": w["about"], "fact": w["fact"], "url": w["url"]} for w in gathered["web"]],
+        "notes": [{"label": n["label"], "id": n["id"], "title": n["title"], "when": n["when"], "headline": n["headline"],
+                   "points": n["points"][:4]} for n in gathered.get("notes") or []],
     }
 
 
@@ -279,6 +284,11 @@ def prepare_brief(graph: Any, llm: Any, store: Any, event: Event, force: bool = 
         return False
     try:
         gathered = gather(graph, event, searcher, linkedin, directory)
+        # What was said last time with these people (the outside ones, or everyone but Dave).
+        people = gathered["external"] or [a["email"] for a in gathered["event"]["attendees"]
+                                          if a["email"] and a["email"].lower() != graph.mailbox.lower()]
+        from agent.notes import earlier_notes
+        gathered["notes"] = earlier_notes(store, people) if hasattr(store, "notes_with_people") else []
         brief = write_brief(llm, gathered)
         brief["meeting"] = {"subject": event.subject, "when": fmt_local(event.start),
                             "ends": event.end.strftime("%I:%M %p").lstrip("0"), "location": event.location,

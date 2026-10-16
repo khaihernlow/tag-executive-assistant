@@ -1,12 +1,13 @@
 import json
 import os
 import threading
+import uuid
 from datetime import datetime, time, timedelta
 from pathlib import Path
 
 from authlib.integrations.starlette_client import OAuth, OAuthError
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -21,9 +22,10 @@ from agent.filing import filed_today, undo_filing
 from agent.junk import moved_today, undo as undo_junk
 from agent.changes import answer_invite, pending_invites
 from agent.requests import open_requests_view, propose_booking, propose_hold, propose_nudge, propose_reply
-from agent.calendar import agenda_day, local_zone, meeting_place, parse_event
+from agent.calendar import agenda_day, event_detail, local_zone, meeting_place, parse_event
 from agent.people import internal_domain
 from agent.emailtext import excerpt as email_excerpt
+from agent.notes import from_plain, new_meeting_note, note_view, number_lines
 from agent.lunch import order_anyway, skip_week as skip_lunch, today_view as lunch_view
 from agent.uploads import MAX_BYTES as MAX_UPLOAD_BYTES, UploadError, prepare as prepare_upload
 from connectors.graph import EVENT_FIELDS
@@ -154,6 +156,15 @@ class ChatIn(BaseModel):
     conversation_id: str | None = None
     attachments: list[str] = []  # ids from /api/uploads
     brief_event_id: str | None = None  # start a conversation about this meeting's brief
+    note_id: str | None = None         # ...or about one meeting's notes
+
+
+def _topic(body: "ChatIn") -> dict | None:
+    if body.brief_event_id:
+        return {"brief": body.brief_event_id}
+    if body.note_id:
+        return {"note": body.note_id}
+    return None
 
 
 def _agenda_events(svc, day, now) -> list[dict]:
@@ -209,6 +220,8 @@ def today(user: dict = Depends(require_auth), svc=Depends(services)):
     statuses = svc.store.brief_statuses([e["id"] for e in events if e["id"]])
     for e in events:
         e["brief"] = statuses.get(e["id"])
+        note = svc.store.note_for_event(e["id"]) if e["id"] and hasattr(svc.store, "note_for_event") else None
+        e["note"] = {"id": note["id"], "status": note["status"]} if note else None
     pending = [public_action(a) for a in svc.store.list_actions(status="pending", limit=20)]
     return {
         "date": now.strftime("%A, %b %d").replace(" 0", " "),
@@ -230,7 +243,7 @@ def today(user: dict = Depends(require_auth), svc=Depends(services)):
 @app.post("/api/chat")
 def chat(body: ChatIn, user: dict = Depends(require_auth), svc=Depends(services)):
     try:
-        topic = {"brief": body.brief_event_id} if body.brief_event_id else None
+        topic = _topic(body)
         return svc.assistant.chat(body.message, body.conversation_id, topic=topic, attachments=body.attachments)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -242,7 +255,7 @@ def chat_stream(body: ChatIn, user: dict = Depends(require_auth), svc=Depends(se
     discard_text, then done (or error)."""
     if not body.message.strip() and not body.attachments:
         raise HTTPException(status_code=400, detail="Empty message")
-    topic = {"brief": body.brief_event_id} if body.brief_event_id else None
+    topic = _topic(body)
 
     def lines():
         try:
@@ -283,6 +296,103 @@ def lunch_order_anyway(user: dict = Depends(require_auth), svc=Depends(services)
     if getattr(svc.worker, "lunch", None) is not None:
         svc.worker.lunch.tick()
     return {"lunch": lunch_view(svc.store)}
+
+
+# ── meeting notes ──
+
+RECORDINGS = os.environ.get("RECORDINGS_DIR", "data/recordings")
+AUDIO_TYPES = {"audio/webm": ".webm", "audio/ogg": ".ogg", "audio/mp4": ".m4a", "audio/x-m4a": ".m4a", "audio/m4a": ".m4a",
+               "audio/mpeg": ".mp3", "audio/mp3": ".mp3", "audio/wav": ".wav", "audio/x-wav": ".wav", "audio/aac": ".aac",
+               "video/mp4": ".mp4", "video/webm": ".webm"}
+MAX_RECORDING_BYTES = 300 * 1024 * 1024       # Azure fast transcription's own limit
+
+
+def _meeting(svc, event_id: str | None) -> dict | None:
+    """The calendar meeting a recording or transcript belongs to (its title and who was there)."""
+    if not event_id:
+        return None
+    try:
+        raw = svc.graph.get(f"/users/{svc.graph.mailbox}/events/{event_id}",
+                            {"$select": "id,subject,start,end,location,attendees,organizer,isAllDay,showAs,onlineMeeting,bodyPreview"},
+                            headers={"Prefer": f'outlook.timezone="{local_zone().key}"'})
+        return event_detail(parse_event(raw, local_zone())) | {"starts_at": raw["start"]["dateTime"][:16]}
+    except Exception:  # noqa: BLE001 - a note without its meeting is still a note
+        return None
+
+
+def _note_out(note: dict, full: bool = False) -> dict:
+    out = note_view(note, full=full) | {"error": note.get("error"), "source": note.get("source"),
+                                         "event_id": note.get("event_id")}
+    if full and note.get("transcript"):
+        out["transcript"] = note["transcript"]
+    return out
+
+
+@app.get("/api/notes")
+def list_notes(q: str = "", user: dict = Depends(require_auth), svc=Depends(services)):
+    return {"notes": [_note_out(n) for n in svc.store.list_notes(query=q, limit=60)]}
+
+
+@app.get("/api/notes/{nid}")
+def get_note(nid: str, user: dict = Depends(require_auth), svc=Depends(services)):
+    note = svc.store.get_note(nid)
+    if note is None:
+        raise HTTPException(status_code=404, detail="Note not found")
+    return _note_out(note, full=True)
+
+
+class NoteIn(BaseModel):
+    text: str
+    title: str = ""
+    event_id: str | None = None
+
+
+@app.post("/api/notes")
+def add_notes(body: NoteIn, user: dict = Depends(require_auth), svc=Depends(services)):
+    """A transcript or notes pasted in: numbered, then written up."""
+    transcript = number_lines(from_plain(body.text))
+    if not transcript:
+        raise HTTPException(status_code=400, detail="There's nothing to make notes from.")
+    meeting = _meeting(svc, body.event_id)
+    nid = new_meeting_note(svc.store, title=body.title or (meeting or {}).get("subject") or "Meeting notes",
+                           source="pasted", transcript=transcript, event=meeting,
+                           started_at=(meeting or {}).get("starts_at"))
+    svc.worker.process_notes_now()
+    return _note_out(svc.store.get_note(nid))
+
+
+@app.post("/api/recordings")
+async def add_recording(file: UploadFile = File(...), event_id: str = Form(""), title: str = Form(""),
+                        user: dict = Depends(require_auth), svc=Depends(services)):
+    """A meeting recorded in the app (or a recording uploaded): kept, transcribed, written up."""
+    kind = (file.content_type or "").split(";")[0].lower()
+    ext = AUDIO_TYPES.get(kind) or os.path.splitext(file.filename or "")[1].lower()
+    if ext not in set(AUDIO_TYPES.values()):
+        raise HTTPException(status_code=400, detail="That isn't an audio recording I can use (try m4a, mp3, wav or webm).")
+    data = await file.read(MAX_RECORDING_BYTES + 1)
+    if not data:
+        raise HTTPException(status_code=400, detail="The recording is empty.")
+    if len(data) > MAX_RECORDING_BYTES:
+        raise HTTPException(status_code=400, detail="The recording is over 300 MB (about two hours).")
+    os.makedirs(RECORDINGS, exist_ok=True)
+    path = os.path.join(RECORDINGS, f"{uuid.uuid4().hex}{ext}")
+    with open(path, "wb") as out:
+        out.write(data)
+    meeting = _meeting(svc, event_id or None)
+    nid = new_meeting_note(svc.store, title=title or (meeting or {}).get("subject") or "Recording", source="recording",
+                           audio_path=path, event=meeting, started_at=(meeting or {}).get("starts_at"))
+    svc.worker.process_notes_now()
+    return _note_out(svc.store.get_note(nid))
+
+
+@app.post("/api/notes/{nid}/retry")
+def retry_note(nid: str, user: dict = Depends(require_auth), svc=Depends(services)):
+    note = svc.store.get_note(nid)
+    if note is None:
+        raise HTTPException(status_code=404, detail="Note not found")
+    svc.store.update_note(nid, status="summarizing" if note.get("transcript") else "waiting_transcript", error=None)
+    svc.worker.process_notes_now()
+    return _note_out(svc.store.get_note(nid))
 
 
 @app.get("/api/conversations")
