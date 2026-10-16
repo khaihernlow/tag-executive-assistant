@@ -141,3 +141,14 @@ def test_chat_tools_return_pending_slips_that_become_cards():
     trace = ToolTrace(name="cancel_event", input={}, output=__import__("json").dumps(result), is_error=False)
     [card] = build_cards([trace])
     assert card["type"] == "action" and card["summary"].startswith("Cancel “Renewals sync”")
+
+
+def test_invites_that_need_no_answer_stay_off_today():
+    no_reply = {**event("sic", "Office hours call", "2026-10-15T20:00", "2026-10-15T21:00", organizer="calls@club.example",
+                        response="none", attendees=(DAVE,)), "responseRequested": False}
+    webinar = event("web", "Vendor webinar", "2026-10-15T18:00", "2026-10-15T19:00", organizer="events@distributor.example",
+                    response="none", attendees=tuple(f"p{i}@x.example" for i in range(300)))
+    all_hands = event("all", "All hands", "2026-10-16T18:00", "2026-10-16T19:00", organizer="ceo-office@tag.example",
+                      response="none", attendees=tuple(f"p{i}@tag.example" for i in range(60)))
+    found = pending_invites(FakeGraph(events=(VENDOR, no_reply, webinar, all_hands)), NOW)
+    assert [i["id"] for i in found] == ["vendor", "all"]    # TAG's own big meetings still count

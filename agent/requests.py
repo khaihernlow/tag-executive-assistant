@@ -118,6 +118,9 @@ CLASSIFY = ToolSpec(
             "time_of_day": {"type": "string", "enum": ["morning", "afternoon", "any"]},
             "format": {"type": "string", "enum": ["teams", "in_person", "phone", "unspecified"]},
             "proposed_start": {"type": "string", "description": "For proposes_time: YYYY-MM-DDTHH:MM, Dave's local time"},
+            "arranged_by": {"type": "string", "description": "If the email says someone other than Dave is setting this "
+                            "meeting up ('RJ asked to set up a call, pending times'), that person's name as written. "
+                            "Empty otherwise."},
         },
         "required": ["n", "kind"],
     }}}, "required": ["emails"]},
@@ -134,6 +137,8 @@ decide whether it is a GENUINE request to meet Dave that still needs scheduling.
 - not_a_request: newsletters, webinars, automated mail, meetings already booked or confirmed, someone
   just mentioning a meeting, or anything else.
 A first contact CAN be genuine: a prospect or client asking TAG for IT help is a real request.
+If they say a colleague of Dave's is already arranging the meeting, it is still a request (asks_for_times),
+and arranged_by names that colleague: then it's theirs to schedule, not Dave's.
 Resolve relative dates ("next week", "Thursday") against the date received, in US Eastern time.
 Leave fields empty when the email doesn't say."""
 
@@ -223,6 +228,18 @@ def addressing(message: dict[str, Any], mailbox: str) -> tuple[str, dict[str, st
     return ("colleague", colleague) if colleague else ("fyi", None)
 
 
+def arranging_colleague(graph: Any, name: str) -> dict[str, str] | None:
+    """'RJ' in "RJ asked to set up a call" -> the TAG colleague, when the directory is sure who that is."""
+    from agent.people import find_people
+    if not name.strip() or name.strip().lower().split(" ")[0] in ("dave", "david"):
+        return None
+    try:
+        people = [p for p in find_people(graph, name.strip(), limit=3) if p.internal and p.score >= 0.9]
+    except Exception:  # noqa: BLE001 - not sure who it is: Dave keeps it
+        return None
+    return {"email": people[0].email.lower(), "name": people[0].name} if len(people) == 1 else None
+
+
 def thread_team(message: dict[str, Any], mailbox: str) -> list[dict[str, str]]:
     """TAG colleagues on the email (To or CC), not Dave: they're part of the meeting."""
     domain = internal_domain()
@@ -287,6 +304,11 @@ def scan(graph: Any, llm: Any, store: Any, now: datetime | None = None, actions:
         if verdict.get("kind") not in ("asks_for_times", "proposes_time") or role == "fyi":
             store.save_request(m["id"], thread, m["receivedDateTime"], "ignored")
             continue
+        arranged_elsewhere = False
+        if role == "dave" and verdict.get("arranged_by"):
+            colleague = arranging_colleague(graph, verdict["arranged_by"])
+            if colleague and colleague["email"] != graph.mailbox.lower():
+                role, handler, arranged_elsewhere = "colleague", colleague, True
         sender = (m.get("from") or {}).get("emailAddress") or {}
         verdict = with_code_dates(verdict, m.get("receivedDateTime"))
         request = {
@@ -300,6 +322,9 @@ def scan(graph: Any, llm: Any, store: Any, now: datetime | None = None, actions:
             "team": thread_team(m, graph.mailbox),
             "handler": handler,  # a colleague answers this one; Dave just needs to know
         }
+        if arranged_elsewhere:
+            # The colleague isn't on this email, so their reply won't reach Dave's mailbox: never "stalled"
+            request["arranged_elsewhere"] = True
         # A newer message in the same thread replaces any older open request for it.
         for old in store.open_requests():
             if old["thread_id"] == thread:
@@ -372,7 +397,7 @@ def stalled(row: dict[str, Any], now: datetime | None = None) -> bool:
     """A colleague was asked and a full working day has gone by without their reply
     reaching Dave's mailbox (a reply would have retired the request)."""
     request = row["request"] or {}
-    if row["status"] != "new" or not request.get("handler"):
+    if row["status"] != "new" or not request.get("handler") or request.get("arranged_elsewhere"):
         return False
     tz = local_zone()
     received = datetime.fromisoformat(row["received_at"].replace("Z", "+00:00")).astimezone(tz)

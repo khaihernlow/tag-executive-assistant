@@ -159,9 +159,25 @@ def propose_response(graph: Any, actions: Actions, event_id: str, response: str,
 
 # ── unanswered invites (Today) ───────────────────────────────────────────────
 
+BROADCAST_ATTENDEES = 50     # an outside invite to this many people is a webinar or a mailing, not a meeting
+
+
+def needs_answer(event: Any, raw: dict[str, Any], me: str) -> bool:
+    """An invite Dave is expected to answer. He answers nearly all of them (154 of 156 over the
+    last 90 days), so an unanswered one is open, except when the organizer didn't ask for a reply,
+    or it went from outside TAG to a crowd (a vendor webinar to 300 people)."""
+    if event.response not in ("none", "notResponded") or event.organizer_email in ("", me):
+        return False
+    if raw.get("responseRequested") is False:
+        return False
+    domain = me.rsplit("@", 1)[-1]
+    outside = not event.organizer_email.lower().endswith("@" + domain)
+    return not (outside and len(event.attendee_emails) >= BROADCAST_ATTENDEES)
+
+
 def pending_invites(graph: Any, now: datetime | None = None, days: int = 21) -> list[dict[str, Any]]:
-    """Invites from other people that Dave hasn't answered, soonest first, each with
-    whatever it would clash with."""
+    """Invites from other people that Dave hasn't answered and is expected to, soonest first,
+    each with whatever it would clash with."""
     tz = local_zone()
     now = now or datetime.now(tz)
     raws = [r for r in graph.calendar_view(now, now + timedelta(days=days)) if not r.get("isCancelled")]
@@ -169,7 +185,7 @@ def pending_invites(graph: Any, now: datetime | None = None, days: int = 21) -> 
     me = graph.mailbox.lower()
     out = []
     for event, raw in events:
-        if event.response not in ("none", "notResponded") or event.organizer_email in ("", me) or event.end <= now:
+        if not needs_answer(event, raw, me) or event.end <= now:
             continue
         clashes = [f"{other.subject}, {_clock(other.start)} to {_clock(other.end)}" for other, _ in events
                    if other.id != event.id and not other.all_day and not event.all_day and other.blocks_time

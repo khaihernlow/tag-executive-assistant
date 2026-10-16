@@ -466,3 +466,27 @@ def test_nudge_is_a_short_internal_email_and_is_remembered():
     assert body["message"]["toRecipients"] == [{"emailAddress": {"address": "rj@tag.example"}}]
     [view] = open_requests_view(graph, store, store, now=now)
     assert view["nudged"]  # remembered, so the card says when instead of offering it again
+
+
+def test_a_request_a_colleague_is_already_arranging_is_theirs_not_daves(monkeypatch):
+    from agent import people, requests as req
+    karen = {**mail("karen", "karen@vet.example", "Re: Your IT Server request",
+                    "Hello Dave- RJ responded to my inquiry and asked to set up a phone meeting, just pending some "
+                    "date/time options - thanks for following up!", thread="tk"),
+             "toRecipients": to(DAVE), "ccRecipients": []}
+    graph = FakeGraph()
+    graph_all = graph.get_all
+    graph.get_all = lambda path, params=None, **kw: (
+        [karen] if path == f"/users/{DAVE}/messages" and "conversationId" not in (params or {}).get("$filter", "")
+        else graph_all(path, params, **kw))
+    monkeypatch.setattr(people, "find_people", lambda g, name, limit=5: [
+        people.Person(name="RJ Gray", email="RGray@tag.example", internal=True, score=0.95)] if name == "RJ" else [])
+    llm = FakeLLM("record_requests", {"emails": [{"n": 0, "kind": "asks_for_times", "purpose": "IT server phone meeting",
+                                                  "arranged_by": "RJ"}]})
+    store = Store(":memory:")
+    scan(graph, llm, store, now=datetime(2026, 10, 16, 10, 0, tzinfo=NY))
+    row = store.get_request("karen")
+    assert row["request"]["handler"] == {"email": "rgray@tag.example", "name": "RJ Gray"}
+    [view] = open_requests_view(graph, store, store)
+    assert view["handler"] == "RJ Gray" and view["slots"] == []        # no times for Dave to offer
+    assert not req.stalled(row, datetime(2026, 10, 20, 10, 0, tzinfo=NY))  # RJ's reply won't reach Dave: never nags

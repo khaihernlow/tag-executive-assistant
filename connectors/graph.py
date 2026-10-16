@@ -22,7 +22,7 @@ import requests
 GRAPH_URL = "https://graph.microsoft.com/v1.0"
 TOKEN_URL = "https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token"
 
-EVENT_FIELDS = "id,subject,start,end,location,attendees,organizer,isAllDay,isCancelled,showAs,isOnlineMeeting,onlineMeeting,webLink,bodyPreview,responseStatus"
+EVENT_FIELDS = "id,subject,start,end,location,attendees,organizer,isAllDay,isCancelled,showAs,isOnlineMeeting,onlineMeeting,webLink,bodyPreview,responseStatus,responseRequested"
 
 
 class GraphError(RuntimeError):
