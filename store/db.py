@@ -112,6 +112,7 @@ CREATE TABLE IF NOT EXISTS notes (
     status      TEXT NOT NULL,          -- waiting_transcript | transcribing | summarizing | ready | failed
     digest      TEXT,                   -- JSON: headline, summary, decisions, action items, open questions
     error       TEXT,
+    parts       TEXT,                   -- JSON: the pieces one meeting came in (two recordings, a paste)
     created_at  TEXT NOT NULL,
     updated_at  TEXT NOT NULL
 );
@@ -130,7 +131,7 @@ CREATE TABLE IF NOT EXISTS memory (
 );
 """
 
-_JSON_FIELDS = {"llm_messages", "display", "payload", "result", "value", "brief", "topic", "request", "people", "digest"}
+_JSON_FIELDS = {"llm_messages", "display", "payload", "result", "value", "brief", "topic", "request", "people", "digest", "parts"}
 
 
 def now_iso() -> str:
@@ -159,6 +160,8 @@ class Store:
         if "topic" not in columns:
             # What a conversation is about, e.g. {"brief": "<event id>"}
             self._conn.execute("ALTER TABLE conversations ADD COLUMN topic TEXT")
+        if "parts" not in {row[1] for row in self._conn.execute("PRAGMA table_info(notes)")}:
+            self._conn.execute("ALTER TABLE notes ADD COLUMN parts TEXT")
         self._conn.commit()
 
     # ── helpers ──────────────────────────────────────────────────────────────
@@ -181,7 +184,7 @@ class Store:
     # ── notes (meetings and quick notes) ────────────────────────────────────
 
     _NOTE_FIELDS = ("kind", "title", "event_id", "started_at", "people", "source", "audio_path", "transcript",
-                    "status", "digest", "error")
+                    "status", "digest", "error", "parts")
 
     def add_note(self, **fields: Any) -> str:
         nid = uuid.uuid4().hex
@@ -189,17 +192,21 @@ class Store:
         row = {k: fields.get(k) for k in self._NOTE_FIELDS}
         row["people"] = json.dumps(row["people"] or [])
         row["digest"] = json.dumps(row["digest"]) if row["digest"] is not None else None
+        row["parts"] = json.dumps(row["parts"]) if row["parts"] is not None else None
         self._execute(f"INSERT INTO notes (id, {', '.join(self._NOTE_FIELDS)}, created_at, updated_at) "
                       f"VALUES (?, {', '.join('?' for _ in self._NOTE_FIELDS)}, ?, ?)",
                       (nid, *row.values(), stamp, stamp))
         return nid
 
     def update_note(self, nid: str, **fields: Any) -> None:
-        sets = {k: (json.dumps(v) if k in ("people", "digest") and v is not None else v)
+        sets = {k: (json.dumps(v) if k in ("people", "digest", "parts") and v is not None else v)
                 for k, v in fields.items() if k in self._NOTE_FIELDS}
         if sets:
             self._execute(f"UPDATE notes SET {', '.join(f'{k} = ?' for k in sets)}, updated_at = ? WHERE id = ?",
                           (*sets.values(), now_iso(), nid))
+
+    def delete_note(self, nid: str) -> None:
+        self._execute("DELETE FROM notes WHERE id = ?", (nid,))
 
     def get_note(self, nid: str) -> dict[str, Any] | None:
         return self._row(self._execute("SELECT * FROM notes WHERE id = ?", (nid,)).fetchone())

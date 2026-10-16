@@ -124,6 +124,8 @@ Albany, NY), from a meeting transcript. He reads them later to remember what hap
 - Action items: only things someone actually said they or someone else would do. Quote the due phrase as
   said ("by Friday"); leave due empty when no time was given. Owner as named; "Dave" when it's him.
 - Speakers may be labelled "Speaker 1", "Speaker 2": keep those labels; don't guess who they are.
+- The transcript may come in parts (one meeting recorded in pieces, or notes added later); a line like
+  "Part 2: recording" marks where the next piece starts. Write one set of notes for the whole meeting.
 - Plain sentences, at most 25 words each, the fact first. No em or en dashes. No filler."""
 
 _CITE = re.compile(r"\[L\d+(?:\s*[-,]\s*L?\d+)*\]")
@@ -192,6 +194,83 @@ def transcript_lines(transcript: str, numbers: list[int]) -> list[str]:
     return [lines[n - 1] for n in numbers if 0 < n <= len(lines)]
 
 
+# ── parts: one meeting can arrive in pieces ──
+# A recording cut off and started again, a second phone, notes pasted afterwards: each is a part of the
+# same meeting's notes. Each part keeps its own transcript; the note's transcript is all of them,
+# numbered straight through (so citations stay unique), and the notes are written over the whole.
+
+PART_LABEL = {"recording": "recording", "pasted": "pasted notes", "teams": "Teams transcript"}
+_LINE_LABEL = re.compile(r"^\[L\d+\]\s*")
+
+
+def new_part(n: int, source: str, transcript: str = "", audio_path: str | None = None) -> dict[str, Any]:
+    return {"n": n, "source": source, "audio_path": audio_path, "transcript": transcript or None,
+            "status": "done" if transcript else "waiting", "error": None,
+            "added_at": datetime.now(local_zone()).isoformat(timespec="minutes")}
+
+
+def parts_of(note: dict[str, Any]) -> list[dict[str, Any]]:
+    """The note's parts (a note from before parts existed is one part)."""
+    if note.get("parts"):
+        return [dict(p) for p in note["parts"]]
+    transcript = note.get("transcript")
+    if not transcript and not note.get("audio_path"):
+        return []
+    part = new_part(1, note.get("source") or "pasted", transcript or "", note.get("audio_path"))
+    part["added_at"] = note.get("created_at") or part["added_at"]
+    return [part]
+
+
+def combined(parts: list[dict[str, Any]]) -> str:
+    """The parts' transcripts as one, numbered straight through, each part headed when there's more than one."""
+    usable = [p for p in parts if p.get("transcript")]
+    if len(usable) == 1:
+        return usable[0]["transcript"]
+    lines: list[str] = []
+    for p in usable:
+        at = ""
+        if p.get("added_at"):
+            try:
+                at = ", " + datetime.fromisoformat(p["added_at"]).strftime("%I:%M %p").lstrip("0")
+            except ValueError:
+                pass
+        lines.append(f"Part {p['n']}: {PART_LABEL.get(p.get('source'), 'notes')}{at}")
+        lines += [_LINE_LABEL.sub("", line) for line in p["transcript"].split("\n")]
+    return "\n".join(f"[L{i}] {line}" for i, line in enumerate(lines, 1))
+
+
+def settle(store: Any, nid: str) -> None:
+    """After a part changes: still waiting on a recording, ready to be written up, or nothing usable."""
+    note = store.get_note(nid)
+    if note is None or note["kind"] != "meeting":
+        return
+    parts = parts_of(note)
+    if any(p["status"] == "waiting" for p in parts):
+        store.update_note(nid, parts=parts, status="waiting_transcript")
+        return
+    transcript = combined(parts)
+    if not transcript:
+        errors = [p["error"] for p in parts if p.get("error")]
+        store.update_note(nid, parts=parts, status="failed", error=errors[0] if errors else "Nothing to write up.")
+        return
+    store.update_note(nid, parts=parts, transcript=transcript, status="summarizing", error=None)
+
+
+def _save_part(store: Any, nid: str, part: dict[str, Any]) -> None:
+    """Write back one part, re-reading the others: a part may have been added meanwhile."""
+    parts = parts_of(store.get_note(nid))
+    store.update_note(nid, parts=[part if p["n"] == part["n"] else p for p in parts])
+
+
+def add_part(store: Any, nid: str, source: str, transcript: str = "", audio_path: str | None = None) -> str:
+    note = store.get_note(nid)
+    parts = parts_of(note)
+    parts.append(new_part(max((p["n"] for p in parts), default=0) + 1, source, transcript, audio_path))
+    store.update_note(nid, parts=parts)
+    settle(store, nid)
+    return nid
+
+
 # ── the work: recordings to transcripts, transcripts to digests ──
 
 def process(store: Any, llm: Any, speech: Any = None, limit: int = 3) -> int:
@@ -201,18 +280,25 @@ def process(store: Any, llm: Any, speech: Any = None, limit: int = 3) -> int:
     for note in store.notes_waiting(("waiting_transcript", "summarizing"))[:limit]:
         try:
             if note["status"] == "waiting_transcript":
-                if speech is None:
+                waiting = [p for p in parts_of(note) if p["status"] == "waiting"]
+                if waiting and speech is None:
                     if note.get("error") != "waiting for the speech-to-text key":
                         store.update_note(note["id"], error="waiting for the speech-to-text key")
                     continue
                 store.update_note(note["id"], status="transcribing", error=None)
-                result = speech.transcribe(note["audio_path"])
-                transcript = number_lines(from_azure(result))
-                if not transcript:
-                    store.update_note(note["id"], status="failed", error="No speech was found in the recording.")
-                    continue
-                store.update_note(note["id"], transcript=transcript, status="summarizing")
+                for part in waiting:
+                    try:
+                        transcript = number_lines(from_azure(speech.transcribe(part["audio_path"])))
+                        part.update(transcript=transcript or None, status="done" if transcript else "failed",
+                                    error=None if transcript else "No speech was found in the recording.")
+                    except Exception as e:  # noqa: BLE001 - kept on the part; the others still count
+                        log.exception("note %s part %s failed", note["id"], part["n"])
+                        part.update(status="failed", error=f"{type(e).__name__}: {e}"[:400])
+                    _save_part(store, note["id"], part)
+                settle(store, note["id"])
                 note = store.get_note(note["id"])
+                if note["status"] != "summarizing":
+                    continue
             summarize(store, llm, note)
             done += 1
         except Exception as e:  # noqa: BLE001 - recorded on the note; Dave can retry from the app
@@ -227,21 +313,61 @@ def summarize(store: Any, llm: Any, note: dict[str, Any]) -> dict[str, Any]:
     digest = checked(write_digest(llm, note["title"], note["transcript"] or "", note.get("people") or [], when),
                      note["transcript"] or "", started.date(), note.get("people") or [])
     fields: dict[str, Any] = {"digest": digest, "status": "ready", "error": None}
-    if digest.get("title") and note["title"].lower() in ("", "recording", "meeting", "notes"):
+    if digest.get("title") and note["title"].lower() in ("", "recording", "meeting", "notes", "meeting notes"):
         fields["title"] = digest["title"]
+    now = store.get_note(note["id"])
+    if now and (now["transcript"] != note["transcript"] or now["status"] != note["status"]):
+        fields.pop("status")    # a part arrived while writing: keep these notes, the next pass rewrites them
     store.update_note(note["id"], **fields)
     return digest
 
 
 def new_meeting_note(store: Any, *, title: str, source: str, transcript: str = "", audio_path: str | None = None,
                      event: dict[str, Any] | None = None, started_at: str | None = None) -> str:
-    """A note for one meeting: from a transcript (digested next) or a recording (transcribed first)."""
+    """A note for one meeting: from a transcript (digested next) or a recording (transcribed first).
+    A meeting that already has notes gets this as its next part, and one set of notes covers both."""
+    if event and event.get("id"):
+        existing = store.note_for_event(event["id"])
+        if existing:
+            return add_part(store, existing["id"], source, transcript, audio_path)
     people = (event or {}).get("attendees") or []
+    part = new_part(1, source, transcript, audio_path)
     return store.add_note(
         kind="meeting", title=title or (event or {}).get("subject") or "Meeting", source=source,
         event_id=(event or {}).get("id"), started_at=started_at or datetime.now(local_zone()).isoformat(timespec="minutes"),
-        people=people, transcript=transcript or None, audio_path=audio_path,
+        people=people, transcript=transcript or None, audio_path=audio_path, parts=[part],
         status="summarizing" if transcript else "waiting_transcript")
+
+
+def move_note(store: Any, nid: str, event: dict[str, Any] | None, started_at: str | None = None) -> str:
+    """Notes saved against the wrong meeting (or none): put them on the right one. If that meeting
+    already has notes, the two become one. Returns the id of the notes that now hold them."""
+    note = store.get_note(nid)
+    if event and event.get("id"):
+        other = store.note_for_event(event["id"])
+        if other and other["id"] != nid:
+            parts, start = parts_of(other), max((p["n"] for p in parts_of(other)), default=0)
+            for i, p in enumerate(parts_of(note), 1):
+                parts.append(p | {"n": start + i})
+            store.update_note(other["id"], parts=parts)
+            store.delete_note(nid)
+            settle(store, other["id"])
+            return other["id"]
+        store.update_note(nid, event_id=event["id"], title=event.get("subject") or note["title"],
+                          people=event.get("attendees") or [], started_at=started_at or note.get("started_at"))
+    else:
+        store.update_note(nid, event_id=None, people=[])
+    if note["status"] in ("ready", "failed"):
+        settle(store, nid)      # the attendees changed: write the notes again with the right people
+    return nid
+
+
+def retry(store: Any, nid: str) -> None:
+    """Try the failed parts again (and the write-up)."""
+    note = store.get_note(nid)
+    parts = [p | {"status": "waiting", "error": None} if p["status"] == "failed" else p for p in parts_of(note)]
+    store.update_note(nid, parts=parts, error=None)
+    settle(store, nid)
 
 
 # ── for briefs: what was said last time with these people ──

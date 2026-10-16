@@ -25,7 +25,8 @@ from agent.requests import open_requests_view, propose_booking, propose_hold, pr
 from agent.calendar import agenda_day, event_detail, local_zone, meeting_place, parse_event
 from agent.people import internal_domain
 from agent.emailtext import excerpt as email_excerpt
-from agent.notes import from_plain, new_meeting_note, note_view, number_lines
+from agent.notes import from_plain, move_note, new_meeting_note, note_view, number_lines, parts_of
+from agent.notes import retry as retry_parts
 from agent.lunch import order_anyway, skip_week as skip_lunch, today_view as lunch_view
 from agent.uploads import MAX_BYTES as MAX_UPLOAD_BYTES, UploadError, prepare as prepare_upload
 from connectors.graph import EVENT_FIELDS
@@ -322,7 +323,11 @@ def _meeting(svc, event_id: str | None) -> dict | None:
 
 def _note_out(note: dict, full: bool = False) -> dict:
     out = note_view(note, full=full) | {"error": note.get("error"), "source": note.get("source"),
-                                         "event_id": note.get("event_id")}
+                                         "event_id": note.get("event_id"),
+                                         "parts": [{"n": p["n"], "source": p["source"], "status": p["status"], "error": p.get("error")}
+                                                   for p in parts_of(note)] if note["kind"] == "meeting" else []}
+    if full and note["kind"] == "meeting" and (note.get("digest") or {}).get("headline"):
+        out["written"] = True     # it has notes to show, even while a new part is on its way
     if full and note.get("transcript"):
         out["transcript"] = note["transcript"]
     return out
@@ -390,9 +395,27 @@ def retry_note(nid: str, user: dict = Depends(require_auth), svc=Depends(service
     note = svc.store.get_note(nid)
     if note is None:
         raise HTTPException(status_code=404, detail="Note not found")
-    svc.store.update_note(nid, status="summarizing" if note.get("transcript") else "waiting_transcript", error=None)
+    retry_parts(svc.store, nid)
     svc.worker.process_notes_now()
     return _note_out(svc.store.get_note(nid))
+
+
+class NoteMove(BaseModel):
+    event_id: str | None = None
+
+
+@app.patch("/api/notes/{nid}")
+def move_notes(nid: str, body: NoteMove, user: dict = Depends(require_auth), svc=Depends(services)):
+    """Notes saved against the wrong meeting: move them (joining that meeting's notes if it has some)."""
+    note = svc.store.get_note(nid)
+    if note is None or note["kind"] != "meeting":
+        raise HTTPException(status_code=404, detail="Note not found")
+    meeting = _meeting(svc, body.event_id) if body.event_id else None
+    if body.event_id and meeting is None:
+        raise HTTPException(status_code=400, detail="That meeting couldn't be found on the calendar.")
+    kept = move_note(svc.store, nid, meeting, started_at=(meeting or {}).get("starts_at"))
+    svc.worker.process_notes_now()
+    return _note_out(svc.store.get_note(kept), full=True)
 
 
 @app.get("/api/conversations")

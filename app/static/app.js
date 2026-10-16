@@ -553,6 +553,7 @@ function openBrief(event) {
   $("#bs-content").replaceChildren(el("div", { class: "skel-brief", "aria-label": "Loading the brief" },
     ...Array.from({ length: 7 }, () => el("span", { class: "skel skel--row" }))));
   $("#briefsheet").hidden = false;
+  meetingTabs("brief", event, event.note && event.note.id);
   loadBrief(event);
 }
 
@@ -1550,6 +1551,37 @@ const NOTE_STATUS = {
   failed: "Couldn't write these up",
 };
 
+// A meeting with both a brief and notes: one page, two tabs. Notes open first once there are some.
+function meetingTabs(which, event, noteId) {
+  const tabs = $(`#${which === "brief" ? "bs" : "ns"}-tabs`);
+  const label = $(`#${which === "brief" ? "bs" : "ns"}-label`);
+  const both = Boolean(event && noteId);
+  tabs.hidden = !both;
+  label.hidden = both;
+  if (!both) return;
+  const tab = (name, text, open) => el("button", {
+    class: "meeting-tabs__tab", type: "button", role: "tab", text,
+    "aria-selected": String(which === name), tabindex: which === name ? "0" : "-1",
+    onclick: () => { if (which !== name) open(); } });
+  tabs.replaceChildren(tab("notes", "Notes", () => openNote(noteId)), tab("brief", "Brief", () => openBrief(event)));
+}
+
+// Which meeting the Start box (or the paste form) is about to add to, if it already has notes
+function joinsHint(select, hint) {
+  const event = todayEvents.find((e) => e.id === select.value);
+  hint.hidden = !(event && event.note);
+}
+
+function partsLabel(parts) {
+  const count = (source) => parts.filter((p) => p.source === source).length;
+  const words = [];
+  const rec = count("recording"), pasted = count("pasted"), teams = count("teams");
+  if (rec) words.push(rec === 1 ? "a recording" : `${rec} recordings`);
+  if (pasted) words.push(pasted === 1 ? "pasted notes" : `${pasted} sets of pasted notes`);
+  if (teams) words.push("the Teams transcript");
+  return words.length ? `From ${words.join(" and ")}` : "";
+}
+
 function noteStatusText(n) {
   if (n.status === "waiting_transcript" && /speech-to-text key/.test(n.error || "")) {
     return "Saved. It'll be transcribed once the speech-to-text service is set up.";
@@ -1586,6 +1618,8 @@ async function openNote(id) {
   $("#ns-when").textContent = "";
   $("#ns-source").textContent = "";
   $("#ns-foot").hidden = true;
+  $("#ns-move").hidden = true;
+  closeMove();
   $("#ns-content").replaceChildren(el("div", { class: "skel-brief", "aria-label": "Loading the notes" },
     ...Array.from({ length: 7 }, () => el("span", { class: "skel skel--row" }))));
   $("#notesheet").hidden = false;
@@ -1622,11 +1656,32 @@ function renderNote(n) {
   $("#ns-title").textContent = n.title;
   const when = n.when ? new Date(n.when).toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "";
   $("#ns-when").textContent = [when, (n.people || []).join(", ")].filter(Boolean).join(" \u00b7 ");
-  $("#ns-source").textContent = { teams: "From the Teams transcript", recording: "From a recording", pasted: "From pasted notes", typed: "Saved note" }[n.source] || "";
+  const parts = n.parts || [];
+  $("#ns-source").textContent = n.kind === "quick" ? "Saved note" : partsLabel(parts);
+  const event = n.event_id ? todayEvents.find((e) => e.id === n.event_id) : null;
+  meetingTabs("notes", event, n.id);
+  $("#ns-move").hidden = n.kind === "quick";
   const content = [];
+  // A part still on its way, or one that couldn't be transcribed, while there are notes to show
+  const waiting = parts.filter((p) => p.status === "waiting");
+  const failed = parts.filter((p) => p.status === "failed");
+  const many = parts.length > 1;
+  const partName = (p) => (many ? `Part ${p.n}` : "The recording");
+  if (n.written && n.status !== "ready" && n.status !== "failed") {
+    const which = (waiting.length ? waiting : parts.slice(-1)).map(partName).join(" and ");
+    content.push(el("p", { class: "ns-notice", text: /speech-to-text key/.test(n.error || "")
+      ? `${which} is saved and will be added once the speech-to-text service is set up. These notes cover the rest.`
+      : `Adding ${which.toLowerCase()}: these notes will be rewritten to include it.` }));
+  }
+  if (failed.length && (n.written || n.status === "ready")) {
+    content.push(el("div", { class: "ns-notice ns-notice--failed" },
+      el("span", { text: `${failed.map(partName).join(" and ")} couldn't be transcribed: ${failed[0].error || "unknown error"}` }),
+      el("button", { class: "link-btn", type: "button", text: "Try again",
+        onclick: async () => { await api(`/api/notes/${encodeURIComponent(n.id)}/retry`, { method: "POST" }); loadNote(n.id); } })));
+  }
   if (n.kind === "quick") {
     content.push(el("p", { class: "bs-headline", text: n.text }));
-  } else if (n.status !== "ready") {
+  } else if (n.status !== "ready" && !n.written) {
     content.push(el("div", { class: "empty" },
       el("p", { class: "empty__title", text: noteStatusText(n) }),
       n.status === "failed" ? el("p", { class: "empty__text", text: n.error || "" }) : null,
@@ -1651,6 +1706,8 @@ function renderNote(n) {
     content.push(el("details", { class: "bsec bsources" },
       el("summary", { class: "bsec__title" }, `Transcript \u00b7 ${n.transcript.split("\n").length} lines`, icon("chevron-down")),
       el("ol", { class: "transcript" }, n.transcript.split("\n").map((line) => {
+        const part = many && /^\[L(\d+)\]\s*(Part \d+: .*)$/.exec(line);
+        if (part) return el("li", { id: `line-${part[1]}`, class: "transcript__part", text: part[2] });
         const m = /^\[L(\d+)\]\s*(?:(\d\d:\d\d)\s+)?(?:([^:]{1,40}):\s)?(.*)$/.exec(line) || [];
         return el("li", { id: `line-${m[1]}` },
           m[2] ? el("span", { class: "transcript__time", text: m[2] }) : null,
@@ -1659,8 +1716,53 @@ function renderNote(n) {
       }))));
   }
   $("#ns-content").replaceChildren(...content.filter(Boolean));
-  $("#ns-foot").hidden = n.kind === "quick" || n.status !== "ready";
+  $("#ns-foot").hidden = n.kind === "quick" || !(n.status === "ready" || n.written);
 }
+
+// Notes saved against the wrong meeting: move them (they join that meeting's notes if it has some)
+function closeMove() {
+  $("#ns-move-form").hidden = true;
+  $("#ns-move-open").hidden = false;
+}
+$("#ns-move-open").addEventListener("click", () => {
+  const n = openNote_;
+  const select = $("#ns-move-meeting");
+  meetingOptions(select, false);
+  if (n.event_id && ![...select.options].some((o) => o.value === n.event_id)) {
+    select.add(el("option", { value: n.event_id, text: n.title }), 1);   // a meeting from another day
+  }
+  select.value = n.event_id || "";
+  $("#ns-move-hint").hidden = true;
+  $("#ns-move-open").hidden = true;
+  $("#ns-move-form").hidden = false;
+  select.focus();
+});
+$("#ns-move-meeting").addEventListener("change", (e) => {
+  const event = todayEvents.find((x) => x.id === e.target.value);
+  const hint = $("#ns-move-hint");
+  hint.hidden = !(event && event.note && event.note.id !== openNote_.id);
+  hint.textContent = "That meeting already has notes. These will be added to them as another part.";
+});
+$("#ns-move-cancel").addEventListener("click", closeMove);
+$("#ns-move-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const n = openNote_;
+  const eventId = $("#ns-move-meeting").value || null;
+  if (eventId === (n.event_id || null)) { closeMove(); return; }
+  const button = e.currentTarget.querySelector("button[type=submit]");
+  button.disabled = true;
+  try {
+    const moved = await api(`/api/notes/${encodeURIComponent(n.id)}`, { method: "PATCH", body: JSON.stringify({ event_id: eventId }) });
+    closeMove();
+    await loadToday();
+    if (moved.id !== n.id) openNote(moved.id); else loadNote(n.id);
+  } catch (err) {
+    $("#ns-move-hint").textContent = `Couldn't move them: ${err.message}`;
+    $("#ns-move-hint").hidden = false;
+  } finally {
+    button.disabled = false;
+  }
+});
 
 $("#ns-close").addEventListener("click", () => closePanels());
 document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("#notesheet").hidden) closePanels(); });
@@ -1735,7 +1837,11 @@ $("#notes-paste").addEventListener("click", () => {
   const form = $("#notes-paste-form");
   form.hidden = !form.hidden;
   $("#notes-paste").setAttribute("aria-expanded", String(!form.hidden));
-  if (!form.hidden) { meetingOptions($("#notes-paste-meeting"), false); $("#notes-paste-text").focus(); }
+  if (!form.hidden) {
+    meetingOptions($("#notes-paste-meeting"), false);
+    joinsHint($("#notes-paste-meeting"), $("#notes-paste-joins"));
+    $("#notes-paste-text").focus();
+  }
 });
 $("#notes-paste-form").addEventListener("submit", async (e) => {
   e.preventDefault();
@@ -1813,6 +1919,7 @@ function recMeetingLabel() {
 function showRecStart() {
   if (recorder || recFailed) { showRecPill(); nudgePill(); return; }   // already recording: point at it, don't stop
   meetingOptions($("#rec-meeting"));
+  joinsHint($("#rec-meeting"), $("#recstart-joins"));
   $("#recstart-error").hidden = true;
   $("#rec-start").disabled = false;
   openPopover("recstart");
@@ -1929,6 +2036,8 @@ async function saveRecording(rec) {
 $("#record-btn").addEventListener("click", () => ($("#recstart").hidden ? showRecStart() : closePopovers()));
 $("#recstart-close").addEventListener("click", closePopovers);
 $("#rec-start").addEventListener("click", startRecording);
+$("#rec-meeting").addEventListener("change", () => joinsHint($("#rec-meeting"), $("#recstart-joins")));
+$("#notes-paste-meeting").addEventListener("change", () => joinsHint($("#notes-paste-meeting"), $("#notes-paste-joins")));
 $("#rec-stop").addEventListener("click", () => stopRecording(false));
 $("#rec-discard").addEventListener("click", () => {
   if ($("#rec-confirm").hidden) { setRecPanel("confirm"); $("#rec-keep").focus(); } else setRecPanel(null);

@@ -161,6 +161,11 @@ def test_the_notes_api(monkeypatch, tmp_path):
         assert http.post(f"/api/notes/{rec['id']}/retry").json()["status"] == "waiting_transcript"
         assert {n["id"] for n in http.get("/api/notes").json()["notes"]} == {pasted["id"], rec["id"]}
         assert http.get("/api/notes/nope").status_code == 404
+
+        # moving notes: a meeting the calendar can't find is refused; "not a calendar meeting" is fine
+        assert http.patch(f"/api/notes/{pasted['id']}", json={"event_id": "ev9"}).status_code == 400
+        moved = http.patch(f"/api/notes/{pasted['id']}", json={"event_id": None}).json()
+        assert moved["event_id"] is None and moved["parts"] == [{"n": 1, "source": "pasted", "status": "done", "error": None}]
     finally:
         main.app.state.services = None
 
@@ -171,3 +176,93 @@ def test_a_conversation_about_a_note_starts_with_it_in_view():
     nid = N.new_meeting_note(store, title="Bob/Dave", source="pasted", transcript=TRANSCRIPT)
     section = Assistant(None, None, store, None)._topic_section({"note": nid})
     assert "one meeting's notes" in section and "[L3] 00:20 Dave Vener: I'll send the revised proposal by Friday." in section
+
+
+class Speech:
+    def __init__(self, **texts):
+        self.texts = texts
+
+    def transcribe(self, path):
+        return {"phrases": [{"speaker": 1, "offsetMilliseconds": 0, "text": self.texts[path]}]}
+
+
+def notes_for(*lines):
+    return tool("write_meeting_notes", headline="Proposal [L2].", summary=[f"Point [L{n}]." for n in lines],
+                decisions=[], open_questions=[], action_items=[])
+
+
+def test_a_second_recording_of_the_same_meeting_becomes_part_two_of_one_set_of_notes():
+    store = Store(":memory:")
+    event = {"id": "ev1", "subject": "Bob/Dave", "attendees": PEOPLE}
+    first = N.new_meeting_note(store, title="Bob/Dave", source="recording", audio_path="a.webm", event=event,
+                               started_at="2026-10-14T10:00")
+    N.process(store, LLM(notes_for(1)), speech=Speech(**{"a.webm": "We'd like pricing for 42 seats."}))
+    assert store.get_note(first)["status"] == "ready"
+
+    second = N.new_meeting_note(store, title="Bob/Dave", source="recording", audio_path="b.webm", event=event)
+    assert second == first                                   # the same notes, not a second set
+    note = store.get_note(first)
+    assert note["status"] == "waiting_transcript" and note["digest"]["headline"]   # part 1's notes still there
+    llm = LLM(notes_for(2, 4))
+    N.process(store, llm, speech=Speech(**{"b.webm": "I'll send the proposal by Friday."}))
+    note = store.get_note(first)
+    assert note["status"] == "ready" and [p["n"] for p in note["parts"]] == [1, 2]
+    lines = note["transcript"].split("\n")
+    assert lines[0].startswith("[L1] Part 1: recording") and lines[1] == "[L2] 00:00 Speaker 1: We'd like pricing for 42 seats."
+    assert lines[2].startswith("[L3] Part 2: recording") and lines[3] == "[L4] 00:00 Speaker 1: I'll send the proposal by Friday."
+    assert "Part 2: recording" in llm.seen[0]                # written over the whole meeting
+    assert store.list_notes() and len(store.list_notes()) == 1
+
+
+def test_pasted_notes_join_the_meeting_and_a_failed_part_does_not_sink_the_rest():
+    store = Store(":memory:")
+    event = {"id": "ev1", "subject": "Bob/Dave", "attendees": PEOPLE}
+    nid = N.new_meeting_note(store, title="Bob/Dave", source="recording", audio_path="a.webm", event=event)
+    N.new_meeting_note(store, title="Bob/Dave", source="pasted", transcript=N.number_lines(N.from_plain("Bob: Phones next.")),
+                       event=event)
+
+    class Broken:
+        def transcribe(self, path):
+            raise RuntimeError("speech service down")
+
+    N.process(store, LLM(notes_for(1)), speech=Broken())
+    note = store.get_note(nid)
+    assert note["status"] == "ready" and note["transcript"] == "[L1] Bob: Phones next."
+    assert [(p["n"], p["status"]) for p in note["parts"]] == [(1, "failed"), (2, "done")]
+    N.retry(store, nid)                                      # the failed recording is tried again
+    assert store.get_note(nid)["status"] == "waiting_transcript"
+
+
+def test_a_part_that_arrives_while_the_notes_are_being_written_is_not_lost():
+    store = Store(":memory:")
+    event = {"id": "ev1", "subject": "Bob/Dave", "attendees": PEOPLE}
+    nid = N.new_meeting_note(store, title="Bob/Dave", source="pasted", transcript=TRANSCRIPT, event=event)
+
+    class Slow(LLM):
+        def complete(self, messages, **kwargs):
+            N.new_meeting_note(store, title="Bob/Dave", source="recording", audio_path="b.webm", event=event)
+            return super().complete(messages, **kwargs)
+
+    N.process(store, Slow(notes_for(2)))
+    note = store.get_note(nid)
+    assert note["digest"]["summary"] and note["status"] == "waiting_transcript"   # notes kept, part 2 still to do
+
+
+def test_notes_moved_to_the_right_meeting():
+    store = Store(":memory:")
+    wrong = {"id": "ev1", "subject": "Lawn Sprinklers", "attendees": [PEOPLE[0]]}
+    right = {"id": "ev2", "subject": "Bob/Dave", "attendees": PEOPLE}
+    nid = N.new_meeting_note(store, title="Lawn Sprinklers", source="pasted", transcript=TRANSCRIPT, event=wrong)
+    store.update_note(nid, status="ready", digest={"headline": "x"})
+    assert N.move_note(store, nid, right, started_at="2026-10-14T14:00") == nid
+    note = store.get_note(nid)
+    assert (note["event_id"], note["title"], note["started_at"]) == ("ev2", "Bob/Dave", "2026-10-14T14:00")
+    assert note["people"] == PEOPLE and note["status"] == "summarizing"      # rewritten with the right people
+
+    # moved onto a meeting that already has notes: the two become one
+    other = N.new_meeting_note(store, title="Lawn Sprinklers", source="recording", audio_path="c.webm", event=wrong)
+    assert N.move_note(store, other, right) == nid and store.get_note(other) is None
+    assert [(p["n"], p["source"]) for p in store.get_note(nid)["parts"]] == [(1, "pasted"), (2, "recording")]
+
+    N.move_note(store, nid, None)                            # not a calendar meeting after all
+    assert store.get_note(nid)["event_id"] is None and store.get_note(nid)["people"] == []

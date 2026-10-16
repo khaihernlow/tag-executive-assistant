@@ -204,13 +204,27 @@
           <header class="pane-head overlay__head">
             <div class="overlay__lead">
               <button class="tool-btn overlay__close" id="ns-close" type="button" aria-label="Close" title="Close (Esc)">{{ icon('x') }}</button>
-              <span class="overlay__label">Meeting notes</span>
+              <span class="overlay__label" id="ns-label">Meeting notes</span>
+              <div class="meeting-tabs" id="ns-tabs" role="tablist" aria-label="This meeting" hidden></div>
             </div>
             <span class="briefsheet__age" id="ns-source"></span>
           </header>
           <div class="overlay__body briefsheet__body">
             <h2 class="briefsheet__title" id="ns-title"></h2>
             <p class="briefsheet__when" id="ns-when"></p>
+            <div class="ns-move" id="ns-move" hidden>
+              <button class="link-btn ns-move__open" id="ns-move-open" type="button">Wrong meeting? Change it</button>
+              <form class="ns-move__form" id="ns-move-form" hidden>
+                <label class="recbar__for"><span>For</span>
+                  <select id="ns-move-meeting" class="slip__field-input"></select>
+                </label>
+                <div class="recpill__row">
+                  <button class="btn" id="ns-move-cancel" type="button">Cancel</button>
+                  <button class="btn btn--sign" type="submit">Move notes</button>
+                </div>
+                <p class="ns-move__hint" id="ns-move-hint" hidden></p>
+              </form>
+            </div>
             <div id="ns-content"></div>
           </div>
           <form class="composer briefsheet__foot" id="ns-foot" autocomplete="off" hidden>
@@ -229,7 +243,8 @@
           <header class="pane-head overlay__head">
             <div class="overlay__lead">
               <button class="tool-btn overlay__close" id="bs-close" type="button" aria-label="Close" title="Close (Esc)">{{ icon('x') }}</button>
-              <span class="overlay__label">Meeting brief</span>
+              <span class="overlay__label" id="bs-label">Meeting brief</span>
+              <div class="meeting-tabs" id="bs-tabs" role="tablist" aria-label="This meeting" hidden></div>
             </div>
             <div class="briefsheet__status" id="bs-status" hidden>
               <span class="briefsheet__age" id="bs-age"></span>
@@ -286,6 +301,7 @@
       <label class="recbar__for"><span>For</span>
         <select id="rec-meeting" class="slip__field-input"></select>
       </label>
+      <p class="recstart__joins" id="recstart-joins" hidden>This meeting already has notes. The recording will be added to them, and they'll be written up again to cover both.</p>
       <p class="recstart__hint">Keep the app open on screen while it records. When you stop, the notes are written up for you.</p>
       <p class="error" id="recstart-error" hidden></p>
       <button class="btn btn--sign recstart__go" id="rec-start" type="button">{{ icon('mic') }}<span>Start recording</span></button>
@@ -361,6 +377,7 @@
         </label>
         <button class="btn btn--sign" type="submit">Write up</button>
       </div>
+      <p class="recstart__joins" id="notes-paste-joins" hidden>This meeting already has notes. These will be added to them.</p>
     </form>
     <p class="notes-list-title" id="notes-list-title">Notes</p>
     <ul class="modal__list rows" id="notes-list"></ul>

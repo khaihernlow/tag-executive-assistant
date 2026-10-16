@@ -1077,7 +1077,7 @@ svg.icon { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: ro
 .recpill__row { display: flex; gap: var(--s2); }
 .recpill__row .btn { min-height: 38px; font-size: 14px; }
 .btn--danger { background: var(--pencil); border-color: var(--pencil); color: var(--surface); }
-.btn--danger:hover { filter: brightness(0.95); }
+.btn--danger:hover, .btn--danger:active { background: var(--pencil); border-color: var(--pencil); filter: brightness(0.92); }
 
 /* The notes pop-up: two clear choices, then the list */
 .notes-choices { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s2); padding: var(--s3) var(--s3) 0; }
@@ -1110,3 +1110,37 @@ svg.icon { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: ro
 .transcript__time { grid-row: span 2; color: var(--ink-ghost); font-variant-numeric: tabular-nums; font-size: 12px; padding-top: 2px; }
 .transcript__who { font-weight: 600; font-size: 13px; color: var(--ink-soft); }
 .transcript li > span:last-child { grid-column: 2; }
+
+/* One meeting, two tabs: Notes (what happened) and Brief (the prep) */
+.meeting-tabs { display: inline-flex; padding: 3px; gap: 2px; border-radius: var(--r-md); background: var(--sunken); }
+.meeting-tabs[hidden] { display: none; }
+.meeting-tabs__tab {
+  min-height: 30px; padding: 0 var(--s3); border: 0; border-radius: calc(var(--r-md) - 2px); cursor: pointer;
+  background: none; color: var(--ink-faint); font: 600 14px/1 var(--sans);
+}
+.meeting-tabs__tab:hover { color: var(--ink); }
+.meeting-tabs__tab[aria-selected="true"] { background: var(--surface); color: var(--ink); box-shadow: 0 1px 2px rgba(20, 23, 28, 0.08); }
+.meeting-tabs__tab:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--focus); }
+.overlay__label[hidden] { display: none; }
+
+/* Notes: a part on its way, a part that failed, the move form */
+.ns-notice { margin: 0 0 var(--s5); padding: var(--s3) var(--s4); border-radius: var(--r-md);
+             background: var(--sunken); font-size: 14px; line-height: 1.5; color: var(--ink-soft); }
+.ns-notice--failed { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s1) var(--s3);
+                     background: var(--pencil-wash); color: var(--ink); }
+.ns-notice--failed .link-btn { padding: 0; }
+.ns-move { margin-top: calc(-1 * var(--s4)); margin-bottom: var(--s5); }   /* sides: the page's centred column */
+.ns-move[hidden], .ns-move__form[hidden], .ns-move__open[hidden] { display: none; }
+.ns-move__open { padding: 0; font-size: 13px; font-weight: 500; color: var(--ink-faint); }
+.ns-move__open:hover { color: var(--link); }
+.ns-move__form { display: grid; gap: var(--s2); max-width: 460px; }
+.ns-move__form .recpill__row { justify-content: flex-end; }
+.ns-move__form .recpill__row .btn { flex: none; }
+.ns-move__hint { margin: 0; font-size: 13px; color: var(--ink-faint); }
+.transcript__part { list-style: none; margin: var(--s4) 0 var(--s2); padding-top: var(--s3); border-top: 1px solid var(--rule-soft);
+                    font-size: 13px; font-weight: 600; color: var(--ink-faint); }
+.transcript li.transcript__part { display: block; }
+.transcript__part:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
+.recstart__joins { margin: 0; padding: var(--s2) var(--s3); border-radius: var(--r-sm); background: var(--sunken);
+                   font-size: 13px; line-height: 1.5; color: var(--ink-soft); }
+.recstart__joins[hidden] { display: none; }
