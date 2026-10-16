@@ -1791,6 +1791,7 @@ let recStarted = 0;
 let recTick = null;
 let recDiscarded = false;
 let recFailed = null;     // { blob, name, eventId } when saving didn't work
+let recEventId = "";      // the meeting chosen when it started
 
 function recordingType() {
   for (const t of ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg"]) {
@@ -1805,12 +1806,12 @@ function recElapsed() {
 }
 
 function recMeetingLabel() {
-  const select = $("#rec-meeting-live");
+  const select = $("#rec-meeting");
   return select.value ? select.selectedOptions[0].textContent.replace(/^.*?\u00b7\s*/, "") : "Not a calendar meeting";
 }
 
 function showRecStart() {
-  if (recorder || recFailed) { showRecPill(true); return; }   // already recording: show its controls, don't stop
+  if (recorder || recFailed) { showRecPill(); nudgePill(); return; }   // already recording: point at it, don't stop
   meetingOptions($("#rec-meeting"));
   $("#recstart-error").hidden = true;
   $("#rec-start").disabled = false;
@@ -1842,9 +1843,7 @@ async function startRecording() {
   recorder.start(10000);   // a chunk every 10s, so a long meeting isn't one huge buffer
   recStarted = Date.now();
 
-  const live = $("#rec-meeting-live");
-  live.replaceChildren(...[...$("#rec-meeting").options].map((o) => o.cloneNode(true)));
-  live.value = $("#rec-meeting").value;
+  recEventId = $("#rec-meeting").value;
   $("#rec-for").textContent = recMeetingLabel();
   closePopovers();
   $("#record-btn").classList.add("is-recording");
@@ -1854,22 +1853,28 @@ async function startRecording() {
   };
   tick();
   recTick = setInterval(tick, 1000);
-  showRecPill(false);
+  showRecPill();
 }
 
-function showRecPill(expand) {
-  const pill = $("#recbar");
-  pill.hidden = false;
+function showRecPill() {
+  $("#recbar").hidden = false;
+  setRecPanel(recFailed ? "failed" : null);
   placePill(loadPillPlace());
-  setRecMore(expand);
 }
 
-function setRecMore(open) {
-  $("#rec-more").hidden = !open;
-  $("#rec-toggle").setAttribute("aria-expanded", String(open));
-  $("#rec-confirm").hidden = true;
-  $("#rec-discard-row").hidden = !!recFailed;
-  $("#rec-failed").hidden = !recFailed;
+function nudgePill() {
+  const pill = $("#recbar");
+  pill.classList.remove("is-nudged");
+  void pill.offsetWidth;   // restart the animation
+  pill.classList.add("is-nudged");
+}
+
+// Under the bar: nothing, the discard question, or a save that failed
+function setRecPanel(which) {
+  $("#rec-confirm").hidden = which !== "confirm";
+  $("#rec-failed").hidden = which !== "failed";
+  $("#rec-discard").hidden = !!recFailed;
+  $("#rec-discard").setAttribute("aria-expanded", String(which === "confirm"));
   placePill(pillPlace());   // keep it on screen as it grows
 }
 
@@ -1893,7 +1898,7 @@ function endRecordingUi() {
 
 async function finishRecording() {
   const type = recorder.mimeType || "audio/webm";
-  const eventId = $("#rec-meeting-live").value;
+  const eventId = recEventId;
   if (recDiscarded || !recChunks.length) { endRecordingUi(); return; }
   const blob = new Blob(recChunks, { type });
   const ext = type.includes("mp4") ? "m4a" : type.includes("ogg") ? "ogg" : "webm";
@@ -1917,7 +1922,7 @@ async function saveRecording(rec) {
     $("#recbar").classList.add("is-failed");
     $("#rec-failed-text").textContent = `The recording couldn't be saved: ${err.message}`;
     $("#rec-stop").hidden = true;
-    setRecMore(true);
+    setRecPanel("failed");
   }
 }
 
@@ -1925,26 +1930,14 @@ $("#record-btn").addEventListener("click", () => ($("#recstart").hidden ? showRe
 $("#recstart-close").addEventListener("click", closePopovers);
 $("#rec-start").addEventListener("click", startRecording);
 $("#rec-stop").addEventListener("click", () => stopRecording(false));
-$("#rec-toggle").addEventListener("click", () => {
-  if (pillDragged) return;
-  setRecMore($("#rec-more").hidden);
-});
-$("#rec-meeting-live").addEventListener("change", () => { $("#rec-for").textContent = recMeetingLabel(); });
 $("#rec-discard").addEventListener("click", () => {
-  $("#rec-confirm-time").textContent = recElapsed();
-  $("#rec-discard-row").hidden = true;
-  $("#rec-confirm").hidden = false;
-  $("#rec-keep").focus();
+  if ($("#rec-confirm").hidden) { setRecPanel("confirm"); $("#rec-keep").focus(); } else setRecPanel(null);
 });
-$("#rec-keep").addEventListener("click", () => setRecMore(true));
+$("#rec-keep").addEventListener("click", () => setRecPanel(null));
 $("#rec-discard-yes").addEventListener("click", () => stopRecording(true));
-$("#rec-retry").addEventListener("click", () => {
-  $("#rec-failed").hidden = true;
-  saveRecording({ ...recFailed, eventId: $("#rec-meeting-live").value });
-});
+$("#rec-retry").addEventListener("click", () => { $("#rec-failed").hidden = true; saveRecording(recFailed); });
 $("#rec-failed-drop").addEventListener("click", () => {
   recFailed = null;
-  $("#rec-stop").hidden = false;
   endRecordingUi();
 });
 window.addEventListener("beforeunload", (e) => {   // closing the page mid-meeting would lose it
@@ -1963,7 +1956,7 @@ function loadPillPlace() {
     if (saved && typeof saved.x === "number") return saved;
   } catch { /* no storage: use the default */ }
   const pill = $("#recbar");
-  return { x: (innerWidth - pill.offsetWidth) / 2, y: 72 };   // centred, just under the header
+  return { x: innerWidth - pill.offsetWidth - 24, y: 72 };   // just under the Record button
 }
 function placePill({ x, y }) {
   const pill = $("#recbar");
@@ -1975,7 +1968,7 @@ function placePill({ x, y }) {
   const handle = $("#rec-handle");
   let start = null;
   handle.addEventListener("pointerdown", (e) => {
-    if (e.button !== 0 || e.target.closest("#rec-stop")) return;
+    if (e.button !== 0 || e.target.closest("button")) return;
     const at = pillPlace();
     start = { px: e.clientX, py: e.clientY, x: at.x, y: at.y, id: e.pointerId };
     pillDragged = false;
