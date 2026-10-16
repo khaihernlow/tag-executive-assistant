@@ -26,6 +26,7 @@
     <symbol id="i-upload" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m17 8-5-5-5 5"/><path d="M12 3v12"/></symbol>
     <symbol id="i-square" viewBox="0 0 24 24"><rect width="14" height="14" x="5" y="5" rx="2"/></symbol>
     <symbol id="i-clipboard" viewBox="0 0 24 24"><rect width="8" height="4" x="8" y="2" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/></symbol>
+    <symbol id="i-grip-vertical" viewBox="0 0 24 24"><circle cx="9" cy="12" r="1"/><circle cx="9" cy="5" r="1"/><circle cx="9" cy="19" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="5" r="1"/><circle cx="15" cy="19" r="1"/></symbol>
     <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
     <symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="M12 5v14"/></symbol>
     <symbol id="i-arrow-up" viewBox="0 0 24 24"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></symbol>
@@ -116,9 +117,9 @@
         <header class="pane-head pane-head--chat chat-only">
           <h2 class="pane-head__title pane-head__title--chat" id="chat-title">New chat</h2>
           <div class="pane-head__actions">
-            <button class="tool-btn" id="record-btn" type="button" title="Record a meeting: notes are written up afterwards">
+            <button class="tool-btn" id="record-btn" type="button" aria-expanded="false" aria-controls="recstart" title="Record a meeting: notes are written up afterwards">
               {{ icon('mic') }}
-              <span>Record</span>
+              <span id="record-btn-label">Record</span>
             </button>
             <button class="tool-btn" id="notes-btn" type="button" aria-expanded="false" aria-controls="notes">
               {{ icon('notebook-pen') }}
@@ -139,21 +140,6 @@
 
           </div>
         </header>
-        <!-- While a meeting is being recorded: a band under the header (it pushes the chat down) -->
-        <div class="recbar chat-only" id="recbar" hidden role="status" aria-live="polite">
-          <div class="recbar__inner">
-            <div class="recbar__row">
-              <span class="recbar__live"><span class="recbar__dot" aria-hidden="true"></span><span class="recbar__word">Recording</span></span>
-              <span class="recbar__time" id="rec-time">0:00</span>
-              <span class="recbar__spacer"></span>
-              <button class="link-btn recbar__discard" id="rec-discard" type="button">Discard</button>
-              <button class="btn btn--sign recbar__stop" id="rec-stop" type="button">{{ icon('square') }}<span>Stop &amp; save</span></button>
-            </div>
-            <label class="recbar__for"><span>For</span>
-              <select id="rec-meeting" class="slip__field-input"></select>
-            </label>
-          </div>
-        </div>
         <main class="scroll view" id="view-chat" aria-label="Chat" hidden>
           <section class="block block--thread" aria-label="Conversation">
             <p class="topic" id="topic" hidden></p>
@@ -287,6 +273,60 @@
         Chat
       </button>
     </nav>
+  </div>
+
+  <!-- Record: pick the meeting, then start -->
+  <div class="modal recstart" id="recstart" hidden role="dialog" aria-labelledby="recstart-title">
+    <div class="modal__head">
+      <h2 class="modal__title" id="recstart-title">Record a meeting</h2>
+      <button class="link-btn" id="recstart-close" type="button">Cancel</button>
+    </div>
+    <div class="recstart__body">
+      <label class="recbar__for"><span>For</span>
+        <select id="rec-meeting" class="slip__field-input"></select>
+      </label>
+      <p class="recstart__hint">Keep the app open on screen while it records. When you stop, the notes are written up for you.</p>
+      <p class="error" id="recstart-error" hidden></p>
+      <button class="btn btn--sign recstart__go" id="rec-start" type="button">{{ icon('mic') }}<span>Start recording</span></button>
+    </div>
+  </div>
+
+  <!-- While recording: a pill over the whole app; drag it out of the way -->
+  <div class="recpill" id="recbar" hidden role="region" aria-label="Recording">
+    <div class="recpill__bar" id="rec-handle">
+      <span class="recpill__grip" aria-hidden="true">{{ icon('grip-vertical') }}</span>
+      <button class="recpill__toggle" id="rec-toggle" type="button" aria-expanded="false" aria-controls="rec-more" title="Recording options">
+        <span class="recbar__dot" aria-hidden="true"></span>
+        <span class="recpill__text">
+          <span class="recbar__time" id="rec-time" role="timer">0:00</span>
+          <span class="recpill__for" id="rec-for"></span>
+        </span>
+        {{ icon('chevron-down') }}
+      </button>
+      <button class="btn btn--sign recpill__stop" id="rec-stop" type="button">{{ icon('square') }}<span>Stop &amp; save</span></button>
+    </div>
+    <div class="recpill__more" id="rec-more" hidden>
+      <label class="recbar__for"><span>For</span>
+        <select id="rec-meeting-live" class="slip__field-input"></select>
+      </label>
+      <div class="recpill__row" id="rec-discard-row">
+        <button class="link-btn recpill__discard" id="rec-discard" type="button">Discard recording</button>
+      </div>
+      <div class="recpill__confirm" id="rec-confirm" hidden>
+        <p>Throw away <span id="rec-confirm-time"></span> of recording? This can't be undone.</p>
+        <div class="recpill__row">
+          <button class="btn" id="rec-keep" type="button">Keep recording</button>
+          <button class="btn btn--danger" id="rec-discard-yes" type="button">Discard</button>
+        </div>
+      </div>
+      <div class="recpill__confirm" id="rec-failed" hidden>
+        <p class="error" id="rec-failed-text"></p>
+        <div class="recpill__row">
+          <button class="btn" id="rec-failed-drop" type="button">Discard</button>
+          <button class="btn btn--sign" id="rec-retry" type="button">Try again</button>
+        </div>
+      </div>
+    </div>
   </div>
 
   <!-- Recent (with search) and Remembered: a pop-up near the top of the screen -->

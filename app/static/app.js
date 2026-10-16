@@ -169,10 +169,11 @@ function closePanels(except = "") {
 // ── Recent and Remembered: a pop-up near the top; nothing behind it moves ──
 
 function closePopovers() {
-  for (const id of ["recent", "memory", "source", "notes"]) {
+  for (const id of ["recent", "memory", "source", "notes", "recstart"]) {
     $(`#${id}`).hidden = true;
     $(`#${id}-btn`)?.setAttribute("aria-expanded", "false");
   }
+  $("#record-btn").setAttribute("aria-expanded", "false");
   $("#scrim").hidden = true;
   document.body.classList.remove("modal-open");
 }
@@ -181,6 +182,7 @@ function openPopover(id) {
   closePopovers();
   $(`#${id}`).hidden = false;
   $(`#${id}-btn`)?.setAttribute("aria-expanded", "true");
+  if (id === "recstart") $("#record-btn").setAttribute("aria-expanded", "true");
   $("#scrim").hidden = false;   // a click anywhere else closes it
   document.body.classList.add("modal-open");
 }
@@ -1781,11 +1783,14 @@ $("#notes-upload-input").addEventListener("change", async (e) => {
 });
 
 // Recording in the app: the phone (or laptop) mic, saved when Dave stops.
+// Record opens a small pop-up (which meeting, then Start); while it runs, a pill floats over the whole
+// app, so he can look at the brief or the day without losing it. The header button never stops it.
 let recorder = null;
 let recChunks = [];
 let recStarted = 0;
 let recTick = null;
 let recDiscarded = false;
+let recFailed = null;     // { blob, name, eventId } when saving didn't work
 
 function recordingType() {
   for (const t of ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg"]) {
@@ -1794,16 +1799,36 @@ function recordingType() {
   return "";
 }
 
+function recElapsed() {
+  const s = Math.floor((Date.now() - recStarted) / 1000);
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
+
+function recMeetingLabel() {
+  const select = $("#rec-meeting-live");
+  return select.value ? select.selectedOptions[0].textContent.replace(/^.*?\u00b7\s*/, "") : "Not a calendar meeting";
+}
+
+function showRecStart() {
+  if (recorder || recFailed) { showRecPill(true); return; }   // already recording: show its controls, don't stop
+  meetingOptions($("#rec-meeting"));
+  $("#recstart-error").hidden = true;
+  $("#rec-start").disabled = false;
+  openPopover("recstart");
+}
+
 async function startRecording() {
+  const error = (text) => { $("#recstart-error").textContent = text; $("#recstart-error").hidden = false; $("#rec-start").disabled = false; };
   if (!navigator.mediaDevices || !window.MediaRecorder) {
-    alert("This browser can't record audio. Upload a recording from Notes instead.");
+    error("This browser can't record audio. Upload a recording from Notes instead.");
     return;
   }
+  $("#rec-start").disabled = true;
   let stream;
   try {
     stream = await navigator.mediaDevices.getUserMedia({ audio: true });
   } catch {
-    alert("The microphone isn't available. Allow microphone access for this site and try again.");
+    error("The microphone isn't available. Allow microphone access for this site and try again.");
     return;
   }
   const type = recordingType();
@@ -1812,54 +1837,169 @@ async function startRecording() {
   recDiscarded = false;
   recorder.ondataavailable = (e) => { if (e.data && e.data.size) recChunks.push(e.data); };
   recorder.onstop = finishRecording;
+  // If the phone takes the mic away (a call, the app closed), keep what was recorded
+  stream.getAudioTracks().forEach((t) => t.addEventListener("ended", () => stopRecording(false)));
   recorder.start(10000);   // a chunk every 10s, so a long meeting isn't one huge buffer
   recStarted = Date.now();
-  meetingOptions($("#rec-meeting"));
-  $("#recbar").hidden = false;
+
+  const live = $("#rec-meeting-live");
+  live.replaceChildren(...[...$("#rec-meeting").options].map((o) => o.cloneNode(true)));
+  live.value = $("#rec-meeting").value;
+  $("#rec-for").textContent = recMeetingLabel();
+  closePopovers();
   $("#record-btn").classList.add("is-recording");
-  $("#record-btn").setAttribute("aria-pressed", "true");
   const tick = () => {
-    const s = Math.floor((Date.now() - recStarted) / 1000);
-    $("#rec-time").textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+    $("#rec-time").textContent = recElapsed();
+    $("#record-btn-label").textContent = recElapsed();
   };
   tick();
   recTick = setInterval(tick, 1000);
+  showRecPill(false);
+}
+
+function showRecPill(expand) {
+  const pill = $("#recbar");
+  pill.hidden = false;
+  placePill(loadPillPlace());
+  setRecMore(expand);
+}
+
+function setRecMore(open) {
+  $("#rec-more").hidden = !open;
+  $("#rec-toggle").setAttribute("aria-expanded", String(open));
+  $("#rec-confirm").hidden = true;
+  $("#rec-discard-row").hidden = !!recFailed;
+  $("#rec-failed").hidden = !recFailed;
+  placePill(pillPlace());   // keep it on screen as it grows
 }
 
 function stopRecording(discard) {
-  if (!recorder) return;
+  if (!recorder || recorder.state === "inactive") return;
   recDiscarded = discard;
   recorder.stop();
   recorder.stream.getTracks().forEach((t) => t.stop());
   clearInterval(recTick);
 }
 
-async function finishRecording() {
-  const type = recorder.mimeType || "audio/webm";
-  const eventId = $("#rec-meeting").value;
+function endRecordingUi() {
   recorder = null;
   $("#recbar").hidden = true;
   $("#record-btn").classList.remove("is-recording");
-  $("#record-btn").removeAttribute("aria-pressed");
-  if (recDiscarded || !recChunks.length) return;
+  $("#record-btn-label").textContent = "Record";
+  $("#rec-stop").disabled = false;
+  $("#rec-stop").hidden = false;
+  $("#recbar").classList.remove("is-failed");
+}
+
+async function finishRecording() {
+  const type = recorder.mimeType || "audio/webm";
+  const eventId = $("#rec-meeting-live").value;
+  if (recDiscarded || !recChunks.length) { endRecordingUi(); return; }
   const blob = new Blob(recChunks, { type });
   const ext = type.includes("mp4") ? "m4a" : type.includes("ogg") ? "ogg" : "webm";
+  await saveRecording({ blob, name: `recording.${ext}`, eventId });
+}
+
+async function saveRecording(rec) {
+  $("#rec-stop").disabled = true;
+  $("#rec-time").textContent = "Saving\u2026";
   try {
-    const note = await uploadRecording(blob, `recording.${ext}`, eventId);
+    const note = await uploadRecording(rec.blob, rec.name, rec.eventId);
+    recFailed = null;
+    endRecordingUi();
     openNote(note.id);
   } catch (err) {
-    alert(`The recording couldn't be saved: ${err.message}`);
+    // Don't lose the meeting: keep the pill up with Try again
+    recFailed = rec;
+    recorder = null;
+    $("#rec-time").textContent = "Not saved";
+    $("#record-btn-label").textContent = "Not saved";
+    $("#recbar").classList.add("is-failed");
+    $("#rec-failed-text").textContent = `The recording couldn't be saved: ${err.message}`;
+    $("#rec-stop").hidden = true;
+    setRecMore(true);
   }
 }
 
-$("#record-btn").addEventListener("click", () => (recorder ? stopRecording(false) : startRecording()));
+$("#record-btn").addEventListener("click", () => ($("#recstart").hidden ? showRecStart() : closePopovers()));
+$("#recstart-close").addEventListener("click", closePopovers);
+$("#rec-start").addEventListener("click", startRecording);
 $("#rec-stop").addEventListener("click", () => stopRecording(false));
+$("#rec-toggle").addEventListener("click", () => {
+  if (pillDragged) return;
+  setRecMore($("#rec-more").hidden);
+});
+$("#rec-meeting-live").addEventListener("change", () => { $("#rec-for").textContent = recMeetingLabel(); });
 $("#rec-discard").addEventListener("click", () => {
-  if (confirm("Discard this recording?")) stopRecording(true);
+  $("#rec-confirm-time").textContent = recElapsed();
+  $("#rec-discard-row").hidden = true;
+  $("#rec-confirm").hidden = false;
+  $("#rec-keep").focus();
+});
+$("#rec-keep").addEventListener("click", () => setRecMore(true));
+$("#rec-discard-yes").addEventListener("click", () => stopRecording(true));
+$("#rec-retry").addEventListener("click", () => {
+  $("#rec-failed").hidden = true;
+  saveRecording({ ...recFailed, eventId: $("#rec-meeting-live").value });
+});
+$("#rec-failed-drop").addEventListener("click", () => {
+  recFailed = null;
+  $("#rec-stop").hidden = false;
+  endRecordingUi();
 });
 window.addEventListener("beforeunload", (e) => {   // closing the page mid-meeting would lose it
-  if (recorder) { e.preventDefault(); e.returnValue = ""; }
+  if (recorder || recFailed) { e.preventDefault(); e.returnValue = ""; }
 });
+
+// Dragging the pill: anywhere on its bar except the buttons' taps; it stays on screen and remembers where it was.
+let pillDragged = false;
+function pillPlace() {
+  const pill = $("#recbar");
+  return { x: pill.offsetLeft, y: pill.offsetTop };
+}
+function loadPillPlace() {
+  try {
+    const saved = JSON.parse(localStorage.getItem("recPill") || "null");
+    if (saved && typeof saved.x === "number") return saved;
+  } catch { /* no storage: use the default */ }
+  const pill = $("#recbar");
+  return { x: (innerWidth - pill.offsetWidth) / 2, y: 72 };   // centred, just under the header
+}
+function placePill({ x, y }) {
+  const pill = $("#recbar");
+  const pad = 8;
+  pill.style.left = `${Math.round(Math.min(Math.max(pad, x), innerWidth - pill.offsetWidth - pad))}px`;
+  pill.style.top = `${Math.round(Math.min(Math.max(pad, y), innerHeight - pill.offsetHeight - pad))}px`;
+}
+(() => {
+  const handle = $("#rec-handle");
+  let start = null;
+  handle.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0 || e.target.closest("#rec-stop")) return;
+    const at = pillPlace();
+    start = { px: e.clientX, py: e.clientY, x: at.x, y: at.y, id: e.pointerId };
+    pillDragged = false;
+  });
+  window.addEventListener("pointermove", (e) => {
+    if (!start || e.pointerId !== start.id) return;
+    const dx = e.clientX - start.px, dy = e.clientY - start.py;
+    if (!pillDragged && Math.hypot(dx, dy) < 6) return;   // a tap, not a drag
+    if (!pillDragged) { pillDragged = true; $("#recbar").classList.add("is-dragging"); }
+    placePill({ x: start.x + dx, y: start.y + dy });
+  });
+  const end = () => {
+    if (!start) return;
+    start = null;
+    $("#recbar").classList.remove("is-dragging");
+    if (pillDragged) {
+      try { localStorage.setItem("recPill", JSON.stringify(pillPlace())); } catch { /* fine */ }
+      setTimeout(() => { pillDragged = false; }, 0);   // swallow the click that ends a drag
+    }
+  };
+  window.addEventListener("pointerup", end);
+  window.addEventListener("pointercancel", end);
+  window.addEventListener("resize", () => { if (!$("#recbar").hidden) placePill(pillPlace()); });
+})();
 
 // ── what the assistant remembers ───────────────────────────────────────────────────────────
 
