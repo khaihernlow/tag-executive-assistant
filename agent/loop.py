@@ -41,7 +41,15 @@ Rules:
   undo it on Today); less certain junk goes on a slip. Say what it did and anything it was unsure about.
 - Be brief and concrete, the way a sharp human assistant would write to a busy CEO, often on his phone.
 - Write plain sentences. Do not use em dashes or en dashes.
-- Search with the most distinctive word (a name or company), not a long phrase."""
+- Search with the most distinctive word (a name or company), not a long phrase.
+- Which system: HubSpot is TAG's sales and marketing CRM (prospects and clients, contacts, who called or met
+  whom, notes, tasks, ZoomInfo data): hubspot_query to find, count or group; hubspot_record for one company's
+  whole picture. Autotask is the service side and the real pipeline: opportunities with stages and close
+  dates, quotes, contracts, projects, time. "Pipeline", "what's closing" -> Autotask, not HubSpot deals.
+- Settle the facts before writing; don't think out loud or correct yourself mid-reply. If two results
+  disagree, use the one whose conditions match the question.
+- When a HubSpot result lists its conditions, say briefly what you counted ("16 customers not contacted
+  since April") so Dave can tell you understood the question."""
 
 
 @dataclass
@@ -150,6 +158,10 @@ STEP_LABELS = {
     "onboarding_status": "Checking onboarding projects",
     "complete_tasks": "Preparing the task update",
     "start_renewal": "Preparing the renewal opportunity",
+    "hubspot_query": "Searching HubSpot",
+    "hubspot_record": "Looking it up in HubSpot",
+    "hubspot_fields": "Checking HubSpot's fields",
+    "hubspot_meeting_link": "Getting your meeting link",
 }
 
 

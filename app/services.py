@@ -32,7 +32,9 @@ from connectors.teams import Teams
 from agent.lunch import Lunch
 from agent.mealeo_order import fill_checkout
 from agent.notes import notes_tools
+from agent.hubspot import HubSpot, hubspot_tools
 from connectors.azure_speech import AzureSpeech
+from connectors.hubspot import HubSpotClient
 from llm.hatzai import HatzAIProvider
 from app.worker import Worker
 from store.db import Store
@@ -67,6 +69,8 @@ def build_services() -> Services:
     llm = HatzAIProvider()
     # The assistant's own account (assistant@), for things it does as itself: Teams messages.
     own = GraphClient.as_account(os.environ["ASSISTANT_ACCOUNT"]) if os.environ.get("ASSISTANT_ACCOUNT") else None
+    hubspot_client = HubSpotClient.from_env()
+    hubspot = HubSpot(hubspot_client, graph) if hubspot_client else None
     # Quick, high-volume judgments (junk triage) use a faster, cheaper model.
     fast_llm = HatzAIProvider(model=os.environ.get("HATZAI_FAST_MODEL", "anthropic.claude-haiku-4-5"))
     registry = ToolRegistry(
@@ -85,6 +89,7 @@ def build_services() -> Services:
         + (project_tools(autotask, directory, actions, picks) if autotask else [])
         + (quote_tools(autotask, directory) if autotask else [])
         + (linkedin_tools(linkedin, graph, directory) if linkedin else [])
+        + (hubspot_tools(hubspot) if hubspot else [])
     )
     assistant = Assistant(llm, registry, store, actions, memory)
     lunch = Lunch(graph, Teams(own, os.environ["ASSISTANT_ACCOUNT"], store), llm, store, checkout=fill_checkout) if own else None

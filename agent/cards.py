@@ -96,6 +96,15 @@ def build_cards(trace: list[ToolTrace]) -> list[dict[str, Any]]:
         elif t.name == "find_opportunities" and data.get("opportunities"):
             cards.append({"type": "opportunities", "opportunities": data["opportunities"][:25]})
 
+        elif t.name == "hubspot_query" and (data.get("rows") or data.get("groups")):
+            cards.append({"type": "hubspot", **{k: data.get(k) for k in ("object", "matching", "conditions", "groups",
+                                                                          "total", "counted", "rows")}})
+
+        elif t.name == "hubspot_record" and data.get("title") and not data.get("choose"):
+            cards.append({"type": "hubspot_record", **{k: data.get(k) for k in (
+                "object", "title", "sub", "url", "owner", "lifecycle_stage", "contacts", "deals", "recent_activity",
+                "upcoming_meetings", "meetings_count", "calls_count", "notes_count")}})
+
         elif t.name in ("create_event", "move_event", "cancel_event", "respond_to_invite",
                         "create_opportunity", "update_opportunity", "start_renewal", "complete_tasks"):
             card = {"type": "action", **{k: data.get(k) for k in ("action_id", "kind", "status", "summary", "result", "error")}}

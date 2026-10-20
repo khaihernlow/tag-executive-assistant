@@ -1144,3 +1144,20 @@ svg.icon { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: ro
 .recstart__joins { margin: 0; padding: var(--s2) var(--s3); border-radius: var(--r-sm); background: var(--sunken);
                    font-size: 13px; line-height: 1.5; color: var(--ink-soft); }
 .recstart__joins[hidden] { display: none; }
+
+/* HubSpot cards: what was counted, groups as quiet bars, records that open in HubSpot */
+.hs-conditions { margin: 0 0 var(--s2); font-size: 13px; line-height: 1.45; color: var(--ink-faint); }
+.hs-groups { list-style: none; margin: 0 0 var(--s2); padding: 0; display: grid; gap: 6px; }
+.hs-group { display: grid; grid-template-columns: minmax(0, 11em) 1fr auto; align-items: center; gap: var(--s2); font-size: 14px; }
+.hs-group__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); }
+.hs-group__bar { height: 8px; border-radius: 4px; background: var(--sunken); overflow: hidden; }
+.hs-group__bar > span { display: block; height: 100%; border-radius: 4px; background: var(--navy); opacity: 0.75; }
+.hs-group__n { font-variant-numeric: tabular-nums; color: var(--ink-soft); font-size: 13px; text-align: right; }
+@media (max-width: 480px) { .hs-group { grid-template-columns: minmax(0, 8em) 1fr auto; } }
+.hs-more { margin-top: var(--s2); }
+.hs-more > summary { display: flex; align-items: center; gap: var(--s1); cursor: pointer; list-style: none;
+                     font-size: 13px; font-weight: 600; color: var(--ink-soft); padding: var(--s1) 0; }
+.hs-more > summary::-webkit-details-marker { display: none; }
+.hs-more > summary svg.icon { width: 14px; height: 14px; transition: transform 0.15s ease-out; }
+.hs-more[open] > summary svg.icon { transform: rotate(180deg); }
+.hs-record .row__top svg.icon { width: 14px; height: 14px; color: var(--ink-faint); flex: none; }

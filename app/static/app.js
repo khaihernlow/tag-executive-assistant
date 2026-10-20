@@ -1348,6 +1348,74 @@ function opportunitiesCard(card) {
         o.overdue ? el("span", { class: "row__preview overdue", text: "Past its close date" }) : null)))));
 }
 
+// HubSpot: what was counted (in words), any groups as bars, then the records, each opening in HubSpot
+const HS_MAIN = ["owner", "lifecycle_stage", "activity_date", "due_date", "last_contacted", "amount", "create_date", "email"];
+
+function hsMeta(r) {
+  // The details that matter for a row, in a steady order, without repeating the title
+  const bits = [];
+  for (const k of HS_MAIN) {
+    if (r[k] === undefined || r[k] === null || r[k] === "") continue;
+    if (k === "amount") bits.push(`$${Math.round(Number(r[k])).toLocaleString()}`);
+    else if (k === "last_contacted") bits.push(`last contacted ${r[k]}`);
+    else if (k === "due_date") bits.push(`due ${r[k]}`);
+    else if (k === "create_date") bits.push(`created ${r[k]}`);
+    else bits.push(String(r[k]));
+  }
+  return bits.join(" · ");
+}
+
+function hubspotRows(rows) {
+  return el("ul", { class: "rows" }, rows.map((r) => el("li", {},
+    el(r.url ? "a" : "div", { class: "row row--tap", ...(r.url ? { href: r.url, target: "_blank", rel: "noopener" } : {}) },
+      el("span", { class: "row__top" }, el("span", { class: "row__title", text: r.title })),
+      r.sub ? el("span", { class: "row__sub", text: r.sub }) : null,
+      hsMeta(r) ? el("span", { class: "row__preview", text: hsMeta(r) }) : null))));
+}
+
+function hsMore(title, rows) {
+  return rows && rows.length ? el("details", { class: "hs-more" },
+    el("summary", {}, title, icon("chevron-down")), hubspotRows(rows)) : null;
+}
+
+function hubspotCard(card) {
+  const body = [el("p", { class: "card__label", text: `HubSpot · ${Number(card.matching || 0).toLocaleString()} ${card.object}` })];
+  if (card.conditions && card.conditions.length) {
+    body.push(el("p", { class: "hs-conditions", text: card.conditions.join(" · ") }));
+  }
+  const groups = card.groups || [];
+  if (groups.length) {
+    const value = (g) => (g.total !== undefined && g.total !== null ? g.total : g.count);
+    const top = Math.max(...groups.map(value), 1);
+    body.push(el("ul", { class: "hs-groups" }, groups.slice(0, 12).map((g) => el("li", { class: "hs-group" },
+      el("span", { class: "hs-group__name", text: g.group }),
+      el("span", { class: "hs-group__bar", "aria-hidden": "true" },
+        el("span", { style: `width:${Math.max(2, Math.round((value(g) / top) * 100))}%` })),
+      el("span", { class: "hs-group__n", text: g.total !== undefined && g.total !== null
+        ? `$${Math.round(g.total).toLocaleString()} · ${g.count}` : Number(g.count).toLocaleString() })))));
+    body.push(hsMore(`Examples · ${(card.rows || []).length}`, card.rows));
+  } else if (card.rows && card.rows.length) {
+    body.push(hubspotRows(card.rows));
+  }
+  return el("div", { class: "card" }, body.filter(Boolean));
+}
+
+function hubspotRecordCard(card) {
+  const counts = [["meetings", card.meetings_count], ["calls", card.calls_count], ["notes", card.notes_count]]
+    .filter(([, n]) => n).map(([w, n]) => `${n} ${n === 1 ? w.slice(0, -1) : w}`).join(" · ");
+  return el("div", { class: "card" }, [
+    el("p", { class: "card__label", text: "HubSpot" }),
+    el(card.url ? "a" : "div", { class: "row row--tap hs-record", ...(card.url ? { href: card.url, target: "_blank", rel: "noopener" } : {}) },
+      el("span", { class: "row__top" }, el("span", { class: "row__title", text: card.title }), card.url ? icon("external-link") : null),
+      card.sub ? el("span", { class: "row__sub", text: card.sub }) : null,
+      el("span", { class: "row__preview", text: [card.lifecycle_stage, card.owner && `owner ${card.owner}`, counts].filter(Boolean).join(" · ") })),
+    hsMore(`Coming up · ${(card.upcoming_meetings || []).length}`, card.upcoming_meetings),
+    card.contacts ? hsMore(`People · ${card.contacts.count}`, card.contacts.rows) : null,
+    hsMore("Recent activity", card.recent_activity),
+    card.deals && card.deals.count ? hsMore(`Deals · ${card.deals.count}`, card.deals.rows) : null,
+  ].filter(Boolean));
+}
+
 function emailCard(card) {
   return el("div", { class: "card" },
     el("p", { class: "card__label", text: "Email" }),
@@ -1393,6 +1461,8 @@ function renderCard(card) {
     case "slots": return slotsCard(card);
     case "emails": return emailsCard(card);
     case "opportunities": return opportunitiesCard(card);
+    case "hubspot": return hubspotCard(card);
+    case "hubspot_record": return hubspotRecordCard(card);
     case "timesheet": return timesheetCard(card);
     case "renewals": return renewalsCard(card);
     case "tasks": return tasksCard(card);
