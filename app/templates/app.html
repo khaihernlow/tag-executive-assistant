@@ -356,6 +356,11 @@
       <input id="notes-search" type="search" placeholder="Search notes" autocomplete="off" enterkeyhint="search">
       <button class="link-btn" id="notes-close" type="button">Close</button>
     </div>
+    <div class="meeting-tabs notes-tabs" role="tablist" aria-label="Meeting notes and to-dos">
+      <button class="meeting-tabs__tab" id="notes-tab-notes" type="button" role="tab" aria-selected="true">Notes</button>
+      <button class="meeting-tabs__tab" id="notes-tab-todos" type="button" role="tab" aria-selected="false">To-dos<span class="notes-tabs__count" id="todos-count"></span></button>
+    </div>
+    <div id="notes-view">
     <div class="notes-choices">
       <button class="notes-choice" id="notes-upload" type="button">
         <span class="notes-choice__icon">{{ icon('upload') }}</span>
@@ -382,6 +387,8 @@
     </form>
     <p class="notes-list-title" id="notes-list-title">Notes</p>
     <ul class="modal__list rows" id="notes-list"></ul>
+    </div>
+    <div class="todos" id="todos-view" hidden></div>
   </div>
   <div class="modal" id="memory" hidden role="dialog" aria-labelledby="memory-title">
     <div class="modal__head">

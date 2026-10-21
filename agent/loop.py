@@ -159,6 +159,7 @@ STEP_LABELS = {
     "onboarding_status": "Checking onboarding projects",
     "complete_tasks": "Preparing the task update",
     "start_renewal": "Preparing the renewal opportunity",
+    "find_todos": "Checking your to-dos",
     "hubspot_query": "Searching HubSpot",
     "hubspot_record": "Looking it up in HubSpot",
     "hubspot_fields": "Checking HubSpot's fields",

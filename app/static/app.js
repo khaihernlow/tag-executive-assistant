@@ -2019,20 +2019,89 @@ async function loadNotesList(query) {
   }
 }
 
+// Notes | To-dos: the action items from all those meetings, Dave's first, then what others owe him
+let notesTab = "notes";
+function setNotesTab(tab) {
+  notesTab = tab;
+  $("#notes-tab-notes").setAttribute("aria-selected", String(tab === "notes"));
+  $("#notes-tab-todos").setAttribute("aria-selected", String(tab === "todos"));
+  $("#notes-view").hidden = tab !== "notes";
+  $("#todos-view").hidden = tab !== "todos";
+  $("#notes-search").placeholder = tab === "todos" ? "Search to-dos" : "Search notes";
+  if (tab === "todos") loadTodos($("#notes-search").value.trim());
+  else loadNotesList($("#notes-search").value.trim());
+}
+$("#notes-tab-notes").addEventListener("click", () => setNotesTab("notes"));
+$("#notes-tab-todos").addEventListener("click", () => setNotesTab("todos"));
+
+let todosSeq = 0;
+async function loadTodos(query) {
+  const seq = ++todosSeq;
+  const box = $("#todos-view");
+  if (!box.children.length) box.replaceChildren(el("ul", { class: "modal__list rows" }, ...skeletonRows(4)));
+  try {
+    const t = await api(`/api/todos${query ? `?q=${encodeURIComponent(query)}` : ""}`);
+    if (seq !== todosSeq) return;
+    $("#todos-count").textContent = t.counts.mine ? ` \u00b7 ${t.counts.mine}` : "";
+    const ago = (days) => (days === 0 ? "today" : days === 1 ? "yesterday" : `${days} days ago`);
+    const item = (x, showOwner) => {
+      const box = el("input", { type: "checkbox", "aria-label": `Done: ${x.what}` });
+      box.checked = x.done;
+      box.addEventListener("change", async () => {
+        box.disabled = true;
+        try {
+          await api(`/api/todos/${encodeURIComponent(x.id)}`, { method: "POST", body: JSON.stringify({ done: box.checked }) });
+          loadTodos($("#notes-search").value.trim());
+        } catch (err) {
+          box.checked = !box.checked;
+          box.disabled = false;
+        }
+      });
+      const meta = [showOwner ? x.owner : "", x.shared_with && x.shared_with.length ? `with ${x.shared_with.join(", ")}` : "",
+                    x.meeting, x.held ? ago(x.age_days) : ""].filter(Boolean).join(" \u00b7 ");
+      return el("li", { class: `todo${x.done ? " todo--done" : ""}` },
+        el("label", { class: "todo__check" }, box),
+        el("button", { class: "todo__body", type: "button", title: "Open the meeting's notes", onclick: () => openNote(x.note_id) },
+          el("span", { class: "todo__what", text: x.what }),
+          el("span", { class: `todo__meta${x.old ? " todo__meta--old" : ""}`, text: x.old ? `${meta} \u00b7 open 2+ weeks` : meta })));
+    };
+    const parts = [];
+    parts.push(el("p", { class: "notes-list-title", text: `Yours \u00b7 ${t.counts.mine} open` +
+      (t.counts.mine_old ? ` \u00b7 ${t.counts.mine_old} open two weeks or more` : "") }));
+    parts.push(t.mine.length ? el("ul", { class: "todos__list" }, t.mine.map((x) => item(x, false)))
+      : el("p", { class: "itinerary__empty", text: query ? `None of yours mention \u201c${query}\u201d.` : "Nothing open from your meetings." }));
+    if (t.others.length) {
+      parts.push(el("p", { class: "notes-list-title", text: `Waiting on others \u00b7 ${t.counts.others}` }));
+      parts.push(...t.others.map((g) => el("details", { class: "todos__group" },
+        el("summary", {}, el("span", { text: g.owner }), el("span", { class: "todos__n", text: String(g.items.length) }), icon("chevron-down")),
+        el("ul", { class: "todos__list" }, g.items.map((x) => item(x, false))))));
+    }
+    if (t.done.length) {
+      parts.push(el("details", { class: "todos__group todos__group--done" },
+        el("summary", {}, el("span", { text: "Done" }), el("span", { class: "todos__n", text: String(t.done.length) }), icon("chevron-down")),
+        el("ul", { class: "todos__list" }, t.done.map((x) => item(x, !x.mine)))));
+    }
+    parts.push(el("p", { class: "todos__foot", text: `From the action items in your meeting notes, last ${t.days} days. Tick what's done.` }));
+    $("#todos-view").replaceChildren(...parts);
+  } catch (err) {
+    if (seq === todosSeq) $("#todos-view").replaceChildren(el("p", { class: "error", text: `Couldn't load: ${err.message}` }));
+  }
+}
+
 function showNotes() {
   openPopover("notes");
   $("#notes-search").value = "";
   $("#notes-paste-form").hidden = true;
   $("#notes-paste").setAttribute("aria-expanded", "false");
   $("#notes-list").replaceChildren();
-  loadNotesList("");
+  setNotesTab(notesTab);
 }
 $("#notes-btn").addEventListener("click", () => ($("#notes").hidden ? showNotes() : closePopovers()));
 $("#notes-close").addEventListener("click", closePopovers);
 let notesTimer = null;
 $("#notes-search").addEventListener("input", (e) => {
   clearTimeout(notesTimer);
-  notesTimer = setTimeout(() => loadNotesList(e.target.value.trim()), 200);
+  notesTimer = setTimeout(() => (notesTab === "todos" ? loadTodos : loadNotesList)(e.target.value.trim()), 200);
 });
 $("#notes-paste").addEventListener("click", () => {
   const form = $("#notes-paste-form");

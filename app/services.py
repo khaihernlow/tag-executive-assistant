@@ -32,6 +32,7 @@ from connectors.teams import Teams
 from agent.lunch import Lunch
 from agent.mealeo_order import fill_checkout
 from agent.notes import notes_tools
+from agent.todos import todo_tools
 from agent.hubspot import HubSpot, hubspot_tools
 from connectors.azure_speech import AzureSpeech
 from connectors.hubspot import HubSpotClient
@@ -81,6 +82,7 @@ def build_services() -> Services:
         + scheduling_tools(graph, memory)
         + memory_tools(memory)
         + notes_tools(store)
+        + todo_tools(store)
         + junk_tools(graph, fast_llm, actions, store)
         + [create_event_tool(graph, actions)]
         + change_tools(graph, actions)

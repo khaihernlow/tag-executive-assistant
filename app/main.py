@@ -419,6 +419,25 @@ def move_notes(nid: str, body: NoteMove, user: dict = Depends(require_auth), svc
     return _note_out(svc.store.get_note(kept), full=True)
 
 
+# ── to-dos (from the action items in meeting notes) ──
+
+@app.get("/api/todos")
+def todos(q: str = "", days: int = 60, user: dict = Depends(require_auth), svc=Depends(services)):
+    from agent.todos import view
+    return view(svc.store, days=max(1, min(days, 365)), query=q)
+
+
+class TodoIn(BaseModel):
+    done: bool = True
+
+
+@app.post("/api/todos/{item_id}")
+def todo_done(item_id: str, body: TodoIn, user: dict = Depends(require_auth), svc=Depends(services)):
+    from agent.todos import set_done
+    set_done(svc.store, item_id, body.done)
+    return {"id": item_id, "done": body.done}
+
+
 @app.get("/api/conversations")
 def conversations(q: str = "", user: dict = Depends(require_auth), svc=Depends(services)):
     """Recent conversations, or with q, those whose title or text mention it."""

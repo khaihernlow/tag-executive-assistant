@@ -149,6 +149,12 @@ def as_transcript(notes: dict[str, Any]) -> str:
     return number_lines(lines)
 
 
+def _is_dave(owner: str, first: str = "dave") -> bool:
+    """TeamsMaestro writes him as "Dave Vener" or "David Vener", sometimes with others ("Dave Vener, RJ Gray")."""
+    from agent.todos import is_dave
+    return is_dave(owner)
+
+
 def as_digest(notes: dict[str, Any], dave: str = "Dave Vener") -> dict[str, Any]:
     first = dave.split()[0].lower()
     return {
@@ -157,7 +163,7 @@ def as_digest(notes: dict[str, Any], dave: str = "Dave Vener") -> dict[str, Any]
         "decisions": [], "open_questions": [],
         "sections": notes["sections"],
         "action_items": [{"what": a["what"], "owner": a["owner"], "due_text": "", "due": None,
-                          "dave": (a["owner"] or "").lower().startswith((first, "dave"))} for a in notes["action_items"]],
+                          "dave": _is_dave(a["owner"], first)} for a in notes["action_items"]],
         "dropped": 0,
     }
 

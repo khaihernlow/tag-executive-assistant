@@ -1178,3 +1178,28 @@ svg.icon { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: ro
 .ns-link { margin: var(--s4) 0 0; font-size: 14px; }
 .ns-link a { display: inline-flex; align-items: center; gap: var(--s1); color: var(--link); }
 .ns-link svg.icon { width: 14px; height: 14px; }
+
+/* Notes | To-dos */
+.notes-tabs { margin: var(--s3) var(--s3) 0; align-self: flex-start; }
+.notes-tabs__count { font-variant-numeric: tabular-nums; color: var(--ink-faint); font-weight: 500; }
+.todos { flex: 1; min-height: 0; overflow-y: auto; padding: 0 var(--s3) var(--s3); }
+.todos__list { list-style: none; margin: var(--s2) 0 0; padding: 0; }
+.todo { display: flex; align-items: flex-start; gap: var(--s2); padding: var(--s2) var(--s1); border-radius: var(--r-md); }
+.todo:hover { background: var(--sunken); }
+.todo__check { flex: none; display: grid; place-items: center; width: 28px; height: 28px; cursor: pointer; }
+.todo__check input { width: 18px; height: 18px; accent-color: var(--navy); cursor: pointer; }
+.todo__body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; padding: 3px 0; border: 0;
+              background: none; text-align: left; font: inherit; color: var(--ink); cursor: pointer; }
+.todo__what { font-size: 14px; line-height: 1.4; }
+.todo__meta { font-size: 12px; color: var(--ink-faint); }
+.todo__meta--old { color: var(--brass); }
+.todo--done .todo__what { text-decoration: line-through; color: var(--ink-faint); }
+.todos__group { margin-top: var(--s2); border-top: 1px solid var(--rule-soft); }
+.todos__group > summary { display: flex; align-items: center; gap: var(--s2); padding: var(--s2) var(--s1); cursor: pointer;
+                          list-style: none; font-size: 14px; font-weight: 600; color: var(--ink); }
+.todos__group > summary::-webkit-details-marker { display: none; }
+.todos__group > summary svg.icon { width: 14px; height: 14px; margin-left: auto; color: var(--ink-faint); transition: transform 0.15s ease-out; }
+.todos__group[open] > summary svg.icon { transform: rotate(180deg); }
+.todos__n { font-size: 12px; font-weight: 500; color: var(--ink-faint); font-variant-numeric: tabular-nums; }
+.todos__group--done > summary { color: var(--ink-faint); }
+.todos__foot { margin: var(--s4) var(--s1) 0; font-size: 12px; color: var(--ink-ghost); }
