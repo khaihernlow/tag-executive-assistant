@@ -1,6 +1,6 @@
 {
-  "name": "TAG Assistant",
-  "short_name": "Assistant",
+  "name": "Geronimo",
+  "short_name": "Geronimo",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

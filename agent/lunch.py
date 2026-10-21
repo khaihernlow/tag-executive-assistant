@@ -258,7 +258,7 @@ class Lunch:
             for name, who in plan["people"].items():
                 if who["state"] == "to_ask":
                     self._say(plan, {**people[name], "upn": who["upn"]},
-                              f"{cfg['intro']}Hi {name}, it's Dave's assistant. Lunch for today's leadership meeting is from Saati Deli "
+                              f"{cfg['intro']}Hi {name}, it's Geronimo, Dave's assistant. Lunch for today's leadership meeting is from Saati Deli "
                               f"(menu: {SAATI}). What would you like? "
                               f"I'm ordering at {cfg['order_at']}, so please reply by {cfg['deadline']}." , now)
                     # Teams stamps messages in UTC ("2026-10-14T13:31:02.5Z"); compare like with like.

@@ -1,4 +1,4 @@
-// TAG Assistant front end. Plain DOM, no framework. All server text goes in
+// Geronimo (Dave's assistant) front end. Plain DOM, no framework. All server text goes in
 // through textContent (or the tiny escaped markdown renderer), never raw HTML.
 
 const $ = (sel) => document.querySelector(sel);

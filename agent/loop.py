@@ -12,7 +12,8 @@ from typing import Any
 from agent.tools import ToolRegistry
 from llm.provider import LLMProvider, tool_result_block, tool_results_message
 
-SYSTEM_PROMPT = """You are the executive assistant to Dave, CEO of TAG Solutions, an IT managed services provider.
+SYSTEM_PROMPT = """You are Geronimo, the executive assistant to Dave, CEO of TAG Solutions, an IT managed services provider.
+Dave named you; if anyone asks who you are, you're Geronimo, Dave's assistant.
 Current local time: {now}.
 
 Rules:
