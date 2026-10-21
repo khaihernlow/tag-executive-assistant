@@ -161,7 +161,7 @@ def test_the_slip_lays_out_the_record_and_dave_can_edit_title_and_description():
         "description": "Draft scope"}, today=TODAY)
     d = slip["display"]
     assert d["title"] == "Draft title" and d["description"] == "Draft scope"
-    assert [r[0] for r in d["rows"]] == ["Company", "Stage", "Closes", "Owner", "Contact"]
+    assert [r[0] for r in d["rows"]] == ["Company", "Stage", "Closes", "Owner", "Contact", "One-time $", "Monthly $", "Term (months)"]
     assert d["rows"][4][1] == "Casey Morgan"
     assert d["warnings"] and d["warnings"][0].startswith("Northwind Savings Bank already has 1 open")
     actions.approve(slip["action_id"], decided_by="test", edits={"title": "Onsite assessment", "description": "Real scope"})
@@ -258,3 +258,26 @@ def test_opportunity_list_highlights():
     assert (h["count"], h["past_close_date"]) == (2, 1)
     assert h["oldest_past_close"] == ["Managed Services (Northwind Savings Bank, Business Case Alignment, closes Jun 9, 2026)"]
     assert h["biggest_amount"][0].startswith("Firewall refresh") and h["biggest_amount"][0].endswith("$9,000")
+
+
+def test_an_estimate_puts_the_opportunity_in_pipeline_before_the_quote():
+    from agent.opportunities import estimate_fields
+    # How TAG's quoted opportunities add up: $1,800 + $1,800 x 36 = $66,600
+    assert estimate_fields("1800", "1800", "36") == {"onetimeRevenue": 1800.0, "monthlyRevenue": 1800.0, "totalAmountMonths": 36,
+                                                     "amount": 66600.0, "useQuoteTotals": False}
+    assert estimate_fields("", "", "") == {"amount": 0.0, "useQuoteTotals": True}      # no estimate: the quote fills it
+    assert estimate_fields("$2.5k", "", "")["amount"] == 2500.0
+    assert estimate_fields("", "500", "")["totalAmountMonths"] == 12                  # monthly with no term: a year
+
+    at, directory, actions = setup()
+    slip = propose_create(directory, actions, {"company_id": 2, "title": "Phones", "monthly_amount": 1500, "term_months": 36},
+                          today=TODAY)
+    assert slip["display"]["values"]["est_monthly"] == "1500" and slip["display"]["values"]["est_term"] == "36"
+    # Dave adds a one-time setup fee on the slip
+    actions.approve(slip["action_id"], decided_by="test", edits={"est_onetime": "2000", "est_monthly": "1500", "est_term": "36"})
+    body = at.created[0][1]
+    assert (body["amount"], body["onetimeRevenue"], body["useQuoteTotals"]) == (56000.0, 2000.0, False)
+
+    slip = propose_create(directory, actions, {"company_id": 2, "title": "Phones", "monthly_amount": 1500}, today=TODAY)
+    actions.approve(slip["action_id"], decided_by="test", edits={"est_onetime": "0", "est_monthly": "0", "est_term": "0"})
+    assert at.created[1][1]["useQuoteTotals"] is True and at.created[1][1]["amount"] == 0.0   # cleared on the slip

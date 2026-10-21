@@ -1091,10 +1091,28 @@ function fillSlip(node, action) {
         const input = spec.options
           ? el("select", { class: "slip__field-input", "aria-label": label },
               ...spec.options.map(([v, text]) => el("option", { value: v, text })))
-          : el("input", { class: "slip__field-input", type: spec.type || "text", "aria-label": label });
+          : el("input", { class: "slip__field-input", type: spec.type || "text", "aria-label": label,
+                          ...(spec.placeholder ? { placeholder: spec.placeholder } : {}),
+                          ...(spec.type === "number" ? { min: "0", step: "any", inputmode: "decimal" } : {}) });
         input.value = values[field] ?? "";
         fieldInputs[field] = input;
         shown = input;
+        if (spec.estimate_total) {
+          // The pipeline value as Dave types: one-time + monthly x months (Autotask's own sum)
+          noteNode = el("span", { class: "slip__note" });
+          const num = (k) => parseFloat((fieldInputs[k] || {}).value || "0") || 0;
+          const total = () => {
+            const one = num("est_onetime"), month = num("est_monthly");
+            const months = Math.max(1, Math.round(num("est_term") || (month ? 12 : 1)));
+            noteNode.textContent = one || month
+              ? `Pipeline value $${Math.round(one + month * months).toLocaleString()}${month && !num("est_term") ? " (12 months assumed)" : ""}`
+              : "No estimate: it fills in from the quote";
+          };
+          queueMicrotask(() => {
+            for (const k of ["est_onetime", "est_monthly", "est_term"]) fieldInputs[k] && fieldInputs[k].addEventListener("input", total);
+            total();
+          });
+        }
         if (spec.usage) {
           // The note follows the dropdown: change the pick and it says how common the new one is
           noteNode = el("span", { class: "slip__note" });
@@ -1223,7 +1241,9 @@ function fillSlip(node, action) {
         const edits = verb !== "approve" ? null
           : action.display && (titleBox || detailsBox || Object.keys(fieldInputs).length)
             ? { ...(titleBox ? { title: titleBox.value } : {}), ...(detailsBox ? { description: detailsBox.value } : {}),
-                ...Object.fromEntries(Object.entries(fieldInputs).map(([k, input]) => [k, input.value])) }
+                // An emptied estimate is sent as 0 (blank values are ignored, which would keep the old number)
+                ...Object.fromEntries(Object.entries(fieldInputs).map(([k, input]) =>
+                  [k, input.value === "" && k.startsWith("est_") ? "0" : input.value])) }
           : emailBox ? { comment: emailBox.value }
           : keepIds.size ? { keep_ids: [...keepIds].join(",") } : null;
         const updated = await api(`/api/actions/${action.action_id}/${verb}`, {

@@ -255,6 +255,35 @@ def _close_date(value: str | None, today: date) -> date:
         raise ValueError("close_date must be YYYY-MM-DD") from e
 
 
+def _money(value: Any) -> float:
+    """'$1,500', '1.5k', 1500 -> 1500.0; blank -> 0."""
+    text = str(value or "").strip().lower().replace(",", "").replace("$", "")
+    if not text:
+        return 0.0
+    scale = 1000.0 if text.endswith("k") else 1.0
+    try:
+        return round(float(text.rstrip("k")) * scale, 2)
+    except ValueError as e:
+        raise ValueError(f"'{value}' isn't an amount.") from e
+
+
+def _fmt_amount(value: Any) -> str:
+    return "" if not value else (str(int(value)) if float(value).is_integer() else str(value))
+
+
+def estimate_fields(onetime: Any, monthly: Any, term: Any) -> dict[str, Any]:
+    """Dave's estimate in Autotask's terms. The pipeline value is one-time + monthly x months (how TAG's
+    quoted opportunities add up, e.g. $1,800 + $1,800 x 36 = $66,600). With no estimate, the
+    opportunity takes its numbers from the quote once pre-sales builds it (useQuoteTotals)."""
+    one, month = _money(onetime), _money(monthly)
+    months = int(_money(term)) if str(term or "").strip() else (12 if month else 1)
+    if not one and not month:
+        return {"amount": 0.0, "useQuoteTotals": True}
+    months = max(1, months)
+    return {"onetimeRevenue": one, "monthlyRevenue": month, "totalAmountMonths": months,
+            "amount": round(one + month * months, 2), "useQuoteTotals": False}
+
+
 def contact_choices(directory: Directory, company_id: int, contact: dict[str, Any] | None,
                     new_contact: dict[str, Any] | None) -> tuple[dict[str, Any], str]:
     """Who the opportunity is with, as a dropdown: the pick first, then the company's other contacts,
@@ -350,7 +379,8 @@ def propose_create(directory: Directory, actions: Actions, args: dict[str, Any],
         "title": title, "companyID": company_id, "ownerResourceID": owner,
         "stage": directory.stage_ids()[stage_key], "status": status, "probability": probability,
         "startDate": _at_date(today), "projectedCloseDate": _at_date(close),
-        "amount": float(args.get("amount") or 0), "cost": 0.0, "useQuoteTotals": True,
+        "cost": 0.0,
+        **estimate_fields(args.get("onetime_amount") or args.get("amount"), args.get("monthly_amount"), args.get("term_months")),
         "opportunityCategoryID": directory.category_id(args["category"]) if args.get("category") else 1,
         "description": (args.get("description") or "").strip(),
     }
@@ -384,7 +414,10 @@ def propose_create(directory: Directory, actions: Actions, args: dict[str, Any],
     rows = [["Company", company], ["Stage", f"{directory.stage_label(body['stage'])} \u00b7 {probability}%", "", "stage"],
             ["Closes", close.strftime("%b %d, %Y").replace(" 0", " "), "", "close_date"],
             ["Owner", directory.resource_name(owner), "", "owner_id"],
-            ["Contact", contact_row, "New contact" if new_contact else "", "contact_id"]]
+            ["Contact", contact_row, "New contact" if new_contact else "", "contact_id"],
+            # An optional estimate, so the opportunity counts in pipeline before pre-sales quotes it
+            ["One-time $", "", "", "est_onetime"], ["Monthly $", "", "", "est_monthly"],
+            ["Term (months)", "", "", "est_term"]]
     contact_spec, contact_value = contact_choices(directory, company_id, contact, new_contact)
     if args.get("category"):
         rows.insert(1, ["Category", args["category"].title() + "s"])
@@ -395,10 +428,15 @@ def propose_create(directory: Directory, actions: Actions, args: dict[str, Any],
         "close_date": {"type": "date"},
         "owner_id": {"options": directory.owner_choices()},
         "contact_id": contact_spec,
+        "est_onetime": {"type": "number", "placeholder": "0"},
+        "est_monthly": {"type": "number", "placeholder": "0"},
+        "est_term": {"type": "number", "placeholder": "36", "estimate_total": True},
     }
     payload: dict[str, Any] = {
         "body": body, "title": title, "description": body["description"],
         "stage": stage_key, "close_date": close.isoformat(), "owner_id": str(owner), "contact_id": contact_value,
+        "est_onetime": _fmt_amount(body.get("onetimeRevenue")), "est_monthly": _fmt_amount(body.get("monthlyRevenue")),
+        "est_term": str(body["totalAmountMonths"]) if body.get("monthlyRevenue") else "",
         # What each stage means in Autotask terms, so an edited stage saves correctly.
         "stage_map": {k: [stages[k], STAGES[k][1], STAGES[k][2]] for k in STAGES if k in stages},
         "display": {"rows": rows, "edit": edit_fields, "warnings": warnings, "details_label": "Description"},
@@ -472,6 +510,10 @@ def apply_slip_edits(payload: dict[str, Any]) -> dict[str, Any]:
     owners = {o[0] for o in edit.get("owner_id", {}).get("options", [])}
     if payload.get("owner_id") in owners:
         body["ownerResourceID"] = int(payload["owner_id"])
+    if any(k in payload for k in ("est_onetime", "est_monthly", "est_term")):
+        for key in ("onetimeRevenue", "monthlyRevenue", "totalAmountMonths"):
+            body.pop(key, None)
+        body.update(estimate_fields(payload.get("est_onetime"), payload.get("est_monthly"), payload.get("est_term")))
     contacts = {o[0] for o in edit.get("contact_id", {}).get("options", [])}
     picked = payload.get("contact_id")
     if picked in contacts:
@@ -506,6 +548,7 @@ def opportunity_kinds(at: Any) -> list[ActionKind]:
     ticket_fields = ("ticket", "ticket_title", "ticket_description", "ticket_category", "ticket_work_type",
                      "ticket_issue", "ticket_priority", "ticket_due", "ticket_queue")
     return [ActionKind(CREATE_KIND, create, editable=("title", "description", "stage", "close_date", "owner_id", "contact_id",
+                                                     "est_onetime", "est_monthly", "est_term",
                                                      *ticket_fields)),
             ActionKind(UPDATE_KIND, update)]
 
@@ -566,7 +609,9 @@ def opportunity_tools(directory: Directory, actions: Actions, llm: Any = None) -
                 "contact_email": {"type": "string"}, "contact_name": {"type": "string", "description": "Full name"},
                 "contact_title": {"type": "string", "description": "Their job title, if known"},
                 "description": {"type": "string"},
-                "amount": {"type": "number", "description": "Only if known; normally 0 until quoted"},
+                "onetime_amount": {"type": "number", "description": "Dave's estimate of the one-time part, if he gave one"},
+                "monthly_amount": {"type": "number", "description": "Dave's estimate of the monthly recurring part, if he gave one"},
+                "term_months": {"type": "integer", "description": "Contract length in months for the monthly part ('3 years' = 36)"},
                 "owner_name": {"type": "string"},
                 "quote_ticket": {"type": "boolean", "description": "Also ask pre-sales to quote it (a ticket linked to the "
                                  "opportunity). Default true; false only if Dave says not to, or it's already quoted"},
