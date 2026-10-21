@@ -1,0 +1,25 @@
+# Never bake secrets or local state into the image: they're mounted at runtime (see docs/DEPLOY.md)
+.env
+.env.*
+!.env.example
+.secrets/
+data/
+output/
+notes/
+
+# Not needed to run
+.git/
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+pytest-cache-files-*/
+tests/
+*.egg-info/
+.DS_Store
+*.tar
+chatlog*.txt
+*.chatlog.txt
+temp-*.txt
