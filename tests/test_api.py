@@ -93,6 +93,19 @@ def test_today_shows_agenda_and_pending_signoffs_then_approval_runs_once(client)
     assert http.get("/api/activity").json()["actions"][0]["decided_by"] == "local@localhost"
 
 
+def test_a_reopened_conversation_shows_each_card_as_it_stands_now(client):
+    http, _, _ = client
+    from app.main import app
+    store = app.state.services.store
+    action = app.state.services.actions.propose("demo", "Book something", {})
+    card = {"type": "action", "action_id": action["id"], "kind": "demo", "status": "pending", "summary": "Book something"}
+    cid = store.create_conversation("Booking")
+    store.save_conversation(cid, [], [{"role": "assistant", "text": "Ready.", "cards": [card]}])
+    http.post(f"/api/actions/{action['id']}/reject")
+    shown = http.get(f"/api/conversations/{cid}").json()["messages"][0]["cards"][0]
+    assert shown["status"] == "rejected"          # not the "pending" it was saved with
+
+
 def test_empty_message_and_unknown_action(client):
     http, _, _ = client
     assert http.post("/api/chat", json={"message": "  "}).status_code == 400

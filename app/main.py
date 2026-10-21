@@ -430,7 +430,27 @@ def conversation(cid: str, user: dict = Depends(require_auth), svc=Depends(servi
     convo = svc.store.get_conversation(cid)
     if convo is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
-    return {"id": convo["id"], "title": convo["title"], "messages": convo["display"]}
+    return {"id": convo["id"], "title": convo["title"], "messages": _current_cards(svc, convo["display"])}
+
+
+def _current_cards(svc, messages: list[dict]) -> list[dict]:
+    """A conversation keeps its cards as they were when written. An approval card shows where it
+    stands now: one approved or declined since (on Today, another device) must not reopen as pending,
+    with live dropdowns and a Save button."""
+    out = []
+    for m in messages or []:
+        if not m.get("cards"):
+            out.append(m)
+            continue
+        cards = []
+        for card in m["cards"]:
+            if card.get("type") == "action" and card.get("action_id"):
+                current = svc.store.get_action(card["action_id"])
+                if current is not None:
+                    card = {**card, **public_action(current)}
+            cards.append(card)
+        out.append({**m, "cards": cards})
+    return out
 
 
 class ApproveIn(BaseModel):
