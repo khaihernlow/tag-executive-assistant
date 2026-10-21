@@ -138,7 +138,10 @@ class Worker:
 
     def process_notes(self) -> int:
         try:
-            done = notes_process(self.store, self.llm, self.speech)
+            if not hasattr(self, "vocab"):
+                from agent.vocab import Vocabulary
+                self.vocab = Vocabulary(self.graph, self.autotask)
+            done = notes_process(self.store, self.llm, self.speech, vocabulary=self.vocab.for_note)
             if done:
                 log.info("meeting notes written: %s", done)
             return done

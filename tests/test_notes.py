@@ -266,3 +266,58 @@ def test_notes_moved_to_the_right_meeting():
 
     N.move_note(store, nid, None)                            # not a calendar meeting after all
     assert store.get_note(nid)["event_id"] is None and store.get_note(nid)["people"] == []
+
+
+def test_misheard_names_are_fixed_only_toward_known_names():
+    transcript = ("[L1] 00:00 Speaker 1: The phone system for Pecanic Landing.\n"
+                  "[L2] 00:08 Speaker 2: Check whether their middle licenses can be reused.")
+    names = ["Peconic Landing", "Mitel", "Lisa Quinn"]
+    fixes = N.corrections([{"heard": "Pecanic Landing", "meant": "Peconic Landing"},
+                           {"heard": "middle licenses", "meant": "Mitel licenses"},
+                           {"heard": "phone system", "meant": "PBX"},                 # not a name on the list: refused
+                           {"heard": "Pinecone", "meant": "Peconic"}],                # not in the transcript: refused
+                          transcript, names)
+    assert fixes == [("Pecanic Landing", "Peconic Landing"), ("middle licenses", "Mitel licenses")]
+    assert N.apply_fixes(transcript, fixes).splitlines()[1] == "[L2] 00:08 Speaker 2: Check whether their Mitel licenses can be reused."
+
+
+def test_the_write_up_fixes_names_in_the_notes_the_transcript_and_the_parts():
+    store = Store(":memory:")
+    transcript = "[L1] 00:00 Speaker 1: Check whether their middle licenses can be reused by Friday."
+    nid = N.new_meeting_note(store, title="Phones", source="pasted", transcript=transcript, started_at="2026-10-14T10:00")
+    llm = LLM(tool("write_meeting_notes", headline="Licensing [L1].", summary=["Reuse the middle licenses [L1]."],
+                   decisions=[], open_questions=[], action_items=[{"what": "Check the middle licenses [L1]", "owner": "Speaker 1"}],
+                   misheard=[{"heard": "middle licenses", "meant": "Mitel licenses"}]))
+    N.process(store, llm, vocabulary=lambda note: ["Mitel", "Peconic Landing"])
+    note = store.get_note(nid)
+    assert "Expected names (spell them this way): Mitel; Peconic Landing" in llm.seen[0]
+    assert "Mitel licenses" in note["transcript"] and "middle" not in note["transcript"]
+    assert note["parts"][0]["transcript"] == note["transcript"]
+    assert note["digest"]["summary"] == ["Reuse the Mitel licenses [L1]."]
+    assert note["digest"]["action_items"][0]["what"] == "Check the Mitel licenses [L1]"
+    assert note["digest"]["fixed_names"] == [{"heard": "middle licenses", "meant": "Mitel licenses"}]
+
+
+def test_speech_gets_the_names_and_retries_without_them_if_azure_refuses():
+    from connectors.azure_speech import AzureSpeech
+
+    class Session:
+        def __init__(self):
+            self.definitions = []
+
+        def post(self, url, headers=None, files=None, timeout=None):
+            import json
+            from types import SimpleNamespace
+            d = json.loads(files["definition"][1])
+            self.definitions.append(d)
+            ok = "phraseList" not in d
+            return SimpleNamespace(ok=ok, status_code=200 if ok else 400, text="Invalid JSON format.",
+                                   json=lambda: {"phrases": []})
+
+    import tempfile
+    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+        f.write(b"RIFF")
+    session = Session()
+    AzureSpeech("k", "eastus", session=session).transcribe(f.name, ["Peconic Landing", "Mitel"])
+    assert session.definitions[0]["phraseList"] == {"phrases": ["Peconic Landing", "Mitel"]}
+    assert "phraseList" not in session.definitions[1]

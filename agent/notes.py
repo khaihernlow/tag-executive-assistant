@@ -113,6 +113,11 @@ WRITE_DIGEST = ToolSpec(
             "due": {"type": "string", "description": "When, quoted as said ('by Friday', 'next week', 'Oct 30'); empty if none"},
         }, "required": ["what"]}},
         "open_questions": {"type": "array", "items": {"type": "string"}, "description": "Left unresolved, each cited"},
+        "misheard": {"type": "array", "items": {"type": "object", "properties": {
+            "heard": {"type": "string", "description": "The words exactly as they appear in the transcript ('middle licenses')"},
+            "meant": {"type": "string", "description": "What was said, spelled as in the expected names ('Mitel licenses')"},
+        }, "required": ["heard", "meant"]},
+            "description": "Names the speech-to-text clearly got wrong, from the expected names list. Empty if none."},
     }, "required": ["headline", "summary", "decisions", "action_items", "open_questions"]},
 )
 
@@ -126,7 +131,10 @@ Albany, NY), from a meeting transcript. He reads them later to remember what hap
 - Speakers may be labelled "Speaker 1", "Speaker 2": keep those labels; don't guess who they are.
 - The transcript may come in parts (one meeting recorded in pieces, or notes added later); a line like
   "Part 2: recording" marks where the next piece starts. Write one set of notes for the whole meeting.
-- Plain sentences, at most 25 words each, the fact first. No em or en dashes. No filler."""
+- Plain sentences, at most 25 words each, the fact first. No em or en dashes. No filler.
+- Recordings are transcribed by machine, which mishears names ("Pecanic" for Peconic, "middle" for Mitel in a
+  phone-system meeting). Use the expected names' spellings in your notes, and list each clear mis-hearing in
+  misheard. Only when the context makes it obvious; never "correct" an ordinary word."""
 
 _CITE = re.compile(r"\[L\d+(?:\s*[-,]\s*L?\d+)*\]")
 
@@ -142,10 +150,12 @@ def _cited_lines(text: str) -> list[int]:
     return lines
 
 
-def write_digest(llm: Any, title: str, transcript: str, people: list[dict[str, str]], when: str) -> dict[str, Any]:
+def write_digest(llm: Any, title: str, transcript: str, people: list[dict[str, str]], when: str,
+                 names: list[str] | None = None) -> dict[str, Any]:
     attendees = ", ".join(p.get("name") or p.get("email", "") for p in people) or "not known"
+    expected = f"Expected names (spell them this way): {'; '.join(names[:250])}\n\n" if names else ""
     response = llm.complete([{"role": "user", "content": f"Meeting: {title}\nWhen: {when}\nAttendees: {attendees}\n\n"
-                                                         f"Transcript:\n{transcript[:MAX_TRANSCRIPT_CHARS]}"}],
+                                                         f"{expected}Transcript:\n{transcript[:MAX_TRANSCRIPT_CHARS]}"}],
                             system=DIGEST_PROMPT, tools=[WRITE_DIGEST], tool_choice=WRITE_DIGEST.name, max_tokens=3000)
     if not response.tool_calls:
         raise RuntimeError("The model did not return notes.")
@@ -186,6 +196,29 @@ def checked(digest: dict[str, Any], transcript: str, started: date, people: list
     if digest.get("title"):
         out["title"] = plain_style(digest["title"])
     return out
+
+
+def corrections(proposed: list[dict[str, Any]], transcript: str, names: list[str]) -> list[tuple[str, str]]:
+    """The model's 'heard -> meant' fixes that code accepts: the heard words really are in the transcript,
+    and the meant ones contain a name from the expected list. Anything else is left as transcribed."""
+    known = [n.lower() for n in names if len(n) >= 3]
+    out = []
+    for c in proposed or []:
+        heard, meant = (c.get("heard") or "").strip(), (c.get("meant") or "").strip()
+        if len(heard) < 3 or not meant or heard.lower() == meant.lower():
+            continue
+        if not re.search(rf"(?<!\w){re.escape(heard)}(?!\w)", transcript, re.I):
+            continue
+        if not any(re.search(rf"(?<!\w){re.escape(k)}(?!\w)", meant.lower()) for k in known):
+            continue
+        out.append((heard, meant))
+    return out
+
+
+def apply_fixes(text: str, fixes: list[tuple[str, str]]) -> str:
+    for heard, meant in fixes:
+        text = re.sub(rf"(?<!\w){re.escape(heard)}(?!\w)", meant, text, flags=re.I)
+    return text
 
 
 def transcript_lines(transcript: str, numbers: list[int]) -> list[str]:
@@ -273,8 +306,9 @@ def add_part(store: Any, nid: str, source: str, transcript: str = "", audio_path
 
 # ── the work: recordings to transcripts, transcripts to digests ──
 
-def process(store: Any, llm: Any, speech: Any = None, limit: int = 3) -> int:
+def process(store: Any, llm: Any, speech: Any = None, limit: int = 3, vocabulary: Any = None) -> int:
     """Move waiting notes along: transcribe recordings (when there's a speech key), then digest.
+    `vocabulary(note)` lists the names to expect (agent.vocab), for both steps.
     Returns how many notes changed. Safe to call every worker cycle."""
     done = 0
     for note in store.notes_waiting(("waiting_transcript", "summarizing"))[:limit]:
@@ -286,9 +320,11 @@ def process(store: Any, llm: Any, speech: Any = None, limit: int = 3) -> int:
                         store.update_note(note["id"], error="waiting for the speech-to-text key")
                     continue
                 store.update_note(note["id"], status="transcribing", error=None)
+                phrases = _names(vocabulary, note)
                 for part in waiting:
                     try:
-                        transcript = number_lines(from_azure(speech.transcribe(part["audio_path"])))
+                        result = speech.transcribe(part["audio_path"], phrases) if phrases else speech.transcribe(part["audio_path"])
+                        transcript = number_lines(from_azure(result))
                         part.update(transcript=transcript or None, status="done" if transcript else "failed",
                                     error=None if transcript else "No speech was found in the recording.")
                     except Exception as e:  # noqa: BLE001 - kept on the part; the others still count
@@ -299,7 +335,7 @@ def process(store: Any, llm: Any, speech: Any = None, limit: int = 3) -> int:
                 note = store.get_note(note["id"])
                 if note["status"] != "summarizing":
                     continue
-            summarize(store, llm, note)
+            summarize(store, llm, note, names=_names(vocabulary, note))
             done += 1
         except Exception as e:  # noqa: BLE001 - recorded on the note; Dave can retry from the app
             log.exception("note %s failed", note["id"])
@@ -307,12 +343,37 @@ def process(store: Any, llm: Any, speech: Any = None, limit: int = 3) -> int:
     return done
 
 
-def summarize(store: Any, llm: Any, note: dict[str, Any]) -> dict[str, Any]:
+def _names(vocabulary: Any, note: dict[str, Any]) -> list[str]:
+    if vocabulary is None:
+        return []
+    try:
+        return vocabulary(note)
+    except Exception:  # noqa: BLE001 - no hints is better than no notes
+        log.exception("names for note %s", note.get("id"))
+        return []
+
+
+def summarize(store: Any, llm: Any, note: dict[str, Any], names: list[str] | None = None) -> dict[str, Any]:
     started = datetime.fromisoformat(note["started_at"]) if note.get("started_at") else datetime.now(local_zone())
     when = started.astimezone(local_zone()).strftime("%A %B %d %Y, %I:%M %p")
-    digest = checked(write_digest(llm, note["title"], note["transcript"] or "", note.get("people") or [], when),
-                     note["transcript"] or "", started.date(), note.get("people") or [])
+    raw = write_digest(llm, note["title"], note["transcript"] or "", note.get("people") or [], when, names)
+    fixes = corrections(raw.get("misheard") or [], note["transcript"] or "", names or [])
+    transcript = apply_fixes(note["transcript"] or "", fixes)
+    digest = checked(raw, transcript, started.date(), note.get("people") or [])
     fields: dict[str, Any] = {"digest": digest, "status": "ready", "error": None}
+    if fixes:
+        # The misheard names are fixed everywhere they're kept: the notes, the transcript, and each part
+        # (so writing the notes again later doesn't bring them back)
+        for key in ("headline", "summary", "decisions", "open_questions"):
+            value = digest.get(key)
+            digest[key] = [apply_fixes(v, fixes) for v in value] if isinstance(value, list) else apply_fixes(value or "", fixes)
+        for item in digest.get("action_items") or []:
+            item["what"] = apply_fixes(item["what"], fixes)
+        digest["fixed_names"] = [{"heard": h, "meant": m} for h, m in fixes]
+        fields["transcript"] = transcript
+        if note.get("parts"):
+            fields["parts"] = [{**p, "transcript": apply_fixes(p["transcript"], fixes)} if p.get("transcript") else p
+                               for p in parts_of(note)]
     if digest.get("title") and note["title"].lower() in ("", "recording", "meeting", "notes", "meeting notes"):
         fields["title"] = digest["title"]
     now = store.get_note(note["id"])
