@@ -106,7 +106,7 @@ CLASSIFY = ToolSpec(
         "properties": {
             "n": {"type": "integer"},
             "kind": {"type": "string",
-                     "enum": ["asks_for_times", "proposes_time", "cold_outreach", "not_a_request"]},
+                     "enum": ["asks_for_times", "proposes_time", "they_will_send_times", "cold_outreach", "not_a_request"]},
             "purpose": {"type": "string", "description": "What the meeting is about, under 8 words"},
             "who": {"type": "string", "description": "Their role and organization, from the signature or domain, "
                     "e.g. 'AVP Finance & IT, Sawyer Savings Bank'. Under 10 words. Empty if unknown."},
@@ -134,6 +134,9 @@ decide whether it is a GENUINE request to meet Dave that still needs scheduling.
   asking for "a quick call", including automated follow-ups ("following up on this", "reply STOP").
   Be skeptical when the sender is a first contact, earlier messages in the thread were deleted, or it
   has automated-sequence text.
+- they_will_send_times: they want to meet but say THEY (or someone on their side) will send the times, or will
+  text or call to set it up ("I'll text you some times", "Gabriella will send dates"). Nothing for Dave to do
+  until those times arrive; that later email is the request.
 - not_a_request: newsletters, webinars, automated mail, meetings already booked or confirmed, someone
   just mentioning a meeting, or anything else.
 A first contact CAN be genuine: a prospect or client asking TAG for IT help is a real request.

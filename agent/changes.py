@@ -9,6 +9,8 @@ cancellation, organizers get Dave's response.
 
 from __future__ import annotations
 
+import re
+
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -175,6 +177,24 @@ def needs_answer(event: Any, raw: dict[str, Any], me: str) -> bool:
     return not (outside and len(event.attendee_emails) >= BROADCAST_ATTENDEES)
 
 
+_FILLER = {"meeting", "call", "with", "and", "the", "for", "tag", "solutions", "sync", "invitation", "updated", "weekly"}
+
+
+def already_planned(invite: Any, events: list[Any]) -> bool:
+    """Dave already has this one: his own block (or an accepted copy) at the same time with a title naming the
+    same thing ("CEO Exchange | CEO Community Cohort" vs the invite "CEO Exchange with Shaun Mahoney")."""
+    words = {w for w in re.findall(r"[a-z0-9]{3,}", invite.subject.lower()) if w not in _FILLER}
+    for other in events:
+        if other.id == invite.id or other.response not in ("organizer", "accepted"):
+            continue
+        if abs((other.start - invite.start).total_seconds()) > 300:
+            continue
+        theirs = {w for w in re.findall(r"[a-z0-9]{3,}", other.subject.lower()) if w not in _FILLER}
+        if len(words & theirs) >= 2 or (words and words <= theirs):
+            return True
+    return False
+
+
 def pending_invites(graph: Any, now: datetime | None = None, days: int = 21) -> list[dict[str, Any]]:
     """Invites from other people that Dave hasn't answered and is expected to, soonest first,
     each with whatever it would clash with."""
@@ -186,6 +206,8 @@ def pending_invites(graph: Any, now: datetime | None = None, days: int = 21) -> 
     out = []
     for event, raw in events:
         if not needs_answer(event, raw, me) or event.end <= now:
+            continue
+        if already_planned(event, [e for e, _ in events]):
             continue
         clashes = [f"{other.subject}, {_clock(other.start)} to {_clock(other.end)}" for other, _ in events
                    if other.id != event.id and not other.all_day and not event.all_day and other.blocks_time

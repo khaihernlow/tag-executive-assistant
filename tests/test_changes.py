@@ -152,3 +152,13 @@ def test_invites_that_need_no_answer_stay_off_today():
                       response="none", attendees=tuple(f"p{i}@tag.example" for i in range(60)))
     found = pending_invites(FakeGraph(events=(VENDOR, no_reply, webinar, all_hands)), NOW)
     assert [i["id"] for i in found] == ["vendor", "all"]    # TAG's own big meetings still count
+
+
+def test_an_invite_dave_already_blocked_for_himself_needs_no_answer():
+    own = event("own", "CEO Exchange | CEO Community Cohort", "2026-10-15T12:30", "2026-10-15T13:30")
+    invite = event("inv", "CEO Exchange with Shaun Mahoney", "2026-10-15T12:30", "2026-10-15T13:30",
+                   organizer="shaun@coach.example", response="none", attendees=(DAVE,))
+    other = event("oth", "Board prep with Shaun", "2026-10-15T12:30", "2026-10-15T13:30",
+                  organizer="shaun@coach.example", response="none", attendees=(DAVE,))
+    found = [i["id"] for i in pending_invites(FakeGraph(events=(own, invite, other)), NOW)]
+    assert found == ["oth"]          # same time, but a different meeting: still Dave's to answer
