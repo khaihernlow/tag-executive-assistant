@@ -11,6 +11,7 @@ a record of every source so citations in the app open the real thing.
 from __future__ import annotations
 
 import hashlib
+import logging
 import json
 import re
 from datetime import datetime, timedelta
@@ -23,6 +24,8 @@ from agent.mail import LIST_FIELDS, read_attachment, read_email, search_mail
 from agent.people import internal_domain
 from agent.research import research_targets, web_research
 from llm.provider import ToolSpec
+
+log = logging.getLogger("assistant.briefs")
 
 INTERVIEW = re.compile(r"\b(interview|candidate|applicant)\b", re.I)
 WORTH_READING = re.compile(r"(resume|résumé|\bcv\b|proposal|rfp|quote|sow|agenda|profile|deck)", re.I)
@@ -54,8 +57,11 @@ def needs_brief(event: Event, mailbox: str, domain: str) -> bool:
     return bool(external_attendees(event, mailbox, domain)) or bool(INTERVIEW.search(event.subject))
 
 
+BRIEF_VERSION = "2"   # bump when briefs gain a source, so upcoming ones are written again with it
+
+
 def fingerprint(event: Event) -> str:
-    parts = [event.subject, event.start.isoformat(), event.end.isoformat(), event.description,
+    parts = [BRIEF_VERSION, event.subject, event.start.isoformat(), event.end.isoformat(), event.description,
              ",".join(sorted(event.attendee_emails))]
     return hashlib.sha1("|".join(parts).encode()).hexdigest()
 
@@ -190,8 +196,13 @@ BRIEF_PROMPT = """You prepare short meeting briefs for Dave, CEO of TAG Solution
 in Albany, NY). He reads them on his phone minutes before the meeting.
 
 Content
-- Use ONLY the material: the invite, emails, attachments, web findings and earlier meeting notes. Never invent facts.
-- End each bullet with its source label(s) in brackets, e.g. "[Email 2]", "[Web 1]", "[Invite]", "[Notes 1]".
+- Use ONLY the material: the invite, emails, attachments, web findings, earlier meeting notes and HubSpot.
+  Never invent facts.
+- End each bullet with its source label(s) in brackets, e.g. "[Email 2]", "[Web 1]", "[Invite]", "[Notes 1]", "[HubSpot 2]".
+- HubSpot is TAG's CRM. "HubSpot n" sources say who owns the account at TAG, its stage, when TAG last talked to
+  them, and what TAG staff (not Dave) wrote, called or emailed. Use them for context and history: e.g. RJ's note
+  that they chose TAG, a colleague's call last week. Say who at TAG did it. Its deal records are quote copies,
+  not a pipeline: don't report deal stages.
 - Earlier meeting notes ("Notes n") are what was said the last time Dave met these people. Use them for context,
   and put anything still open from them (a promise, a question, a deadline) in prep.
 - Never tell Dave what he already knows: what TAG Solutions is or does, his own title, his own
@@ -206,7 +217,9 @@ Content
 
 Style
 - Plain sentences, at most 20 words per bullet; prep items are one question or point each. Lead with the fact.
-- Dates: use the dates in the material exactly; never infer a year that isn't shown.
+- Dates: use the dates in the material exactly; never infer a year that isn't shown. A weekday in a source
+  ("moved it to 11 AM Friday") stays a weekday: never attach a date to it unless the source gives that date.
+- Credit each email to its sender as written in the material ("From x@y to ..."), not to whoever it mentions.
 - Do not use em dashes or en dashes. Use commas, colons or a new sentence.
 - No hedging filler ("it appears that", "it is worth noting"), no marketing adjectives."""
 
@@ -214,9 +227,9 @@ _DASH = re.compile(r"\s*[—–]\s*|\s+-\s+")
 _RANGE = re.compile(r"(\d)\s*[–—]\s*(\d)")
 
 
-_GROUPED_CITE = re.compile(r"\[(Emails?|Attachments?|Web|Notes)\s+([\d,\s&and]+)\]")
+_GROUPED_CITE = re.compile(r"\[(Emails?|Attachments?|Web|Notes|HubSpot)\s+([\d,\s&and]+)\]")
 _CITE_KIND = {"emails": "Email", "email": "Email", "attachments": "Attachment", "attachment": "Attachment", "web": "Web",
-              "notes": "Notes"}
+              "notes": "Notes", "hubspot": "HubSpot"}
 
 
 def _expand_citation(match: re.Match) -> str:
@@ -255,7 +268,13 @@ def write_brief(llm: Any, gathered: dict[str, Any]) -> dict[str, Any]:
         if isinstance(value, dict):
             return {k: clean(v) for k, v in value.items()}
         return value
-    return clean(brief)
+    out = clean(brief)
+    for person in out.get("who") or []:
+        # Citations belong in the note; in a name, role or company they'd show as raw "[HubSpot 1]"
+        for key in ("name", "role", "organization"):
+            if isinstance(person.get(key), str):
+                person[key] = re.sub(r"\s*\[[^\]]*\d\]", "", person[key]).strip(" ,")
+    return out
 
 
 def material_record(event: Event, gathered: dict[str, Any]) -> dict[str, Any]:
@@ -274,11 +293,13 @@ def material_record(event: Event, gathered: dict[str, Any]) -> dict[str, Any]:
         "web": [{"label": w["label"], "about": w["about"], "fact": w["fact"], "url": w["url"]} for w in gathered["web"]],
         "notes": [{"label": n["label"], "id": n["id"], "title": n["title"], "when": n["when"], "headline": n["headline"],
                    "points": n["points"][:4]} for n in gathered.get("notes") or []],
+        "hubspot": [{"label": h["label"], "kind": h["kind"], "title": h["title"], "when": h.get("when", ""), "by": h.get("by", ""),
+                     "url": h.get("url"), "excerpt": h["text"]} for h in gathered.get("hubspot") or []],
     }
 
 
 def prepare_brief(graph: Any, llm: Any, store: Any, event: Event, force: bool = False, searcher: Any = None,
-                  linkedin: Any = None, directory: Any = None) -> bool:
+                  linkedin: Any = None, directory: Any = None, hubspot: Any = None) -> bool:
     """Generate (or refresh) one brief. False if someone else is on it or it's current."""
     if not store.claim_brief(event.id, event.subject, event.start.isoformat(), fingerprint(event), force=force):
         return False
@@ -289,6 +310,12 @@ def prepare_brief(graph: Any, llm: Any, store: Any, event: Event, force: bool = 
                                           if a["email"] and a["email"].lower() != graph.mailbox.lower()]
         from agent.notes import earlier_notes
         gathered["notes"] = earlier_notes(store, people) if hasattr(store, "notes_with_people") else []
+        if hubspot is not None and gathered["external"]:
+            from agent.hubspot import brief_material
+            try:
+                gathered["hubspot"] = brief_material(hubspot, gathered["external"], graph.mailbox)
+            except Exception:  # noqa: BLE001 - HubSpot being slow or down shouldn't cost Dave his brief
+                log.exception("HubSpot material failed for %s", event.subject)
         brief = write_brief(llm, gathered)
         brief["meeting"] = {"subject": event.subject, "when": fmt_local(event.start),
                             "ends": event.end.strftime("%I:%M %p").lstrip("0"), "location": event.location,

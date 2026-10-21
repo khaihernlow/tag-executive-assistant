@@ -490,3 +490,17 @@ def test_a_request_a_colleague_is_already_arranging_is_theirs_not_daves(monkeypa
     [view] = open_requests_view(graph, store, store)
     assert view["handler"] == "RJ Gray" and view["slots"] == []        # no times for Dave to offer
     assert not req.stalled(row, datetime(2026, 10, 20, 10, 0, tzinfo=NY))  # RJ's reply won't reach Dave: never nags
+
+
+def test_outside_people_are_offered_daves_booking_link_and_colleagues_are_not(monkeypatch):
+    monkeypatch.setenv("INTERNAL_DOMAIN", "tag.example")
+    link = "https://meetings.hubspot.com/dvener1"
+    forgot = FakeLLM("write_reply", {"comment": "Hi Mark, happy to.\nTuesday, Oct 13 at 10:00 AM ET\n"
+                                                "Wednesday, Oct 14 at 2:30 PM ET\nDave"})
+    reply = draft_reply(forgot, FakeGraph(), REQUEST, SLOTS, booking_link=link)
+    assert f"Booking link: {link}" in forgot.calls[0]
+    assert reply.endswith(f"Or grab any time that suits you here: {link}\nDave")   # added before the sign-off
+    colleague = {**REQUEST, "from_email": "rj@tag.example"}
+    plain = FakeLLM("write_reply", {"comment": "Hi RJ,\nTuesday, Oct 13 at 10:00 AM ET\nWednesday, Oct 14 at 2:30 PM ET\nDave"})
+    assert link not in draft_reply(plain, FakeGraph(), colleague, SLOTS, booking_link=link)
+    assert "Booking link" not in plain.calls[0]

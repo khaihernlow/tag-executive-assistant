@@ -36,6 +36,7 @@ OBJECT_WORDS = {
     "meetings": ("meeting", "meetings"),
     "notes": ("note", "notes"),
     "tasks": ("task", "tasks", "to-do", "todo", "todos", "to-dos"),
+    "emails": ("email", "emails", "logged email", "logged emails", "e-mail", "e-mails"),
 }
 
 # What each kind of record shows, and the words Dave uses for its fields
@@ -97,6 +98,13 @@ SHAPES: dict[str, dict[str, Any]] = {
         "fields": {"subject": "hs_task_subject", "title": "hs_task_subject", "owner": "hubspot_owner_id",
                    "assigned to": "hubspot_owner_id", "due": "hs_timestamp", "due date": "hs_timestamp",
                    "status": "hs_task_status", "priority": "hs_task_priority", "type": "hs_task_type"},
+        "modified": "hs_lastmodifieddate", "when": "hs_timestamp"},
+    "emails": {
+        "title": ["hs_email_subject"], "sub": ["hs_email_from_email", "hs_email_to_email"],
+        "show": ["hubspot_owner_id", "hs_timestamp"],
+        "fields": {"subject": "hs_email_subject", "title": "hs_email_subject", "owner": "hubspot_owner_id",
+                   "sent by": "hubspot_owner_id", "when": "hs_timestamp", "date": "hs_timestamp", "from": "hs_email_from_email",
+                   "to": "hs_email_to_email", "direction": "hs_email_direction", "text": "hs_email_text", "body": "hs_email_text"},
         "modified": "hs_lastmodifieddate", "when": "hs_timestamp"},
 }
 
@@ -462,7 +470,7 @@ class HubSpot:
             return self.stages().get(raw, {}).get("label", raw)
         if prop_name == "pipeline":
             return next((p["label"] for p in self.hs.pipelines("deals") if p["id"] == raw), raw)
-        if prop_name in ("hs_note_body", "hs_call_body", "hs_meeting_body"):
+        if prop_name in ("hs_note_body", "hs_call_body", "hs_meeting_body", "hs_email_text"):
             return _plain(str(raw))
         if prop_name == "hs_call_disposition":
             return self.hs.call_outcomes().get(str(raw), raw)
@@ -478,8 +486,8 @@ class HubSpot:
                 else:
                     d = datetime.fromisoformat(str(raw).replace("Z", "+00:00")).astimezone(local_zone()).date()
                 return f"{d:%b %d, %Y}".replace(" 0", " ")
-            except ValueError:
-                return raw
+            except (ValueError, OSError, OverflowError):   # junk dates (year 1) can't be converted on Windows
+                return str(raw)[:10]
         if prop_name == "hs_call_duration":
             seconds = int(float(raw)) // 1000
             return f"{seconds // 60}m {seconds % 60:02d}s"
@@ -687,16 +695,19 @@ class HubSpot:
                             "about_deals": DEALS_CAVEAT}
         recent = []
         now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
-        for kind in ("meetings", "calls", "notes"):
+        for kind in ("meetings", "calls", "notes", "emails"):
             found = self.hs.search(kind, filters=link + [{"propertyName": "hs_timestamp", "operator": "LTE", "value": str(now_ms)}],
-                                   properties=self.wanted_props(kind, ["hs_note_body", "hs_call_body"] if kind != "meetings" else []),
+                                   properties=self.wanted_props(kind, {"notes": ["hs_note_body"], "calls": ["hs_call_body"],
+                                                                       "emails": ["hs_email_text"]}.get(kind, [])),
                                    sorts=[{"propertyName": "hs_timestamp", "direction": "DESCENDING"}], limit=5)
             out[f"{kind}_count"] = found.get("total", 0)
             for r in found.get("results", []):
                 row = self.row(kind, r)
-                body = (r.get("properties") or {}).get("hs_note_body") or (r.get("properties") or {}).get("hs_call_body")
-                if body and kind == "calls":
-                    row["notes"] = _plain(body, 200)
+                p = r.get("properties") or {}
+                if kind == "calls" and p.get("hs_call_body"):
+                    row["notes"] = _plain(p["hs_call_body"], 200)
+                if kind == "emails" and p.get("hs_email_text"):
+                    row["text"] = _plain(p["hs_email_text"], 200)
                 row["kind"] = kind[:-1]
                 row["_when"] = (r.get("properties") or {}).get("hs_timestamp") or ""
                 recent.append(row)
@@ -717,7 +728,8 @@ class HubSpot:
             "people (contacts) in HubSpot": (out.get("contacts") or {}).get("count"),
             "deals in HubSpot": (out.get("deals") or {}).get("count"),
             "meetings logged": out.get("meetings_count"), "calls logged": out.get("calls_count"),
-            "notes": out.get("notes_count"), "open tasks": (out.get("open_tasks") or {}).get("count", 0),
+            "notes": out.get("notes_count"), "emails logged": out.get("emails_count"),
+            "open tasks": (out.get("open_tasks") or {}).get("count", 0),
         }.items() if v is not None}
         for key in ("number of employees", "employees"):
             if key in out["details"]:
@@ -730,9 +742,9 @@ DEALS_CAVEAT = ("TAG's HubSpot deals are mostly copies of Autotask quotes made b
                 "for pipeline questions use Autotask opportunities (find_opportunities).")
 
 QUERY_DESCRIPTION = """Ask TAG's HubSpot a question: find, count, add up or group companies, contacts, deals, calls,
-meetings, notes or tasks. Code finds the fields, works out dates and does all the arithmetic; quote its numbers.
+meetings, notes, tasks or logged emails (sales emails, sequences, replies). Code finds the fields, works out dates and does all the arithmetic; quote its numbers.
 How to ask:
-- object: companies | contacts | deals | calls | meetings | notes | tasks
+- object: companies | contacts | deals | calls | meetings | notes | tasks | emails
 - filters: [{field, op, value}] in plain words. field: e.g. owner, lifecycle, industry, employees, state, last contacted,
   created, title, outcome, status, due, amount, or any field label (hubspot_fields finds others).
   op: is, is_not, any_of, none_of, contains, more_than, less_than, at_least, at_most, between, during, before, after,
@@ -754,18 +766,32 @@ Examples:
 For one company/contact/deal's whole picture, use hubspot_record instead."""
 
 
+def dave_links(hub: HubSpot) -> list[dict[str, str]]:
+    """Dave's HubSpot scheduling links, his main one first (the others belong to marketing campaigns)."""
+    user = os.environ.get("GRAPH_MAILBOX", "").lower().split("@")[0]
+    mine = [l for l in hub.hs.meeting_links() if user and user[:6] in (l.get("link") or "")]
+    mine.sort(key=lambda l: (len(l.get("link") or ""), l.get("name") or ""))
+    return [{"name": l.get("name") or "", "url": l.get("link") or ""} for l in mine]
+
+
+def booking_link(hub: HubSpot | None) -> str | None:
+    """Dave's main booking link, or None (no HubSpot, or it can't be reached)."""
+    if hub is None:
+        return None
+    try:
+        links = dave_links(hub)
+    except Exception:  # noqa: BLE001 - a reply without the link is still a good reply
+        return None
+    return links[0]["url"] if links else None
+
+
 def hubspot_tools(hub: HubSpot) -> list[Tool]:
     def fields(args: dict[str, Any]) -> dict[str, Any]:
         obj = object_type(args.get("object", "companies"))
         return {"object": obj, "fields": hub.find_fields(obj, args.get("words") or "")}
 
     def links(args: dict[str, Any]) -> dict[str, Any]:
-        me = os.environ.get("GRAPH_MAILBOX", "").lower()
-        user = me.split("@")[0]
-        mine = [l for l in hub.hs.meeting_links() if user and user[:6] in (l.get("link") or "")]
-        mine.sort(key=lambda l: (len(l.get("link") or ""), l.get("name") or ""))
-        return {"links": [{"name": l.get("name"), "url": l.get("link")} for l in mine],
-                "note": "The first is Dave's main link; the others are for marketing campaigns."}
+        return {"links": dave_links(hub), "note": "The first is Dave's main link; the others are for marketing campaigns."}
 
     return [
         Tool(ToolSpec("hubspot_query", QUERY_DESCRIPTION, {"type": "object", "properties": {
@@ -799,3 +825,132 @@ def hubspot_tools(hub: HubSpot) -> list[Tool]:
         Tool(ToolSpec("hubspot_meeting_link", "Dave's HubSpot scheduling link(s), for someone outside TAG to book time "
                       "with him themselves.", {"type": "object", "properties": {}}), handler=links),
     ]
+
+
+# ── for meeting briefs: what TAG's CRM knows about the outside people ──
+
+MAX_BRIEF_ITEMS = 8
+BRIEF_EXCERPT = 700
+BRIEF_LOOKBACK_DAYS = 540          # older activity rarely helps prepare for tomorrow's meeting
+_INVITE_NOISE = re.compile(r"_{5,}|Microsoft Teams (?:meeting|Need help)|Join(?: the meeting now|:)\s*\S+|Meeting ID:?\s*[\d ]+"
+                           r"|Passcode:?\s*\S+|Dial in by phone.*|For organizers:.*|Join on a video conferencing device.*", re.I)
+# Logged automatically with nothing a person wrote: dialer attempts, call-recording links, booking confirmations
+_DIALER = re.compile(r"ConnectAndSell|Agent Disposition|Agent Attempt|^Called \(?\d{3}\)?[\d\s-]+ from \d+\.? Recording:"
+                     r"|Thank you for booking a meeting|Need to make changes\? \S* Reschedule", re.I)
+
+
+def _said(kind: str, raw: str, subject: str = "") -> str:
+    """The human words in an activity: no invite boilerplate, no signatures or quoted history."""
+    from agent.emailtext import readable
+    text = readable(raw or "", subject) if kind in ("emails", "meetings") else raw or ""
+    text = _plain(_INVITE_NOISE.sub(" ", text), BRIEF_EXCERPT)
+    text = re.sub(r"\[cid:[^\]]*\]", "", text).strip(" ·")
+    return "" if _DIALER.search(text) else text
+
+
+def brief_material(hub: HubSpot, externals: list[str], mailbox: str, first_label: int = 1) -> list[dict[str, Any]]:
+    """The companies behind a meeting's outside attendees, as citable sources ("HubSpot n"):
+    an account overview (owner, stage, last contact, who's known there), then what TAG people
+    did with them lately: notes, calls, meeting recaps, emails. Emails to or from Dave are left
+    out (the brief reads his own mailbox already); his staff's are the point."""
+    from agent.research import FREEMAIL
+
+    me = (mailbox or "").lower()
+    companies: dict[str, str] = {}             # id -> name
+    attendees: dict[str, dict[str, Any]] = {}  # email -> their contact record, if any
+    for address in externals[:6]:
+        email = address.lower()
+        found = hub.hs.search("contacts", filters=[{"propertyName": "email", "operator": "EQ", "value": email}],
+                              properties=hub.wanted_props("contacts", ["associatedcompanyid"]), limit=1).get("results", [])
+        if found:
+            attendees[email] = found[0]
+            cid = (found[0].get("properties") or {}).get("associatedcompanyid")
+            if cid and cid not in companies:
+                companies[cid] = ""
+        domain = email.rsplit("@", 1)[-1]
+        if domain not in FREEMAIL and not any(domain in n for n in companies.values()):
+            try:
+                cid, name, _ = hub.company_id(domain)
+                companies.setdefault(cid, name)
+            except ValueError:
+                pass
+    items: list[dict[str, Any]] = []
+
+    def add(item: dict[str, Any]) -> None:
+        if len(items) < MAX_BRIEF_ITEMS:
+            items.append({"label": f"HubSpot {first_label + len(items)}", **item})
+
+    for cid in list(companies)[:2]:
+        rec = hub.record({"object": "companies", "name": cid})
+        name = rec.get("title") or companies[cid]
+        lines = [f"{name} in TAG's HubSpot."]
+        if rec.get("lifecycle_stage"):
+            lines.append(f"Lifecycle stage: {rec['lifecycle_stage']}.")
+        if rec.get("owner"):
+            lines.append(f"Account owner at TAG: {rec['owner']}.")
+        if rec.get("last_contacted"):
+            lines.append(f"Last contacted: {rec['last_contacted']}.")
+        people = (rec.get("contacts") or {}).get("rows") or []
+        if people:
+            lines.append("People known there: " + "; ".join(
+                p["title"] + (f" ({p['sub'].split(' · ')[0]})" if p.get("sub") else "") for p in people[:6]) + ".")
+        for email, contact in attendees.items():
+            row = hub.row("contacts", contact)
+            bits = [b for b in (row.get("lifecycle_stage"), row.get("owner") and f"owned by {row['owner']}",
+                                row.get("last_contacted") and f"last contacted {row['last_contacted']}") if b]
+            if bits:
+                lines.append(f"{row['title']}: " + ", ".join(bits) + ".")
+        counts = rec.get("in_hubspot") or {}
+        lines.append("Logged: " + ", ".join(f"{v} {k}" for k, v in counts.items() if v and "people" not in k and "deals" not in k) + ".")
+        add({"kind": "account", "title": name, "url": rec.get("url"), "text": " ".join(lines)})
+
+        link = [{"propertyName": "associations.company", "operator": "EQ", "value": cid}]
+        now_ms = str(int(datetime.now(timezone.utc).timestamp() * 1000))
+        since = datetime.now(timezone.utc) - timedelta(days=BRIEF_LOOKBACK_DAYS)
+        past = link + [{"propertyName": "hs_timestamp", "operator": "LTE", "value": now_ms},
+                       {"propertyName": "hs_timestamp", "operator": "GTE", "value": str(int(since.timestamp() * 1000))}]
+        activity, seen = [], set()
+        dave_owner = None
+        try:
+            dave_owner = hub.owner_id("me")
+        except ValueError:
+            pass
+        extras = {"emails": ["hs_email_direction", "hs_email_from_email", "hs_email_to_email", "hs_sequence_id", "hs_template_id"],
+                  "meetings": ["hs_internal_meeting_notes"]}
+        for kind, body, limit in (("notes", "hs_note_body", 3), ("calls", "hs_call_body", 3), ("meetings", "hs_meeting_body", 4),
+                                  ("emails", "hs_email_text", 8)):
+            for r in hub.hs.search(kind, filters=past, properties=hub.wanted_props(kind, [body, *extras.get(kind, [])]),
+                                   sorts=[{"propertyName": "hs_timestamp", "direction": "DESCENDING"}], limit=limit).get("results", []):
+                p = r.get("properties") or {}
+                if kind == "emails":
+                    if p.get("hs_sequence_id") or p.get("hs_template_id"):
+                        continue  # sequence and template sends (RJ's "TAG - Connect" went to 1,830 people)
+                    parties = f"{p.get('hs_email_from_email') or ''} {p.get('hs_email_to_email') or ''}".lower()
+                    if me and me in parties:
+                        continue  # Dave's own mail: the brief already reads it from Outlook
+                if kind == "meetings":
+                    recap = p.get("hs_internal_meeting_notes")      # where Fathom puts its summary
+                    if recap:
+                        text = _plain(re.sub(r"(?is)<h1>.*?</h1>|Generated by.*?</p>", " ", recap), BRIEF_EXCERPT * 2)
+                    elif str(p.get("hubspot_owner_id")) == str(dave_owner):
+                        continue  # Dave's own calendar, synced in: he knows his events
+                    else:
+                        text = _said(kind, p.get(body) or "")
+                else:
+                    text = _said(kind, p.get(body) or "", p.get("hs_email_subject") or "")
+                if not text or (kind == "meetings" and len(text) < 40) or text[:120] in seen:
+                    continue      # nothing written down (or just the invite, or a copy) says nothing new
+                seen.add(text[:120])
+                if kind == "emails" and (p.get("hs_email_from_email") or p.get("hs_email_to_email")):
+                    # Who wrote it, so a reply isn't credited to the wrong person
+                    text = f"From {p.get('hs_email_from_email') or 'unknown'} to {p.get('hs_email_to_email') or 'unknown'}: {text}"
+                row = hub.row(kind, r)
+                if row["title"].startswith("(meeting"):
+                    row["title"] = "Meeting"
+                activity.append((p.get("hs_timestamp") or "", {
+                    "kind": kind[:-1], "title": row["title"] if kind != "notes" else f"Note by {row.get('owner') or 'TAG'}",
+                    "when": row.get("activity_date") or "", "by": row.get("owner") or "",
+                    "url": row.get("url"), "text": text}))
+        for _, item in sorted(activity, key=lambda x: x[0], reverse=True):
+            add(item)
+    return items

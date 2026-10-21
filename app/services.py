@@ -50,6 +50,7 @@ class Services:
     worker: Worker
     llm: HatzAIProvider
     autotask: Directory | None = None
+    hubspot: HubSpot | None = None
 
 
 def build_services() -> Services:
@@ -94,5 +95,5 @@ def build_services() -> Services:
     assistant = Assistant(llm, registry, store, actions, memory)
     lunch = Lunch(graph, Teams(own, os.environ["ASSISTANT_ACCOUNT"], store), llm, store, checkout=fill_checkout) if own else None
     worker = Worker(graph, llm, store, searcher=llm, fast_llm=fast_llm, actions=actions, autotask=directory,
-                    linkedin=linkedin, lunch=lunch, speech=AzureSpeech.from_env())
-    return Services(graph, store, actions, assistant, memory, worker, llm, directory)
+                    linkedin=linkedin, lunch=lunch, speech=AzureSpeech.from_env(), hubspot=hubspot)
+    return Services(graph, store, actions, assistant, memory, worker, llm, directory, hubspot)

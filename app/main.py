@@ -21,6 +21,7 @@ from agent.briefs import needs_brief
 from agent.filing import filed_today, undo_filing
 from agent.junk import moved_today, undo as undo_junk
 from agent.changes import answer_invite, pending_invites
+from agent.hubspot import booking_link
 from agent.requests import open_requests_view, propose_booking, propose_hold, propose_nudge, propose_reply
 from agent.calendar import agenda_day, event_detail, local_zone, meeting_place, parse_event
 from agent.people import internal_domain
@@ -502,7 +503,8 @@ class SlotIn(BaseModel):
 def request_reply(message_id: str, body: SlotsIn, user: dict = Depends(require_auth), svc=Depends(services)):
     """Draft a reply proposing these times; it waits on a sign-off slip."""
     try:
-        return propose_reply(svc.graph, svc.llm, svc.store, svc.actions, message_id, body.starts)
+        return propose_reply(svc.graph, svc.llm, svc.store, svc.actions, message_id, body.starts,
+                             booking_link=booking_link(getattr(svc, "hubspot", None)))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 

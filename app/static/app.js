@@ -384,6 +384,12 @@ function sourceIndex(material) {
                          excerpt: [n.headline, ...(n.points || []).map((p) => `\u2022 ${p}`)].filter(Boolean).join("\n"),
                          noteId: n.id, linkText: "Open the notes" });
   }
+  for (const h of m.hubspot || []) {
+    const what = { account: "HubSpot account", note: "HubSpot note", call: "HubSpot call", meeting: "HubSpot meeting",
+                   email: "HubSpot email" }[h.kind] || "HubSpot";
+    index.set(h.label, { kind: h.label, icon: "database", title: h.title, meta: [what, h.by, h.when].filter(Boolean).join(" · "),
+                         excerpt: h.excerpt, link: h.url, linkText: "Open in HubSpot" });
+  }
   for (const w of m.web || []) {
     let host = w.url;
     try { host = new URL(w.url).hostname.replace(/^www\./, ""); } catch { /* keep raw */ }
@@ -428,7 +434,7 @@ $("#src-close").addEventListener("click", closePopovers);
 
 function cited(text) {
   // "[Email 2, Web 1]" becomes tappable chips that open the source; unknown labels stay plain.
-  const label = "(?:Invite|Email \\d+|Attachment \\d+|Web \\d+|Notes \\d+|L\\d+(?:\\s*-\\s*L?\\d+)?)";
+  const label = "(?:Invite|Email \\d+|Attachment \\d+|Web \\d+|Notes \\d+|HubSpot \\d+|L\\d+(?:\\s*-\\s*L?\\d+)?)";
   const parts = String(text).split(new RegExp(`(\\[${label}(?:,\\s*${label})*\\])`, "g"));
   const out = [];
   for (const p of parts.filter(Boolean)) {

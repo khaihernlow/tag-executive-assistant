@@ -49,7 +49,7 @@ LUNCH_REPLY_SECONDS = int(os.environ.get("LUNCH_REPLY_SECONDS", "30"))
 class Worker:
     def __init__(self, graph: Any, llm: Any, store: Any, interval: int = BRIEF_INTERVAL, searcher: Any = None,
                  fast_llm: Any = None, actions: Any = None, autotask: Any = None, linkedin: Any = None,
-                 lunch: Any = None, speech: Any = None) -> None:
+                 lunch: Any = None, speech: Any = None, hubspot: Any = None) -> None:
         self.graph, self.llm, self.store = graph, llm, store
         self.searcher = searcher  # web research for briefs; None skips it
         self.fast_llm = fast_llm  # quick classification (meeting requests); None skips the inbox scan
@@ -58,6 +58,7 @@ class Worker:
         self.linkedin = linkedin  # LinkedIn backgrounds for briefs; None without an Apify token
         self.lunch = lunch        # Wednesday lunch; None without the assistant's own account
         self.speech = speech      # Azure Speech for recordings; None until there's a key
+        self.hubspot = hubspot    # TAG's CRM, for briefs; None without a token
         self.interval = interval
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
@@ -167,7 +168,7 @@ class Worker:
     def _prepare(self, event: Event, force: bool) -> None:
         try:
             if prepare_brief(self.graph, self.llm, self.store, event, force=force, searcher=self.searcher,
-                             linkedin=self.linkedin, directory=self.autotask):
+                             linkedin=self.linkedin, directory=self.autotask, hubspot=self.hubspot):
                 log.info("brief done: %s", event.subject)
         except Exception:  # noqa: BLE001
             log.exception("brief failed: %s", event.subject)

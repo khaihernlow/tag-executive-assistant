@@ -658,7 +658,9 @@ WRITE_REPLY = ToolSpec(
 
 REPLY_PROMPT = """Write Dave's reply email (Dave is CEO of TAG Solutions). He writes short, warm, direct emails;
 match the style samples. Propose exactly the listed times, each on its own line, and ask them to pick
-one (or suggest another). If the meeting is on Teams, say a Teams invite will follow. Under 80 words.
+one (or suggest another). If a booking link is given, offer it in one short line after the times as the
+easy alternative ("Or grab any time that suits you here: <link>"), with the link exactly as given.
+If the meeting is on Teams, say a Teams invite will follow. Under 90 words.
 Sign off with just "Dave". No subject line, no em dashes, no placeholders."""
 
 _style_cache: dict[str, tuple[float, list[str]]] = {}
@@ -682,11 +684,21 @@ def style_samples(graph: Any, count: int = 6) -> list[str]:
     return samples
 
 
-def draft_reply(llm: Any, graph: Any, request: dict[str, Any], slots: list[datetime]) -> str:
+def offers_link(request: dict[str, Any], link: str | None) -> str | None:
+    """Dave's booking link goes to people outside TAG; colleagues just get the times."""
+    domain = internal_domain()
+    sender = (request.get("from_email") or "").lower()
+    return link if link and sender and not (domain and sender.endswith("@" + domain)) else None
+
+
+def draft_reply(llm: Any, graph: Any, request: dict[str, Any], slots: list[datetime],
+                booking_link: str | None = None) -> str:
     labels = [slot_label(s) for s in slots]
+    link = offers_link(request, booking_link)
     brief = (f"Their email (from {request.get('from_name')}): \"{request.get('subject')}\" {request.get('preview')}\n"
              f"Meeting: {request.get('purpose') or 'a meeting'}, format: {request.get('format') or 'unspecified'}\n"
              "Times to propose:\n" + "\n".join(labels) +
+             (f"\nBooking link: {link}" if link else "") +
              "\n\nStyle samples of Dave's emails:\n" + "\n---\n".join(style_samples(graph)))
     response = llm.complete([{"role": "user", "content": brief}], system=REPLY_PROMPT,
                             tools=[WRITE_REPLY], tool_choice=WRITE_REPLY.name, max_tokens=600)
@@ -697,6 +709,11 @@ def draft_reply(llm: Any, graph: Any, request: dict[str, Any], slots: list[datet
         # The times are the point of the email: if any didn't make it in verbatim, use a plain version.
         comment = ("Hi " + (request.get("from_name") or "").split(" ")[0] + ",\n\nHappy to meet. Would any of these work?\n"
                    + "\n".join(labels) + "\n\nDave")
+    if link and link not in comment:
+        # The link is a convenience for them: if the draft left it out (or mangled it), add it before the sign-off
+        body, sep, sign = comment.rpartition("\nDave")
+        line = f"Or grab any time that suits you here: {link}"
+        comment = f"{body.rstrip()}\n\n{line}\n{sep.strip()}{sign}" if sep else f"{comment.rstrip()}\n\n{line}"
     return comment
 
 
@@ -750,7 +767,7 @@ def request_kinds(graph: Any, store: Any) -> list[ActionKind]:
 
 
 def propose_reply(graph: Any, llm: Any, store: Any, actions: Actions, message_id: str,
-                  starts: list[str]) -> dict[str, Any]:
+                  starts: list[str], booking_link: str | None = None) -> dict[str, Any]:
     row = store.get_request(message_id)
     if row is None or row["status"] != "new":
         raise ValueError("This request is no longer open.")
@@ -759,7 +776,7 @@ def propose_reply(graph: Any, llm: Any, store: Any, actions: Actions, message_id
     if not slots:
         raise ValueError("Pick at least one time.")
     request = row["request"]
-    comment = draft_reply(llm, graph, request, slots)
+    comment = draft_reply(llm, graph, request, slots, booking_link)
     action = actions.propose(REPLY_KIND, f"Reply to {request['from_name']} proposing {len(slots)} time"
                              f"{'s' if len(slots) != 1 else ''}", {
         "message_id": message_id, "to": request["from_email"], "subject": f"Re: {request['subject']}",
