@@ -16,7 +16,8 @@ TICKET_FIELDS = [
     {"name": "ticketCategory", "isPickList": True, "picklistValues": [{"value": "119", "label": "Pre-Sales - New Quote"},
                                                                        {"value": "120", "label": "Pre-Sales - Renewal"},
                                                                        {"value": "3", "label": "Standard"}]},
-    {"name": "queueID", "isPickList": True, "picklistValues": [{"value": "50", "label": "Pre-Sales / Design Desk"}]},
+    {"name": "queueID", "isPickList": True, "picklistValues": [{"value": "50", "label": "Pre-Sales / Design Desk"},
+                                                               {"value": "60", "label": "MST: Pro Services"}]},
     {"name": "status", "isPickList": True, "picklistValues": [{"value": "1", "label": "New"}, {"value": "5", "label": "Complete"}]},
     {"name": "issueType", "isPickList": True, "picklistValues": [{"value": "9", "label": "Voice"}, {"value": "13", "label": "Pre-Sales"}]},
     {"name": "subIssueType", "isPickList": True, "picklistValues": [{"value": "61", "label": "Quote", "parentValue": "13"},
@@ -96,12 +97,17 @@ def test_the_quote_ticket_rides_on_the_opportunity_slip_with_best_guesses_dave_c
     assert [o[1] for o in t["edit"]["ticket_work_type"]["options"]] == ["Pre-Sales", "Voice - Pre-Sales"]
     assert slip["display"]["values"]["ticket"] == "yes"
 
-    # Dave keeps the ticket but switches the work type and priority
-    actions.approve(slip["action_id"], decided_by="test", edits={"ticket_work_type": "200", "ticket_priority": "1"})
+    # The queue is a choice too: where tickets on opportunities have gone, then every other queue
+    assert [o[1] for o in t["edit"]["ticket_queue"]["options"]] == ["Pre-Sales / Design Desk", "MST: Pro Services"]
+    assert rows["Queue"][2] == "Usual choice: 4 of the last 4 tickets on opportunities"
+
+    # Dave keeps the ticket but switches the work type, priority and queue
+    actions.approve(slip["action_id"], decided_by="test",
+                    edits={"ticket_work_type": "200", "ticket_priority": "1", "ticket_queue": "60"})
     (_, opp), (entity, body) = at.created
     assert entity == "Tickets" and body["opportunityID"] == 777 and body["companyID"] == 1 and body["contactID"] == 10
     assert (body["billingCodeID"], body["priority"], body["ticketCategory"]) == (200, 1, 119)
-    assert (body["queueID"], body["ticketType"], body["source"], body["status"]) == (50, 4, 10, 1)
+    assert (body["queueID"], body["ticketType"], body["source"], body["status"]) == (60, 4, 10, 1)
     assert body["title"] == "Quote - Phone System for Northwind" and "issueType" not in body
 
 

@@ -1076,10 +1076,11 @@ function fillSlip(node, action) {
     // How common a choice is, in the same words the server uses (agent/quote_tickets.describe_usage)
     const usageWords = (spec, v) => {
       const total = spec.usage_total || 0, n = (spec.usage || {})[v] || 0;
+      const [one, many] = spec.usage_noun || ["quote request", "quote requests"];
       if (!total) return "";
-      if (n === 0) return "Unusual: no quote request used this in the last 3 months";
-      if (n >= total / 2) return `Usual choice: ${n} of the last ${total} quote requests`;
-      return `Less common: ${n} of the last ${total} quote requests`;
+      if (n === 0) return `Unusual: no ${one} used this in the last 3 months`;
+      if (n >= total / 2) return `Usual choice: ${n} of the last ${total} ${many}`;
+      return `Less common: ${n} of the last ${total} ${many}`;
     };
     const fieldList = (rows, editSpec) => el("dl", { class: "slip__fields" }, ...rows.flatMap(([label, value, note, field]) => {
       let shown = value;

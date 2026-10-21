@@ -116,7 +116,17 @@ class QuoteHistory:
         voice_quote = next((k for k, p in self.parents.items() if p == voice
                             and self.labels.get("subIssueType", {}).get(k) == "Sales Quote"), None) if voice else None
         issue_values = ["none"] + [v for v, _ in issues.most_common()] + ([f"{voice}:{voice_quote}"] if voice_quote else [])
+        # Queues: where tickets on opportunities have gone (any queue, not just pre-sales), then every other queue
+        cut = (datetime.now(timezone.utc) - timedelta(days=90)).isoformat()[:19]
+        lately = Counter(str(t["queueID"]) for t in self.tickets if t.get("queueID") and (t.get("createDate") or "") >= cut)
+        ever = Counter(str(t["queueID"]) for t in self.tickets if t.get("queueID"))
+        queues = [v for v, _ in lately.most_common()] + [v for v, _ in ever.most_common() if v not in lately]
+        retired = re.compile(r"^\s*(xx\.|x\s*-)|do not use|\btest\b", re.I)   # "xx. Monitoring Alert test"
+        queues += sorted((v for v in self.labels.get("queueID", {})
+                          if v not in queues and not retired.search(self.label("queueID", v))),
+                         key=lambda v: self.label("queueID", v))
         return {
+            "queue": [[v, self.label("queueID", v)] for v in queues],
             "category": [[v, self.label("ticketCategory", v)] for v in ranked("ticketCategory")
                          if "pre-sales" in self.label("ticketCategory", v).lower()] or
                         [[v, self.label("ticketCategory", v)] for v in ranked("ticketCategory")],
@@ -249,6 +259,10 @@ def usage(history: QuoteHistory, field: str, source_field: str) -> tuple[dict[st
     """How many of the last 3 months' quote requests used each value of a field, counted in code,
     so the slip can say whether a pick is the usual one (and keep saying it as Dave changes it)."""
     recent = history.quote_tickets(days=90) or history.quote_tickets()
+    if field == "queue":
+        # Every quote request is in the pre-sales queue by definition: count all tickets on opportunities instead
+        cut = (datetime.now(timezone.utc) - timedelta(days=90)).isoformat()[:19]
+        recent = [t for t in history.tickets if (t.get("createDate") or "") >= cut] or history.tickets
 
     def value(t: dict[str, Any]) -> str:
         if field == "issue":
@@ -260,20 +274,23 @@ def usage(history: QuoteHistory, field: str, source_field: str) -> tuple[dict[st
     return counts, len(recent)
 
 
-def describe_usage(n: int, total: int) -> str:
+QUEUE_NOUN = ("ticket on an opportunity", "tickets on opportunities")
+
+
+def describe_usage(n: int, total: int, noun: tuple[str, str] = ("quote request", "quote requests")) -> str:
     """Plain words for how common a choice is. app.js says the same thing the same way when Dave changes it."""
     if not total:
         return ""
     if n == 0:
-        return "Unusual: no quote request used this in the last 3 months"
+        return f"Unusual: no {noun[0]} used this in the last 3 months"
     if n >= total / 2:
-        return f"Usual choice: {n} of the last {total} quote requests"
-    return f"Less common: {n} of the last {total} quote requests"
+        return f"Usual choice: {n} of the last {total} {noun[1]}"
+    return f"Less common: {n} of the last {total} {noun[1]}"
 
 
 def usage_note(history: QuoteHistory, field: str, source_field: str, value: str) -> str:
     counts, total = usage(history, field, source_field)
-    return describe_usage(counts.get(value, 0), total)
+    return describe_usage(counts.get(value, 0), total, QUEUE_NOUN if field == "queue" else ("quote request", "quote requests"))
 
 
 def ticket_body(payload: dict[str, Any], opportunity_id: int, company_id: int, contact_id: int | None) -> dict[str, Any]:
@@ -284,6 +301,7 @@ def ticket_body(payload: dict[str, Any], opportunity_id: int, company_id: int, c
         "title": payload["ticket_title"].strip()[:255],
         "description": payload["ticket_description"].strip()[:8000],
         "ticketCategory": int(payload["ticket_category"]),
+        **({"queueID": int(payload["ticket_queue"])} if str(payload.get("ticket_queue") or "").isdigit() else {}),
         "billingCodeID": int(payload["ticket_work_type"]),
         "priority": int(payload["ticket_priority"]),
         "dueDateTime": f"{payload['ticket_due'][:10]}T17:00:00Z",

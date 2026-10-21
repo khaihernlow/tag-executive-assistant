@@ -287,6 +287,7 @@ def ticket_section(history: Any, llm: Any, args: dict[str, Any], company: str, c
     values = {"ticket": "yes", "ticket_title": s["title"], "ticket_description": s["description"],
               "ticket_category": s["category"], "ticket_work_type": s["work_type"], "ticket_issue": s["issue"],
               "ticket_priority": s["priority"], "ticket_due": s["due"], "ticket_fixed": history.fixed()}
+    values["ticket_queue"] = str(values["ticket_fixed"].get("queueID") or "")
     rows = [["Create it", "", "", "ticket"],
             ["Category", history.label("ticketCategory", s["category"]),
              usage_note(history, "category", "ticketCategory", s["category"]), "ticket_category"],
@@ -295,13 +296,18 @@ def ticket_section(history: Any, llm: Any, args: dict[str, Any], company: str, c
             ["Issue type", history.label("issue", s["issue"]), usage_note(history, "issue", "", s["issue"]), "ticket_issue"],
             ["Priority", history.label("priority", s["priority"]), "", "ticket_priority"],
             ["Due", s["due"], "", "ticket_due"],
-            ["Queue", history.label("queueID", values["ticket_fixed"].get("queueID"))]]
+            ["Queue", history.label("queueID", values["ticket_queue"]),
+             usage_note(history, "queue", "queueID", values["ticket_queue"]), "ticket_queue"]]
     from agent.quote_tickets import usage
 
     def with_usage(field: str, source_field: str) -> dict[str, Any]:
         # Every option's count goes to the slip, so the note follows whatever Dave picks
         counts, total = usage(history, field, source_field)
-        return {"options": options[field], "usage": {v: counts.get(v, 0) for v, _ in options[field]}, "usage_total": total}
+        spec = {"options": options[field], "usage": {v: counts.get(v, 0) for v, _ in options[field]}, "usage_total": total}
+        if field == "queue":
+            from agent.quote_tickets import QUEUE_NOUN
+            spec["usage_noun"] = list(QUEUE_NOUN)
+        return spec
 
     section = {"heading": "Quote request ticket", "rows": rows, "why": s["why"],
                "edit": {"ticket": {"options": [["yes", "Yes, send to pre-sales"], ["no", "No, just the opportunity"]]},
@@ -311,7 +317,8 @@ def ticket_section(history: Any, llm: Any, args: dict[str, Any], company: str, c
                         # The due date follows the priority (how long pre-sales usually gets at each one)
                         "ticket_priority": {"options": options["priority"],
                                             "due_days": {v: history.due_days(v) for v, _ in options["priority"]}},
-                        "ticket_due": {"type": "date"}}}
+                        "ticket_due": {"type": "date"},
+                        "ticket_queue": with_usage("queue", "queueID")}}
     return values, section
 
 
@@ -497,7 +504,7 @@ def opportunity_kinds(at: Any) -> list[ActionKind]:
         return {"opportunity_id": oid, "web_link": web_link("opportunity", oid)}
 
     ticket_fields = ("ticket", "ticket_title", "ticket_description", "ticket_category", "ticket_work_type",
-                     "ticket_issue", "ticket_priority", "ticket_due")
+                     "ticket_issue", "ticket_priority", "ticket_due", "ticket_queue")
     return [ActionKind(CREATE_KIND, create, editable=("title", "description", "stage", "close_date", "owner_id", "contact_id",
                                                      *ticket_fields)),
             ActionKind(UPDATE_KIND, update)]
