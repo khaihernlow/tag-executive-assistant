@@ -458,6 +458,17 @@ def opportunity_kinds(at: Any) -> list[ActionKind]:
 def opportunity_tools(directory: Directory, actions: Actions, llm: Any = None) -> list[Tool]:
     from agent.quote_tickets import QuoteHistory
     history = QuoteHistory(directory.at) if llm is not None else None
+    if history is not None:
+        # A year of quote tickets takes ~12s to read: do it now, not while Dave waits for his card
+        import threading
+
+        def warm() -> None:
+            try:
+                history.load()
+            except Exception:  # noqa: BLE001 - it loads again on first use
+                pass
+        threading.Thread(target=warm, daemon=True).start()
+
     def pending_note(result: dict[str, Any]) -> dict[str, Any]:
         if result["status"] == "pending":
             result["note"] = "Not saved yet. Dave sees an approval card; tell him it's ready for his approval."
