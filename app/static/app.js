@@ -898,6 +898,9 @@ function inviteCard(inv) {
     inv.clashes.length
       ? el("p", { class: "avail avail--busy" }, el("strong", { text: "\u26a0 Clashes with: " }), inv.clashes.join("; "))
       : el("p", { class: "avail avail--free", text: "\u2713 You\u2019re free" }));
+  const context = el("div", { class: "invite__context" }, el("span", { class: "skel skel--row" }), el("span", { class: "skel skel--row" }));
+  card.append(context);
+  loadInviteContext(inv, context);
   const status = el("p", { class: "card__note" });
   const row = el("div", { class: "invite__actions" });
   const choices = [["accept", "Accept"], ["tentative", "Maybe"], ["decline", "Decline"]].map(([response, label]) =>
@@ -919,6 +922,49 @@ function inviteCard(inv) {
   row.append(...choices);
   card.append(row, status);
   return card;
+}
+
+// Before Dave answers: what the meeting is, who's on it, the latest emails, last time, HubSpot
+async function loadInviteContext(inv, box) {
+  let c;
+  try {
+    c = await api(`/api/invites/${encodeURIComponent(inv.id)}/context`);
+  } catch (err) {
+    box.replaceChildren(el("p", { class: "card__note", text: `Couldn't load the background: ${err.message}` }));
+    return;
+  }
+  const part = (label, ...children) => el("section", { class: "invite__part" }, el("p", { class: "invite__label", text: label }), ...children);
+  const parts = [];
+  if (c.about) parts.push(part("What it says", el("p", { class: "invite__about", text: c.about })));
+  if (c.people && c.people.length) {
+    const outside = c.people.filter((p) => p.outside), inside = c.people.filter((p) => !p.outside);
+    parts.push(part("Who\u2019s on it",
+      outside.length ? el("p", { class: "invite__people", text: `Outside: ${outside.map((p) => p.name).join(", ")}` }) : null,
+      inside.length ? el("p", { class: "invite__people", text: `TAG: ${inside.map((p) => p.name).join(", ")}` }) : null,
+      c.more_people ? el("p", { class: "card__note", text: `and ${c.more_people} more` }) : null));
+  }
+  for (const h of c.hubspot || []) {
+    parts.push(part("In HubSpot", el(h.url ? "a" : "p", { class: "invite__link", ...(h.url ? { href: h.url, target: "_blank", rel: "noopener" } : {}),
+      text: [h.title, h.lifecycle_stage, h.owner && `owner ${h.owner}`, h.last_contacted && `last contacted ${h.last_contacted}`].filter(Boolean).join(" \u00b7 ") })));
+  }
+  if (c.last_notes && c.last_notes.length) {
+    const n = c.last_notes[0];
+    parts.push(part("Last time", el("button", { class: "invite__note", type: "button", onclick: () => openNote(n.id) },
+      el("span", { class: "invite__note-title", text: `${n.title} \u00b7 ${n.when}` }),
+      n.headline ? el("span", { class: "invite__note-text", text: n.headline }) : null)));
+  }
+  if (c.emails && c.emails.length) {
+    parts.push(part("Recent emails", el("ul", { class: "invite__emails" }, c.emails.map((e) => el("li", {},
+      el(e.web_link ? "a" : "div", { class: "invite__email", ...(e.web_link ? { href: e.web_link, target: "_blank", rel: "noopener" } : {}) },
+        el("span", { class: "invite__email-subject", text: e.subject }),
+        el("span", { class: "invite__email-meta", text: [e.from, e.received].filter(Boolean).join(" \u00b7 ") }),
+        e.excerpt ? el("span", { class: "invite__email-text", text: e.excerpt }) : null))))));
+  }
+  const event = todayEvents.find((e) => e.id === inv.id) || c.event;
+  if (c.brief_ready && event) {
+    parts.push(el("button", { class: "link-btn invite__brief", type: "button", text: "Open the brief", onclick: () => { closeDetail(); openBrief(event); } }));
+  }
+  box.replaceChildren(...(parts.length ? parts : [el("p", { class: "card__note", text: "No emails or notes about this one yet." })]));
 }
 
 // ── next up and "needs you" ────────────────────────────────────────────────────

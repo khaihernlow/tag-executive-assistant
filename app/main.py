@@ -578,6 +578,16 @@ class InviteIn(BaseModel):
     response: str
 
 
+@app.get("/api/invites/{event_id:path}/context")
+def invite_context_view(event_id: str, user: dict = Depends(require_auth), svc=Depends(services)):
+    """What Dave needs before answering: what it's about, who's on it, recent emails, last time, HubSpot."""
+    from agent.invite_context import invite_context
+    try:
+        return invite_context(svc.graph, svc.store, event_id, getattr(svc, "hubspot", None))
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
 @app.post("/api/invites/{event_id:path}/respond")
 def invite_respond(event_id: str, body: InviteIn, user: dict = Depends(require_auth), svc=Depends(services)):
     """Dave tapped Accept, Maybe or Decline on Today: that tap is his decision, so it goes straight out."""

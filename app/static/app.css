@@ -1203,3 +1203,24 @@ svg.icon { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: ro
 .todos__n { font-size: 12px; font-weight: 500; color: var(--ink-faint); font-variant-numeric: tabular-nums; }
 .todos__group--done > summary { color: var(--ink-faint); }
 .todos__foot { margin: var(--s4) var(--s1) 0; font-size: 12px; color: var(--ink-ghost); }
+
+/* An invite's background, so Dave can answer without going to look */
+.invite__context { display: grid; gap: var(--s3); margin: var(--s3) 0; padding-top: var(--s3); border-top: 1px solid var(--rule-soft); }
+.invite__part { display: grid; gap: var(--s1); }
+.invite__label { margin: 0; font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-faint); }
+.invite__about, .invite__people { margin: 0; font-size: 14px; line-height: 1.45; color: var(--ink-soft); }
+.invite__link { font-size: 14px; color: var(--link); text-decoration: none; }
+.invite__link:hover { text-decoration: underline; }
+.invite__note { display: grid; gap: 2px; padding: var(--s2) var(--s3); border: 1px solid var(--rule-soft); border-radius: var(--r-md);
+                background: none; text-align: left; font: inherit; color: var(--ink); cursor: pointer; }
+.invite__note:hover { background: var(--sunken); }
+.invite__note-title { font-size: 14px; font-weight: 600; }
+.invite__note-text { font-size: 13px; color: var(--ink-soft); line-height: 1.4; }
+.invite__emails { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--s1); }
+.invite__email { display: grid; gap: 1px; padding: var(--s2) var(--s3); border-radius: var(--r-md); color: var(--ink); text-decoration: none; }
+a.invite__email:hover { background: var(--sunken); }
+.invite__email-subject { font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.invite__email-meta { font-size: 12px; color: var(--ink-faint); }
+.invite__email-text { font-size: 13px; color: var(--ink-soft); line-height: 1.4; overflow: hidden; display: -webkit-box;
+                      -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.invite__brief { justify-self: start; padding-left: 0; }
