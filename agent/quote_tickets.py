@@ -245,14 +245,35 @@ def suggest(llm: Any, history: QuoteHistory, request: dict[str, Any]) -> dict[st
     return out
 
 
-def usage_note(history: QuoteHistory, field: str, source_field: str, value: str) -> str:
-    """'used on 89 of 101 recent quote tickets': how common a pick is, counted in code."""
+def usage(history: QuoteHistory, field: str, source_field: str) -> tuple[dict[str, int], int]:
+    """How many of the last 3 months' quote requests used each value of a field, counted in code,
+    so the slip can say whether a pick is the usual one (and keep saying it as Dave changes it)."""
     recent = history.quote_tickets(days=90) or history.quote_tickets()
-    if field == "issue":
-        n = sum(1 for t in recent if (f"{t['issueType']}:{t.get('subIssueType') or ''}" if t.get("issueType") else "none") == value)
-    else:
-        n = sum(1 for t in recent if str(t.get(source_field)) == value)
-    return f"{n} of {len(recent)} recent quote tickets"
+
+    def value(t: dict[str, Any]) -> str:
+        if field == "issue":
+            return f"{t['issueType']}:{t.get('subIssueType') or ''}" if t.get("issueType") else "none"
+        return str(t.get(source_field))
+    counts: dict[str, int] = {}
+    for t in recent:
+        counts[value(t)] = counts.get(value(t), 0) + 1
+    return counts, len(recent)
+
+
+def describe_usage(n: int, total: int) -> str:
+    """Plain words for how common a choice is. app.js says the same thing the same way when Dave changes it."""
+    if not total:
+        return ""
+    if n == 0:
+        return "Unusual: no quote request used this in the last 3 months"
+    if n >= total / 2:
+        return f"Usual choice: {n} of the last {total} quote requests"
+    return f"Less common: {n} of the last {total} quote requests"
+
+
+def usage_note(history: QuoteHistory, field: str, source_field: str, value: str) -> str:
+    counts, total = usage(history, field, source_field)
+    return describe_usage(counts.get(value, 0), total)
 
 
 def ticket_body(payload: dict[str, Any], opportunity_id: int, company_id: int, contact_id: int | None) -> dict[str, Any]:

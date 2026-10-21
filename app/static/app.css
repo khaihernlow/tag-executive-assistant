@@ -1169,3 +1169,5 @@ svg.icon { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: ro
 .slip__title-input--sub { margin-top: var(--s2); font-size: 15px; }
 .slip__why { margin: var(--s2) 0; padding: var(--s2) var(--s3); border-radius: var(--r-sm); background: var(--sunken);
              font-size: 13px; line-height: 1.5; color: var(--ink-soft); }
+
+.slip__note--unusual { color: var(--brass); background: var(--brass-wash); }

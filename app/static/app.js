@@ -1073,9 +1073,18 @@ function fillSlip(node, action) {
       parts.push(el("p", { class: "slip__heading", text: d.heading || "" }));
     }
     const values = d.values || {};
+    // How common a choice is, in the same words the server uses (agent/quote_tickets.describe_usage)
+    const usageWords = (spec, v) => {
+      const total = spec.usage_total || 0, n = (spec.usage || {})[v] || 0;
+      if (!total) return "";
+      if (n === 0) return "Unusual: no quote request used this in the last 3 months";
+      if (n >= total / 2) return `Usual choice: ${n} of the last ${total} quote requests`;
+      return `Less common: ${n} of the last ${total} quote requests`;
+    };
     const fieldList = (rows, editSpec) => el("dl", { class: "slip__fields" }, ...rows.flatMap(([label, value, note, field]) => {
       let shown = value;
       const spec = field && editSpec[field];
+      let noteNode = note ? el("span", { class: "slip__note", text: note }) : null;
       if (pending && spec) {
         // Native pickers: on an iPhone these are the wheel and the calendar.
         const input = spec.options
@@ -1085,10 +1094,22 @@ function fillSlip(node, action) {
         input.value = values[field] ?? "";
         fieldInputs[field] = input;
         shown = input;
+        if (spec.usage) {
+          // The note follows the dropdown: change the pick and it says how common the new one is
+          noteNode = el("span", { class: "slip__note" });
+          const say = () => {
+            const words = usageWords(spec, input.value);
+            noteNode.textContent = words;
+            noteNode.classList.toggle("slip__note--unusual", words.startsWith("Unusual"));
+          };
+          input.addEventListener("change", say);
+          say();
+        }
       } else if (spec && spec.options && values[field] !== undefined) {
         shown = (spec.options.find(([v]) => v === values[field]) || [])[1] || value;   // what was chosen, not the first guess
+        noteNode = null;   // decided: how common it was no longer matters
       }
-      return [el("dt", { text: label }), el("dd", {}, shown, note ? el("span", { class: "slip__note", text: note }) : null)];
+      return [el("dt", { text: label }), el("dd", {}, shown, noteNode)];
     }));
     parts.push(fieldList(d.rows, d.edit || {}));
     if ("description" in d) {
@@ -1116,6 +1137,19 @@ function fillSlip(node, action) {
         fieldList(t.rows.filter((r) => r[3] !== "ticket"), t.edit || {}),
         el("p", { class: "slip__email-meta", text: "What pre-sales should quote" }), ticketText);
       block.append(fieldList(t.rows.filter((r) => r[3] === "ticket"), t.edit || {}), rest);
+      const priority = fieldInputs.ticket_priority, due = fieldInputs.ticket_due;
+      const dueDays = ((t.edit || {}).ticket_priority || {}).due_days;
+      if (priority && due && dueDays) {
+        // A new priority moves the due date with it, unless Dave has picked the date himself
+        let dueTouched = false;
+        due.addEventListener("change", () => { dueTouched = true; });
+        priority.addEventListener("change", () => {
+          if (dueTouched || dueDays[priority.value] === undefined) return;
+          const d = new Date();
+          d.setDate(d.getDate() + dueDays[priority.value]);
+          due.value = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+        });
+      }
       const toggle = fieldInputs.ticket;
       const sync = () => { rest.hidden = (toggle ? toggle.value : values.ticket) === "no"; };
       if (toggle) toggle.addEventListener("change", sync);

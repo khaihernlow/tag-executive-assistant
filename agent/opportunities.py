@@ -266,12 +266,21 @@ def ticket_section(history: Any, llm: Any, args: dict[str, Any], company: str, c
             ["Priority", history.label("priority", s["priority"]), "", "ticket_priority"],
             ["Due", s["due"], "", "ticket_due"],
             ["Queue", history.label("queueID", values["ticket_fixed"].get("queueID"))]]
+    from agent.quote_tickets import usage
+
+    def with_usage(field: str, source_field: str) -> dict[str, Any]:
+        # Every option's count goes to the slip, so the note follows whatever Dave picks
+        counts, total = usage(history, field, source_field)
+        return {"options": options[field], "usage": {v: counts.get(v, 0) for v, _ in options[field]}, "usage_total": total}
+
     section = {"heading": "Quote request ticket", "rows": rows, "why": s["why"],
                "edit": {"ticket": {"options": [["yes", "Yes, send to pre-sales"], ["no", "No, just the opportunity"]]},
-                        "ticket_category": {"options": options["category"]},
-                        "ticket_work_type": {"options": options["work_type"]},
-                        "ticket_issue": {"options": options["issue"]},
-                        "ticket_priority": {"options": options["priority"]},
+                        "ticket_category": with_usage("category", "ticketCategory"),
+                        "ticket_work_type": with_usage("work_type", "billingCodeID"),
+                        "ticket_issue": with_usage("issue", ""),
+                        # The due date follows the priority (how long pre-sales usually gets at each one)
+                        "ticket_priority": {"options": options["priority"],
+                                            "due_days": {v: history.due_days(v) for v, _ in options["priority"]}},
                         "ticket_due": {"type": "date"}}}
     return values, section
 

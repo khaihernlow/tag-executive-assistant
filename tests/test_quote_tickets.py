@@ -87,7 +87,11 @@ def test_the_quote_ticket_rides_on_the_opportunity_slip_with_best_guesses_dave_c
     assert "Quote - Mitel phone system" in llm.seen[0]                      # similar past tickets shown to the model
     t = slip["display"]["ticket"]
     rows = {r[0]: r for r in t["rows"]}
-    assert rows["Work type"][1] == "Voice - Pre-Sales" and rows["Work type"][2] == "1 of 4 recent quote tickets"
+    assert rows["Work type"][1] == "Voice - Pre-Sales" and rows["Work type"][2] == "Less common: 1 of the last 4 quote requests"
+    assert rows["Category"][2] == "Usual choice: 3 of the last 4 quote requests"
+    # Every option's count is on the slip, so the note can follow Dave's pick
+    assert t["edit"]["ticket_work_type"]["usage"] == {"200": 3, "201": 1} and t["edit"]["ticket_work_type"]["usage_total"] == 4
+    assert t["edit"]["ticket_issue"]["usage"]["none"] == 4
     assert rows["Category"][1] == "Pre-Sales - New Quote" and t["why"] == "A phone system, so voice pre-sales."
     assert [o[1] for o in t["edit"]["ticket_work_type"]["options"]] == ["Pre-Sales", "Voice - Pre-Sales"]
     assert slip["display"]["values"]["ticket"] == "yes"
