@@ -126,6 +126,13 @@ class Worker:
                         log.info("meeting requests found: %s", added)
                 except Exception:  # noqa: BLE001
                     log.exception("meeting request scan failed")
+            try:
+                from agent.maestro import ingest as maestro_ingest
+                got = maestro_ingest(self.graph, self.store)   # TeamsMaestro's write-ups from Dave's inbox
+                if got:
+                    log.info("TeamsMaestro notes added: %s", got)
+            except Exception:  # noqa: BLE001
+                log.exception("TeamsMaestro step failed")
             self.process_notes()
             self._stop.wait(self.interval)
 

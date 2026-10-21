@@ -1740,7 +1740,8 @@ function joinsHint(select, hint) {
 function partsLabel(parts) {
   const count = (source) => parts.filter((p) => p.source === source).length;
   const words = [];
-  const rec = count("recording"), pasted = count("pasted"), teams = count("teams");
+  const rec = count("recording"), pasted = count("pasted"), teams = count("teams"), maestro = count("maestro");
+  if (maestro) words.push("TeamsMaestro");
   if (rec) words.push(rec === 1 ? "a recording" : `${rec} recordings`);
   if (pasted) words.push(pasted === 1 ? "pasted notes" : `${pasted} sets of pasted notes`);
   if (teams) words.push("the Teams transcript");
@@ -1864,10 +1865,25 @@ function renderNote(n) {
           a.owner && !a.dave ? el("span", { text: a.owner }) : null,
           a.due ? el("span", { class: "notes-due", text: `Due ${dueLabel(a.due)}` }) : a.due_text ? el("span", { text: a.due_text }) : null))))) : null;
     content.push(actions("For you", mine), actions("Others' to-dos", others));
-    content.push(briefSection("Decisions", n.decisions), briefSection("Discussed", n.summary),
+    content.push(briefSection("Decisions", n.decisions),
+                 briefSection(n.sections && n.sections.length ? "Takeaways" : "Discussed", n.summary),
                  briefSection("Still open", n.open_questions));
+    if (n.sections && n.sections.length) {
+      // TeamsMaestro's detailed summary: its own sections, folded so the takeaways lead
+      content.push(el("details", { class: "bsec bsources" },
+        el("summary", { class: "bsec__title" }, `Detailed summary \u00b7 ${n.sections.length} topics`, icon("chevron-down")),
+        ...n.sections.map((s) => el("div", { class: "ns-topic" },
+          s.heading ? el("p", { class: "ns-topic__title", text: s.heading }) : null,
+          el("ul", { class: "bsec__list" }, s.points.map((p) => el("li", { text: p })))))));
+    }
+    if (n.link) {
+      content.push(el("p", { class: "ns-link" }, el("a", { href: n.link, target: "_blank", rel: "noopener" },
+        "Open in TeamsMaestro (full transcript)", icon("external-link"))));
+    }
   }
-  if (n.transcript) {
+  // TeamsMaestro's notes come as a write-up, not a transcript (that's behind its link): no "Transcript" here
+  const onlyMaestro = parts.length && parts.every((p) => p.source === "maestro");
+  if (n.transcript && !onlyMaestro) {
     content.push(el("details", { class: "bsec bsources" },
       el("summary", { class: "bsec__title" }, `Transcript \u00b7 ${n.transcript.split("\n").length} lines`, icon("chevron-down")),
       el("ol", { class: "transcript" }, n.transcript.split("\n").map((line) => {

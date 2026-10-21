@@ -1171,3 +1171,10 @@ svg.icon { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: ro
              font-size: 13px; line-height: 1.5; color: var(--ink-soft); }
 
 .slip__note--unusual { color: var(--brass); background: var(--brass-wash); }
+
+/* TeamsMaestro notes: the detailed summary's topics, and the way back to the full transcript */
+.ns-topic { margin-top: var(--s3); }
+.ns-topic__title { margin: 0 0 var(--s1); font-size: 14px; font-weight: 600; color: var(--ink); }
+.ns-link { margin: var(--s4) 0 0; font-size: 14px; }
+.ns-link a { display: inline-flex; align-items: center; gap: var(--s1); color: var(--link); }
+.ns-link svg.icon { width: 14px; height: 14px; }

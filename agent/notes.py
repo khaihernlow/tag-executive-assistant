@@ -199,7 +199,7 @@ def transcript_lines(transcript: str, numbers: list[int]) -> list[str]:
 # same meeting's notes. Each part keeps its own transcript; the note's transcript is all of them,
 # numbered straight through (so citations stay unique), and the notes are written over the whole.
 
-PART_LABEL = {"recording": "recording", "pasted": "pasted notes", "teams": "Teams transcript"}
+PART_LABEL = {"recording": "recording", "pasted": "pasted notes", "teams": "Teams transcript", "maestro": "TeamsMaestro notes"}
 _LINE_LABEL = re.compile(r"^\[L\d+\]\s*")
 
 
@@ -401,7 +401,8 @@ def note_view(note: dict[str, Any], full: bool = False) -> dict[str, Any]:
         view.update(headline=d.get("headline", ""), decisions=d.get("decisions", []),
                     action_items=d.get("action_items", []))
         if full:
-            view.update(summary=d.get("summary", []), open_questions=d.get("open_questions", []))
+            view.update(summary=d.get("summary", []), open_questions=d.get("open_questions", []),
+                        sections=d.get("sections", []), link=d.get("link"))
     return view
 
 
