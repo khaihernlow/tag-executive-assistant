@@ -164,7 +164,8 @@ class Directory:
 def web_link(record: str, record_id: int) -> str:
     """Opens the record in Autotask (zone LR01 -> ww1)."""
     base = os.environ.get("AUTOTASK_WEB_URL", "https://ww1.autotask.net").rstrip("/")
-    code = {"opportunity": "OpenOpportunity&OpportunityID", "company": "OpenAccount&AccountID"}[record]
+    code = {"opportunity": "OpenOpportunity&OpportunityID", "company": "OpenAccount&AccountID",
+            "ticket": "OpenTicketDetail&TicketID"}[record]
     return f"{base}/Autotask/AutotaskExtend/ExecuteCommand.aspx?Code={code}={record_id}"
 
 
@@ -245,7 +246,38 @@ def _close_date(value: str | None, today: date) -> date:
         raise ValueError("close_date must be YYYY-MM-DD") from e
 
 
-def propose_create(directory: Directory, actions: Actions, args: dict[str, Any], today: date | None = None) -> dict[str, Any]:
+def ticket_section(history: Any, llm: Any, args: dict[str, Any], company: str, contact_name: str) -> tuple[dict, dict]:
+    """The quote request ticket for the slip: best-guess codes (from TAG's past quote tickets), each
+    a dropdown Dave can change, with how often it's used and why it was picked."""
+    from agent.quote_tickets import suggest, usage_note
+    s = suggest(llm, history, {"title": args.get("title"), "company": company, "contact": contact_name,
+                               "notes": args.get("quote_notes") or "", "description": args.get("description") or "",
+                               "tag_people": args.get("tag_people") or ""})
+    options = history.options()
+    values = {"ticket": "yes", "ticket_title": s["title"], "ticket_description": s["description"],
+              "ticket_category": s["category"], "ticket_work_type": s["work_type"], "ticket_issue": s["issue"],
+              "ticket_priority": s["priority"], "ticket_due": s["due"], "ticket_fixed": history.fixed()}
+    rows = [["Create it", "", "", "ticket"],
+            ["Category", history.label("ticketCategory", s["category"]),
+             usage_note(history, "category", "ticketCategory", s["category"]), "ticket_category"],
+            ["Work type", history.label("billingCodeID", s["work_type"]),
+             usage_note(history, "work_type", "billingCodeID", s["work_type"]), "ticket_work_type"],
+            ["Issue type", history.label("issue", s["issue"]), usage_note(history, "issue", "", s["issue"]), "ticket_issue"],
+            ["Priority", history.label("priority", s["priority"]), "", "ticket_priority"],
+            ["Due", s["due"], "", "ticket_due"],
+            ["Queue", history.label("queueID", values["ticket_fixed"].get("queueID"))]]
+    section = {"heading": "Quote request ticket", "rows": rows, "why": s["why"],
+               "edit": {"ticket": {"options": [["yes", "Yes, send to pre-sales"], ["no", "No, just the opportunity"]]},
+                        "ticket_category": {"options": options["category"]},
+                        "ticket_work_type": {"options": options["work_type"]},
+                        "ticket_issue": {"options": options["issue"]},
+                        "ticket_priority": {"options": options["priority"]},
+                        "ticket_due": {"type": "date"}}}
+    return values, section
+
+
+def propose_create(directory: Directory, actions: Actions, args: dict[str, Any], today: date | None = None,
+                   llm: Any = None, history: Any = None) -> dict[str, Any]:
     today = today or datetime.now(local_zone()).date()
     title = (args.get("title") or "").strip()
     if not title:
@@ -325,6 +357,16 @@ def propose_create(directory: Directory, actions: Actions, args: dict[str, Any],
     }
     if new_contact:
         payload["new_contact"] = new_contact
+    if llm is not None and history is not None and args.get("quote_ticket", True):
+        try:
+            values, section = ticket_section(history, llm, args, company, contact["name"] if contact else
+                                             (args.get("contact_name") or ""))
+        except Exception as e:  # noqa: BLE001 - the opportunity still stands; say the ticket couldn't be prepared
+            warnings.append(f"couldn't prepare the quote ticket ({type(e).__name__}); create it in Autotask")
+        else:
+            payload.update(values)
+            payload["display"]["ticket"] = section
+            summary += f" · then a quote request ticket ({section['rows'][1][1]}, {section['rows'][2][1]})"
     return public_action(actions.propose(CREATE_KIND, summary, payload))
 
 
@@ -391,19 +433,31 @@ def opportunity_kinds(at: Any) -> list[ActionKind]:
         if payload.get("new_contact"):
             body["contactID"] = result["contact_id"] = at.create("Contacts", payload["new_contact"])
         oid = at.create("Opportunities", body)
-        return {**result, "opportunity_id": oid, "web_link": web_link("opportunity", oid)}
+        result.update({"opportunity_id": oid, "web_link": web_link("opportunity", oid)})
+        if payload.get("ticket") == "yes" and payload.get("ticket_fixed"):
+            from agent.quote_tickets import ticket_body
+            try:
+                tid = at.create("Tickets", ticket_body(payload, oid, body["companyID"], body.get("contactID")))
+                result.update({"ticket_id": tid, "ticket_link": web_link("ticket", tid)})
+            except Exception as e:  # noqa: BLE001 - the opportunity is saved; say the ticket wasn't
+                result["ticket_error"] = f"{type(e).__name__}: {e}"[:300]
+        return result
 
     def update(payload: dict[str, Any], action_id: str) -> dict[str, Any]:
         oid = at.update("Opportunities", payload["patch"])
         return {"opportunity_id": oid, "web_link": web_link("opportunity", oid)}
 
-    return [ActionKind(CREATE_KIND, create, editable=("title", "description", "stage", "close_date", "owner_id")),
+    ticket_fields = ("ticket", "ticket_title", "ticket_description", "ticket_category", "ticket_work_type",
+                     "ticket_issue", "ticket_priority", "ticket_due")
+    return [ActionKind(CREATE_KIND, create, editable=("title", "description", "stage", "close_date", "owner_id", *ticket_fields)),
             ActionKind(UPDATE_KIND, update)]
 
 
 # ── chat tools ───────────────────────────────────────────────────────────────
 
-def opportunity_tools(directory: Directory, actions: Actions) -> list[Tool]:
+def opportunity_tools(directory: Directory, actions: Actions, llm: Any = None) -> list[Tool]:
+    from agent.quote_tickets import QuoteHistory
+    history = QuoteHistory(directory.at) if llm is not None else None
     def pending_note(result: dict[str, Any]) -> dict[str, Any]:
         if result["status"] == "pending":
             result["note"] = "Not saved yet. Dave sees an approval card; tell him it's ready for his approval."
@@ -445,9 +499,15 @@ def opportunity_tools(directory: Directory, actions: Actions) -> list[Tool]:
                 "contact_title": {"type": "string", "description": "Their job title, if known"},
                 "description": {"type": "string"},
                 "amount": {"type": "number", "description": "Only if known; normally 0 until quoted"},
-                "owner_name": {"type": "string"}},
+                "owner_name": {"type": "string"},
+                "quote_ticket": {"type": "boolean", "description": "Also ask pre-sales to quote it (a ticket linked to the "
+                                 "opportunity). Default true; false only if Dave says not to, or it's already quoted"},
+                "quote_notes": {"type": "string", "description": "What to quote, in Dave's words: what, how many, budget, "
+                                "what they pay now if it's a renewal, whether he wants ballpark numbers or the client "
+                                "already approved, any urgency"},
+                "tag_people": {"type": "string", "description": "TAG people involved besides Dave, if any ('RJ Gray / Sales')"}},
                 "required": ["company_id", "title"]}),
-            handler=lambda a: pending_note(propose_create(directory, actions, a))),
+            handler=lambda a: pending_note(propose_create(directory, actions, a, llm=llm, history=history))),
         Tool(spec=ToolSpec(
             name="update_opportunity",
             description="Propose changing an opportunity's stage, close date, title or amount (saved once Dave approves).",

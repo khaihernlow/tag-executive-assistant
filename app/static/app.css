@@ -1161,3 +1161,11 @@ svg.icon { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: ro
 .hs-more > summary svg.icon { width: 14px; height: 14px; transition: transform 0.15s ease-out; }
 .hs-more[open] > summary svg.icon { transform: rotate(180deg); }
 .hs-record .row__top svg.icon { width: 14px; height: 14px; color: var(--ink-faint); flex: none; }
+
+/* An opportunity's quote request ticket: a second block on the same slip */
+.slip__sub { margin-top: var(--s4); padding-top: var(--s3); border-top: 1px solid var(--rule-soft); }
+.slip__sub-title { margin: 0 0 var(--s2); font-size: 12px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-faint); }
+.slip__sub-body[hidden] { display: none; }
+.slip__title-input--sub { margin-top: var(--s2); font-size: 15px; }
+.slip__why { margin: var(--s2) 0; padding: var(--s2) var(--s3); border-radius: var(--r-sm); background: var(--sunken);
+             font-size: 13px; line-height: 1.5; color: var(--ink-soft); }

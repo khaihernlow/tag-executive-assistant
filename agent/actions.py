@@ -106,7 +106,8 @@ def public_action(action: dict[str, Any]) -> dict[str, Any]:
     if "display" in payload:
         # Records (e.g. an Autotask opportunity): the slip lays out each field and
         # lets Dave edit the ones the kind allows before approving.
-        editable = ("title", "description", *((payload["display"].get("edit") or {}).keys()))
+        editable = ("title", "description", *((payload["display"].get("edit") or {}).keys()),
+                    *(((payload["display"].get("ticket") or {}).get("edit") or {}).keys()), "ticket_title", "ticket_description")
         out["display"] = {**payload["display"], "values": {k: payload[k] for k in editable if k in payload}}
         for k in ("title", "description"):
             if k in payload:

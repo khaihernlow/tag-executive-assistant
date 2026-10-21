@@ -84,7 +84,7 @@ def build_services() -> Services:
         + junk_tools(graph, fast_llm, actions, store)
         + [create_event_tool(graph, actions)]
         + change_tools(graph, actions)
-        + (opportunity_tools(directory, actions) if directory else [])
+        + (opportunity_tools(directory, actions, llm) if directory else [])
         + (timesheet_tools(autotask, store) if autotask else [])
         + (renewal_tools(tag_data, directory, actions) if tag_data and directory else [])
         + (project_tools(autotask, directory, actions, picks) if autotask else [])

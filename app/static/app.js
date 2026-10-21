@@ -1072,12 +1072,12 @@ function fillSlip(node, action) {
     } else {
       parts.push(el("p", { class: "slip__heading", text: d.heading || "" }));
     }
-    const editSpec = d.edit || {}, values = d.values || {};
-    parts.push(el("dl", { class: "slip__fields" }, ...d.rows.flatMap(([label, value, note, field]) => {
+    const values = d.values || {};
+    const fieldList = (rows, editSpec) => el("dl", { class: "slip__fields" }, ...rows.flatMap(([label, value, note, field]) => {
       let shown = value;
-      if (pending && field && editSpec[field]) {
+      const spec = field && editSpec[field];
+      if (pending && spec) {
         // Native pickers: on an iPhone these are the wheel and the calendar.
-        const spec = editSpec[field];
         const input = spec.options
           ? el("select", { class: "slip__field-input", "aria-label": label },
               ...spec.options.map(([v, text]) => el("option", { value: v, text })))
@@ -1085,15 +1085,42 @@ function fillSlip(node, action) {
         input.value = values[field] ?? "";
         fieldInputs[field] = input;
         shown = input;
+      } else if (spec && spec.options && values[field] !== undefined) {
+        shown = (spec.options.find(([v]) => v === values[field]) || [])[1] || value;   // what was chosen, not the first guess
       }
       return [el("dt", { text: label }), el("dd", {}, shown, note ? el("span", { class: "slip__note", text: note }) : null)];
-    })));
+    }));
+    parts.push(fieldList(d.rows, d.edit || {}));
     if ("description" in d) {
       parts.push(el("p", { class: "slip__email-meta", text: d.details_label || "Details" }));
       detailsBox = el("textarea", { class: "slip__email", rows: "7", "aria-label": d.details_label || "Details" });
       detailsBox.value = d.description || "";
       detailsBox.readOnly = !pending;
       parts.push(detailsBox);
+    }
+    if (d.ticket) {
+      // The quote request for pre-sales: best-guess codes from past tickets, each one changeable
+      const t = d.ticket;
+      const block = el("div", { class: "slip__sub" }, el("p", { class: "slip__sub-title", text: t.heading }));
+      const ticketTitle = el("input", { class: "slip__title-input slip__title-input--sub", type: "text", "aria-label": "Ticket title" });
+      ticketTitle.value = values.ticket_title || "";
+      ticketTitle.readOnly = !pending;
+      fieldInputs.ticket_title = ticketTitle;
+      const ticketText = el("textarea", { class: "slip__email", rows: "9", "aria-label": "Ticket description" });
+      ticketText.value = values.ticket_description || "";
+      ticketText.readOnly = !pending;
+      fieldInputs.ticket_description = ticketText;
+      const rest = el("div", { class: "slip__sub-body" },
+        ticketTitle,
+        t.why ? el("p", { class: "slip__why", text: `Why: ${t.why}` }) : null,
+        fieldList(t.rows.filter((r) => r[3] !== "ticket"), t.edit || {}),
+        el("p", { class: "slip__email-meta", text: "What pre-sales should quote" }), ticketText);
+      block.append(fieldList(t.rows.filter((r) => r[3] === "ticket"), t.edit || {}), rest);
+      const toggle = fieldInputs.ticket;
+      const sync = () => { rest.hidden = (toggle ? toggle.value : values.ticket) === "no"; };
+      if (toggle) toggle.addEventListener("change", sync);
+      sync();
+      parts.push(block);
     }
     if (d.warnings && d.warnings.length) {
       parts.push(el("div", { class: "slip__warnings" }, ...d.warnings.map((w) => el("p", { class: "warn", text: `\u26a0 ${w}` }))));
@@ -1167,7 +1194,9 @@ function fillSlip(node, action) {
     const isAutotask = action.kind.endsWith("_opportunity");
     parts.push(el("span", { class: "stamp stamp--done" }, doneText,
       r.join_url ? el("a", { href: r.join_url, target: "_blank", rel: "noopener", text: "Teams link" }) : null,
-      r.web_link ? el("a", { href: r.web_link, target: "_blank", rel: "noopener", text: isAutotask ? "Open in Autotask" : "Outlook" }) : null));
+      r.web_link ? el("a", { href: r.web_link, target: "_blank", rel: "noopener", text: isAutotask ? "Open in Autotask" : "Outlook" }) : null,
+      r.ticket_link ? el("a", { href: r.ticket_link, target: "_blank", rel: "noopener", text: "Quote ticket" }) : null));
+    if (r.ticket_error) parts.push(el("p", { class: "warn", text: `⚠ The opportunity is saved, but the quote ticket wasn't: ${r.ticket_error}` }));
   } else if (action.status === "rejected") {
     node.classList.add("slip--declined");
     parts.push(el("span", { class: "stamp stamp--declined", text: "Declined" }));
