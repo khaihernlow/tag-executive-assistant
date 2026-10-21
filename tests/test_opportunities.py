@@ -184,6 +184,36 @@ def test_stage_close_date_and_owner_can_be_changed_on_the_slip():
     assert body["ownerResourceID"] == DAVE_ID  # 501 wasn't offered, so it's ignored
 
 
+def test_the_contact_is_a_dropdown_of_the_companys_people():
+    at, directory, actions = setup()
+    at.tables["Contacts"] = CONTACTS + [
+        {"id": 11, "companyID": 1, "firstName": "Lisa", "lastName": "Quinn", "emailAddress": "lquinn@northwind.example",
+         "title": "CFO", "isActive": 1},
+        {"id": 12, "companyID": 1, "firstName": "Old", "lastName": "Timer", "emailAddress": "old@northwind.example", "isActive": 0}]
+    slip = propose_create(directory, actions, {"company_id": 1, "title": "Phones", "contact_email": "cmorgan@northwind.example"},
+                          today=TODAY)
+    spec = slip["display"]["edit"]["contact_id"]
+    assert spec["options"] == [["10", "Casey Morgan"], ["11", "Lisa Quinn · CFO"], ["none", "No contact"]]  # the pick first; no inactive
+    assert spec["people"]["11"] == {"name": "Lisa Quinn", "email": "lquinn@northwind.example", "title": "CFO"}
+    assert slip["display"]["values"]["contact_id"] == "10"
+    actions.approve(slip["action_id"], decided_by="test", edits={"contact_id": "11"})
+    assert at.created[0][1]["contactID"] == 11
+
+    slip = propose_create(directory, actions, {"company_id": 1, "title": "Phones", "contact_email": "cmorgan@northwind.example"},
+                          today=TODAY)
+    actions.approve(slip["action_id"], decided_by="test", edits={"contact_id": "none"})
+    assert "contactID" not in at.created[1][1]
+
+
+def test_picking_an_existing_contact_instead_of_a_new_one_adds_nobody():
+    at, directory, actions = setup()
+    slip = propose_create(directory, actions, {"company_id": 1, "title": "Phones", "contact_email": "pat@northwind.example",
+                                               "contact_name": "Pat Lee"}, today=TODAY)
+    assert slip["display"]["edit"]["contact_id"]["options"][0] == ["new", "Pat Lee (new, added to Autotask)"]
+    actions.approve(slip["action_id"], decided_by="test", edits={"contact_id": "10"})
+    assert [e for e, _ in at.created] == ["Opportunities"] and at.created[0][1]["contactID"] == 10
+
+
 # ── pipeline check ───────────────────────────────────────────────────────────
 
 def test_pipeline_snapshot_lists_overdue_oldest_first_and_a_tap_saves_and_clears_it():

@@ -1059,7 +1059,7 @@ function fillSlip(node, action) {
     ...warnings.map((w) => el("span", { class: "warn", text: `⚠ ${w}` })));
   const parts = [el("p", { class: "slip__kind", text: KIND_LABELS[action.kind] || action.kind })];
   const pending = action.status === "pending";
-  let emailBox = null, titleBox = null, detailsBox = null;
+  let emailBox = null, titleBox = null, detailsBox = null, ticketTextBox = null;
   const fieldInputs = {};
   if (action.display) {
     // A record: its fields laid out, the editable ones as inputs.
@@ -1152,9 +1152,34 @@ function fillSlip(node, action) {
       }
       const toggle = fieldInputs.ticket;
       const sync = () => { rest.hidden = (toggle ? toggle.value : values.ticket) === "no"; };
+      ticketTextBox = ticketText;
       if (toggle) toggle.addEventListener("change", sync);
       sync();
       parts.push(block);
+    }
+    const contactPick = fieldInputs.contact_id, people = ((d.edit || {}).contact_id || {}).people;
+    if (contactPick && people) {
+      // A different contact: their name, title and email replace the previous one's in the description
+      // and the ticket text, so what's saved doesn't name one person in the field and another in the text
+      const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const swap = (text, prev, next) => {
+        // The text may say "Richard Marino" where Autotask says "Rick Marino": match the surname with
+        // whatever first name is in front, and an "/ title" after it; emails ignoring case
+        if (prev.email) text = text.replace(new RegExp(esc(prev.email), "gi"), next.email || "");
+        const last = prev.name.trim().split(/\s+/).pop();
+        if (!last) return text;
+        const who = new RegExp(`(?:\\b[A-Z][\\w.'’()-]*\\s+){1,2}${esc(last)}\\b(\\s*/\\s*[^\\n]*)?`, "g");
+        return text.replace(who, (m, title) => (title !== undefined ? `${next.name} / ${next.title || "Unknown"}` : next.name));
+      };
+      let previous = people[contactPick.value];
+      contactPick.addEventListener("change", () => {
+        const next = people[contactPick.value];
+        if (!next) return;                       // "No contact": leave the text for Dave to edit
+        for (const box of [detailsBox, ticketTextBox]) {
+          if (box && previous) box.value = swap(box.value, previous, next);
+        }
+        previous = next;
+      });
     }
     if (d.warnings && d.warnings.length) {
       parts.push(el("div", { class: "slip__warnings" }, ...d.warnings.map((w) => el("p", { class: "warn", text: `\u26a0 ${w}` }))));

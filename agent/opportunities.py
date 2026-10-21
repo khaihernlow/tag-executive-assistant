@@ -160,6 +160,15 @@ class Directory:
         return {"contact_id": r["id"], "name": f"{r.get('firstName', '')} {r.get('lastName', '')}".strip(),
                 "email": r.get("emailAddress") or ""}
 
+    def company_contacts(self, company_id: int) -> list[dict[str, Any]]:
+        """The company's active contacts, for Dave to pick from on the slip: name, title, email."""
+        rows = self.at.query("Contacts", [{"op": "eq", "field": "companyID", "value": company_id}],
+                             ["id", "firstName", "lastName", "emailAddress", "title", "isActive"], 500)
+        people = [{"id": r["id"], "name": f"{r.get('firstName') or ''} {r.get('lastName') or ''}".strip(),
+                   "email": r.get("emailAddress") or "", "title": (r.get("title") or "").strip()}
+                  for r in rows if r.get("isActive", 1) not in (0, False)]
+        return sorted((p for p in people if p["name"]), key=lambda p: p["name"].lower())
+
 
 def web_link(record: str, record_id: int) -> str:
     """Opens the record in Autotask (zone LR01 -> ww1)."""
@@ -244,6 +253,27 @@ def _close_date(value: str | None, today: date) -> date:
         return date.fromisoformat(value[:10])
     except ValueError as e:
         raise ValueError("close_date must be YYYY-MM-DD") from e
+
+
+def contact_choices(directory: Directory, company_id: int, contact: dict[str, Any] | None,
+                    new_contact: dict[str, Any] | None) -> tuple[dict[str, Any], str]:
+    """Who the opportunity is with, as a dropdown: the pick first, then the company's other contacts,
+    then 'No contact'. Each option carries name, title and email, so the slip can swap them in the
+    description and the ticket text when Dave changes it."""
+    people = directory.company_contacts(company_id)
+    if contact:
+        people.sort(key=lambda p: p["id"] != contact["contact_id"])
+    options, details = [], {}
+    if new_contact:
+        name = f"{new_contact['firstName']} {new_contact['lastName']}"
+        options.append(["new", f"{name} (new, added to Autotask)"])
+        details["new"] = {"name": name, "email": new_contact["emailAddress"], "title": new_contact.get("title", "")}
+    for p in people:
+        options.append([str(p["id"]), p["name"] + (f" \u00b7 {p['title']}" if p["title"] else "")])
+        details[str(p["id"])] = {"name": p["name"], "email": p["email"], "title": p["title"]}
+    options.append(["none", "No contact"])
+    value = "new" if new_contact else str(contact["contact_id"]) if contact else "none"
+    return {"options": options, "people": details}, value
 
 
 def ticket_section(history: Any, llm: Any, args: dict[str, Any], company: str, contact_name: str) -> tuple[dict, dict]:
@@ -347,7 +377,8 @@ def propose_create(directory: Directory, actions: Actions, args: dict[str, Any],
     rows = [["Company", company], ["Stage", f"{directory.stage_label(body['stage'])} \u00b7 {probability}%", "", "stage"],
             ["Closes", close.strftime("%b %d, %Y").replace(" 0", " "), "", "close_date"],
             ["Owner", directory.resource_name(owner), "", "owner_id"],
-            ["Contact", contact_row, "New contact" if new_contact else ""]]
+            ["Contact", contact_row, "New contact" if new_contact else "", "contact_id"]]
+    contact_spec, contact_value = contact_choices(directory, company_id, contact, new_contact)
     if args.get("category"):
         rows.insert(1, ["Category", args["category"].title() + "s"])
     stages = directory.stage_ids()
@@ -356,10 +387,11 @@ def propose_create(directory: Directory, actions: Actions, args: dict[str, Any],
                               for k in STAGES if k in stages and k not in ("won", "lost")]},
         "close_date": {"type": "date"},
         "owner_id": {"options": directory.owner_choices()},
+        "contact_id": contact_spec,
     }
     payload: dict[str, Any] = {
         "body": body, "title": title, "description": body["description"],
-        "stage": stage_key, "close_date": close.isoformat(), "owner_id": str(owner),
+        "stage": stage_key, "close_date": close.isoformat(), "owner_id": str(owner), "contact_id": contact_value,
         # What each stage means in Autotask terms, so an edited stage saves correctly.
         "stage_map": {k: [stages[k], STAGES[k][1], STAGES[k][2]] for k in STAGES if k in stages},
         "display": {"rows": rows, "edit": edit_fields, "warnings": warnings, "details_label": "Description"},
@@ -429,9 +461,17 @@ def apply_slip_edits(payload: dict[str, Any]) -> dict[str, Any]:
             body["projectedCloseDate"] = _at_date(date.fromisoformat(payload["close_date"][:10]))
         except ValueError as e:
             raise ValueError("The close date isn't a valid date.") from e
-    owners = {o[0] for o in ((payload.get("display") or {}).get("edit") or {}).get("owner_id", {}).get("options", [])}
+    edit = (payload.get("display") or {}).get("edit") or {}
+    owners = {o[0] for o in edit.get("owner_id", {}).get("options", [])}
     if payload.get("owner_id") in owners:
         body["ownerResourceID"] = int(payload["owner_id"])
+    contacts = {o[0] for o in edit.get("contact_id", {}).get("options", [])}
+    picked = payload.get("contact_id")
+    if picked in contacts:
+        if picked == "none":
+            body.pop("contactID", None)
+        elif picked != "new":
+            body["contactID"] = int(picked)
     return body
 
 
@@ -439,7 +479,7 @@ def opportunity_kinds(at: Any) -> list[ActionKind]:
     def create(payload: dict[str, Any], action_id: str) -> dict[str, Any]:
         body = apply_slip_edits(payload)
         result: dict[str, Any] = {}
-        if payload.get("new_contact"):
+        if payload.get("new_contact") and payload.get("contact_id", "new") == "new":
             body["contactID"] = result["contact_id"] = at.create("Contacts", payload["new_contact"])
         oid = at.create("Opportunities", body)
         result.update({"opportunity_id": oid, "web_link": web_link("opportunity", oid)})
@@ -458,7 +498,8 @@ def opportunity_kinds(at: Any) -> list[ActionKind]:
 
     ticket_fields = ("ticket", "ticket_title", "ticket_description", "ticket_category", "ticket_work_type",
                      "ticket_issue", "ticket_priority", "ticket_due")
-    return [ActionKind(CREATE_KIND, create, editable=("title", "description", "stage", "close_date", "owner_id", *ticket_fields)),
+    return [ActionKind(CREATE_KIND, create, editable=("title", "description", "stage", "close_date", "owner_id", "contact_id",
+                                                     *ticket_fields)),
             ActionKind(UPDATE_KIND, update)]
 
 
