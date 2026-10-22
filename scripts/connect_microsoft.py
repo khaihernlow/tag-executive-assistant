@@ -37,7 +37,10 @@ def main() -> int:
     cache = load_cache(path)
     app = build_app(os.environ.get("GRAPH_TENANT_ID", ""), os.environ.get("GRAPH_CLIENT_ID", ""), cache)
 
-    if args.device_code:
+    # A server or container has no browser to open: use the code flow there without being asked
+    no_browser = sys.platform.startswith("linux") and not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+    if args.device_code or no_browser:
+        print(f"Sign in as {account}.")
         flow = app.initiate_device_flow(scopes=SCOPES)
         if "user_code" not in flow:
             print(f"Device code sign-in unavailable: {flow.get('error_description', flow)}")
