@@ -132,8 +132,14 @@ class DelegatedTokenProvider:
             self.cache.deserialize(self.path.read_text(encoding="utf-8"))
             accounts = self._accounts()
         if not accounts:
+            # Say which: a missing file (not copied, or not mounted) and a file without this account need different fixes
+            if not self.path.exists():
+                where = f"there is no token file at {self.path.resolve()}"
+            else:
+                others = sorted({a.get("username", "") for a in self.app.get_accounts()})
+                where = f"{self.path.resolve()} only has: {', '.join(others) or 'no accounts'}"
             raise NotConnectedError(
-                f"No saved Microsoft sign-in for {self.account}. Run: python scripts/connect_microsoft.py"
+                f"No saved Microsoft sign-in for {self.account} ({where}). Run: python scripts/connect_microsoft.py"
             )
         result = self.app.acquire_token_silent(SCOPES, account=accounts[0])
         # MSAL may have rotated the refresh token; persist it either way.
