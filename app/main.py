@@ -31,7 +31,7 @@ from agent.notes import retry as retry_parts
 from agent.lunch import order_anyway, skip_week as skip_lunch, today_view as lunch_view
 from agent.uploads import MAX_BYTES as MAX_UPLOAD_BYTES, UploadError, prepare as prepare_upload
 from connectors.graph import EVENT_FIELDS
-from app.auth import is_allowed, require_auth, user_email
+from app.auth import is_allowed, is_auth_required, require_auth, user_email
 
 BASE_DIR = Path(__file__).parent
 app = FastAPI(title="TAG Executive Assistant")
@@ -70,6 +70,10 @@ def services(request: Request):
 
 @app.on_event("startup")
 def start_worker() -> None:
+    # The fallback key is in this public repo: with it, anyone could forge a signed-in session
+    if is_auth_required() and os.environ.get("SECRET_KEY", "dev_secret_key") in ("", "dev_secret_key",
+                                                                                "change-me-to-a-long-random-string"):
+        raise RuntimeError("Set SECRET_KEY to a long random string before running with sign-in on (see .env.example)")
     # The background worker (briefs, later sweeps). Off with WORKER_ENABLED=False.
     if os.environ.get("WORKER_ENABLED", "True").lower() == "true":
         get_services(app).worker.start()

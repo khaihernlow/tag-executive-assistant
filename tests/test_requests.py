@@ -24,6 +24,13 @@ def env(monkeypatch):
     monkeypatch.setenv("ASSISTANT_TIMEZONE", "America/New_York")
     from agent import junk, relationship
 
+    # The fixtures are written for the week of Oct 8, 2026; pin the clock there so requests don't expire
+    class Frozen(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            fixed = datetime(2026, 10, 9, 10, 0, tzinfo=NY)
+            return fixed.astimezone(tz) if tz else fixed.replace(tzinfo=None)
+    monkeypatch.setattr(req, "datetime", Frozen)
     req._style_cache.clear()
     req._skip_folder_ids.clear()
     junk._correspondents.clear()
