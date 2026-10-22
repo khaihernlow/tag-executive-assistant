@@ -30,6 +30,11 @@ Copy `.env.example` to `.env` on the server and fill it in. Every setting is des
 send the values, or they're in IT Glue: HatzAI, Autotask API user, HubSpot token, Azure Speech key,
 Apify, Mealeo login, the Entra app IDs. Generate a fresh `SECRET_KEY` (for example `openssl rand -hex 32`).
 
+**tag_data:** the app reads your tag_data database (read-only: the session is opened read-only, it never
+writes) for one feature, contract renewals. It queries `ms_customer_contracts`, `ms_contract_line_items`
+and `ms_customers_meta`. Set `DB_POSTGRESDB_HOST` to the Postgres container's name on `n8n-network` (not
+`localhost`), and ideally give it a read-only database user. Left empty, renewals are simply absent.
+
 Leave these as they are unless told otherwise:
 - `LUNCH_LIVE` empty: the Wednesday lunch runs as a dry run (nobody is messaged) until Dave turns it on.
 - `ACTION_AUTO` empty: everything that changes the outside world waits for Dave's approval.
