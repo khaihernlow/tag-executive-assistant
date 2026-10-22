@@ -76,7 +76,7 @@ async function api(path, options = {}) {
   });
   if (res.status === 401) { location.href = "/auth/login"; throw new Error("Signed out"); }
   if (!res.ok) {
-    let detail = res.statusText;
+    let detail = res.statusText || `error ${res.status}`;   // HTTP/2 has no status text
     try { detail = (await res.json()).detail || detail; } catch { /* not json */ }
     throw new Error(detail);
   }

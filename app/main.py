@@ -8,7 +8,7 @@ from pathlib import Path
 from authlib.integrations.starlette_client import OAuth, OAuthError
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
@@ -38,6 +38,14 @@ app = FastAPI(title="TAG Executive Assistant")
 
 app.add_middleware(SessionMiddleware, secret_key=os.environ.get("SECRET_KEY", "dev_secret_key"))
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
+
+
+@app.exception_handler(Exception)
+async def unexpected_error(request: Request, exc: Exception):
+    # Say what broke ("Microsoft sign-in needs renewing ..."), not a bare 500; the traceback still goes to the logs
+    import logging
+    logging.getLogger("app").exception("%s %s failed", request.method, request.url.path)
+    return JSONResponse({"detail": f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__}, status_code=500)
 
 oauth = OAuth()
 oauth.register(
