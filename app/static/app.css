@@ -299,6 +299,21 @@ input[type="checkbox"] { accent-color: var(--navy); }
 /* The day's agenda: a card of stops, a time column on the left. */
 .itinerary { list-style: none; margin: 0; padding: var(--s1) var(--s4); }
 .itinerary__empty { color: var(--ink-faint); font-size: 14px; padding: var(--s3) 0; }
+.itinerary--loading { opacity: 0.45; transition: opacity 0.15s ease-out; }
+
+/* Stepping the agenda a day at a time: quiet arrows either side of the day's name. */
+.daynav { display: inline-flex; align-items: center; gap: var(--s1); margin-left: -6px; }
+.daynav__step {
+  width: 26px; height: 26px; display: grid; place-items: center; padding: 0;
+  border: 0; border-radius: 50%; background: none; color: var(--ink-faint); cursor: pointer;
+}
+.daynav__step:hover { background: var(--sunken); color: var(--ink); }
+.daynav__step:focus-visible, .daynav__back:focus-visible { outline: 2px solid var(--link); outline-offset: 1px; }
+.daynav__step svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.daynav__back {
+  border: 0; background: none; padding: 2px 0; cursor: pointer;
+  font-size: 12px; font-weight: 600; letter-spacing: 0; text-transform: none; color: var(--link);
+}
 .done-today { margin: 0 0 var(--s2); font-size: 13px; color: var(--ink-faint); }
 .done-today::before { content: "\2713  "; color: var(--sage); }
 .stop {

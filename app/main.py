@@ -210,6 +210,33 @@ def _agenda_events(svc, day, now) -> list[dict]:
     return events
 
 
+def _with_status(svc, events: list[dict]) -> list[dict]:
+    """Each meeting's brief and notes, so the agenda can open them."""
+    statuses = svc.store.brief_statuses([e["id"] for e in events if e["id"]])
+    for e in events:
+        e["brief"] = statuses.get(e["id"])
+        note = svc.store.note_for_event(e["id"]) if e["id"] and hasattr(svc.store, "note_for_event") else None
+        e["note"] = {"id": note["id"], "status": note["status"]} if note else None
+    return events
+
+
+def _day_title(day, today) -> str:
+    names = {today: "Today", today + timedelta(days=1): "Tomorrow", today - timedelta(days=1): "Yesterday"}
+    return names.get(day) or day.strftime("%A")
+
+
+@app.get("/api/agenda")
+def agenda(date: str, user: dict = Depends(require_auth), svc=Depends(services)):
+    """Any one day's meetings, for stepping through the week from the agenda."""
+    try:
+        day = datetime.strptime(date, "%Y-%m-%d").date()
+    except ValueError:
+        raise HTTPException(status_code=400, detail="date must be YYYY-MM-DD")
+    now = datetime.now(local_zone())
+    return {"title": _day_title(day, now.date()), "date": day.strftime("%a, %b %d").replace(" 0", " "),
+            "iso": day.isoformat(), "events": _with_status(svc, _agenda_events(svc, day, now))}
+
+
 @app.get("/api/today")
 def today(user: dict = Depends(require_auth), svc=Depends(services)):
     now = datetime.now(local_zone())
@@ -231,11 +258,7 @@ def today(user: dict = Depends(require_auth), svc=Depends(services)):
         invites = pending_invites(svc.graph, now)
     except Exception:  # noqa: BLE001
         invites = []
-    statuses = svc.store.brief_statuses([e["id"] for e in events if e["id"]])
-    for e in events:
-        e["brief"] = statuses.get(e["id"])
-        note = svc.store.note_for_event(e["id"]) if e["id"] and hasattr(svc.store, "note_for_event") else None
-        e["note"] = {"id": note["id"], "status": note["status"]} if note else None
+    _with_status(svc, events)
     pending = [public_action(a) for a in svc.store.list_actions(status="pending", limit=20)]
     return {
         "date": now.strftime("%A, %b %d").replace(" 0", " "),
@@ -243,6 +266,7 @@ def today(user: dict = Depends(require_auth), svc=Depends(services)):
         "name": "" if user.get("name") == "Local Admin" else (user.get("name") or "").split(" ")[0],
         "agenda_title": title,
         "agenda_date": day.strftime("%a, %b %d").replace(" 0", " "),
+        "agenda_iso": day.isoformat(),
         "done_today": done_today,
         "events": events,
         "pending": pending,

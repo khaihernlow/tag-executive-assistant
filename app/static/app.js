@@ -308,12 +308,10 @@ async function loadToday() {
     $("#today-skeleton").hidden = true;
     $("#agenda-block").hidden = false;
     const isToday = day.agenda_title === "Today";
-    $("#today-title").textContent = isToday ? "Today" : `${day.agenda_title} · ${day.agenda_date}`;
-    const done = $("#done-today");
-    done.hidden = !day.done_today;
-    withMarks(done, `\u2713 ${day.done_today} done today`);
+    agendaHome = { iso: day.agenda_iso, title: isToday ? "Today" : `${day.agenda_title} · ${day.agenda_date}`,
+                   when: isToday ? "today" : day.agenda_title.toLowerCase(), events: day.events, done: day.done_today };
     todayEvents = day.events;
-    renderItinerary(day.events, isToday ? "today" : day.agenda_title.toLowerCase());
+    if (!agendaShown) showHomeDay();   // a refresh doesn't pull Dave back from the day he's looking at
     renderNext(day.events, isToday ? "" : day.agenda_title);
     renderNeeds(day.pending.filter((a) => !["reply_email", "book_meeting"].includes(a.kind)),
                 day.requests || [], day.invites || []);
@@ -359,6 +357,57 @@ function renderItinerary(events, when) {
     );
   }));
 }
+
+// ── other days ─────────────────────────────────────────────────────────────────
+
+let agendaHome = null;    // the day the agenda opens on (today, or tomorrow once today is done)
+let agendaShown = null;   // the date being looked at instead, "YYYY-MM-DD"
+let agendaAsk = 0;
+
+function showHomeDay() {
+  agendaShown = null;
+  $("#today-title").textContent = agendaHome.title;
+  const done = $("#done-today");
+  done.hidden = !agendaHome.done;
+  withMarks(done, `✓ ${agendaHome.done} done today`);
+  $("#day-back").hidden = true;
+  $("#itinerary").classList.remove("itinerary--loading");
+  renderItinerary(agendaHome.events, agendaHome.when);
+}
+
+function shiftDate(iso, days) {
+  const d = new Date(`${iso}T12:00:00`);
+  d.setDate(d.getDate() + days);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+async function stepDay(days) {
+  if (!agendaHome) return;
+  const iso = shiftDate(agendaShown || agendaHome.iso, days);
+  if (iso === agendaHome.iso) { agendaAsk++; return showHomeDay(); }
+  agendaShown = iso;
+  const ask = ++agendaAsk;
+  const list = $("#itinerary");
+  list.classList.add("itinerary--loading");
+  try {
+    const day = await api(`/api/agenda?date=${iso}`);
+    if (ask !== agendaAsk) return;   // he's already moved on to another day
+    const named = ["Today", "Tomorrow", "Yesterday"].includes(day.title);
+    $("#today-title").textContent = named ? `${day.title} · ${day.date}` : day.date;
+    $("#done-today").hidden = true;
+    $("#day-back").hidden = false;
+    renderItinerary(day.events, named ? day.title.toLowerCase() : day.date);
+  } catch (err) {
+    if (ask !== agendaAsk) return;
+    list.replaceChildren(el("li", { class: "itinerary__empty", text: `Couldn't load that day: ${err.message}` }));
+  } finally {
+    if (ask === agendaAsk) list.classList.remove("itinerary--loading");
+  }
+}
+
+$("#day-prev").addEventListener("click", () => stepDay(-1));
+$("#day-next").addEventListener("click", () => stepDay(1));
+$("#day-back").addEventListener("click", () => { agendaAsk++; showHomeDay(); });
 
 // ── meeting briefs ─────────────────────────────────────────────────────────────
 
