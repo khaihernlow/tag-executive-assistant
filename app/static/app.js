@@ -1675,6 +1675,26 @@ function hubspotCard(card) {
   return el("div", { class: "card" }, body.filter(Boolean));
 }
 
+// One rep's calling: the four numbers, how the calls went, then the appointments themselves
+function repActivityCard(card) {
+  const tile = (n, label) => el("div", { class: "rep__tile" },
+    el("span", { class: "rep__n", text: Number(n || 0).toLocaleString() }), el("span", { class: "rep__label", text: label }));
+  const groups = card.outcomes || [];
+  const top = Math.max(...groups.map((g) => g.count), 1);
+  return el("div", { class: "card rep" }, [
+    el("p", { class: "card__label", text: `HubSpot · ${card.person} · ${card.period}` }),
+    el("div", { class: "rep__tiles" }, tile(card.calls, "calls"), tile(card.conversations, "conversations"),
+      tile(card.appointments_booked, "appointments booked"), tile(card.meetings_in_period, "meetings held")),
+    groups.length ? el("ul", { class: "hs-groups" }, groups.slice(0, 10).map((g) => el("li", { class: "hs-group" },
+      el("span", { class: "hs-group__name", text: g.group }),
+      el("span", { class: "hs-group__bar", "aria-hidden": "true" }, el("span", { style: `width:${Math.max(2, Math.round((g.count / top) * 100))}%` })),
+      el("span", { class: "hs-group__n", text: g.count.toLocaleString() })))) : null,
+    (card.booked || []).length ? el("p", { class: "rep__sub", text: "Appointments booked" }) : null,
+    (card.booked || []).length ? hubspotRows(card.booked) : null,
+    hsMore(`Meetings held · ${(card.meetings || []).length}`, card.meetings),
+  ].filter(Boolean));
+}
+
 function hubspotRecordCard(card) {
   const counts = [["meetings", card.meetings_count], ["calls", card.calls_count], ["notes", card.notes_count]]
     .filter(([, n]) => n).map(([w, n]) => `${n} ${n === 1 ? w.slice(0, -1) : w}`).join(" · ");
@@ -1806,6 +1826,7 @@ function renderCard(card) {
     case "opportunities": return opportunitiesCard(card);
     case "hubspot": return hubspotCard(card);
     case "hubspot_record": return hubspotRecordCard(card);
+    case "rep_activity": return repActivityCard(card);
     case "timesheet": return timesheetCard(card);
     case "renewals": return renewalsCard(card);
     case "tasks": return tasksCard(card);

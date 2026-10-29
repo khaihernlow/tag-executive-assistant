@@ -669,6 +669,33 @@ class HubSpot:
             out["about_deals"] = DEALS_CAVEAT
         return out
 
+    # ── one rep's calling: calls, conversations, appointments ──
+
+    def rep_activity(self, args: dict[str, Any]) -> dict[str, Any]:
+        """'How many calls did Garrett make today, and how many appointments did he get?', worked out
+        in code. Appointments booked are meetings *made* in the period; the meetings on the calendar
+        in the period are a different number (asked once, it gave 0 booked when there was 1)."""
+        who, when = args.get("person") or "me", args.get("period") or "today"
+        owner = {"field": "owner", "op": "is", "value": who}
+        calls = self.query({"object": "calls", "filters": [owner, {"field": "when", "op": "during", "value": when}],
+                            "group_by": "outcome"})
+        outcomes = calls.get("groups") or []
+        talked = [g for g in outcomes if g["group"].lower() in CONVERSATION]
+        booked = self.query({"object": "meetings", "filters": [owner, {"field": "booked", "op": "during", "value": when}],
+                             "sort_by": "when", "order": "ascending", "limit": 25})
+        held = self.query({"object": "meetings", "filters": [owner, {"field": "when", "op": "during", "value": when}],
+                           "sort_by": "when", "order": "ascending", "limit": 25})
+        span = next((c.split(": ", 1)[1] for c in calls["conditions"] if c.startswith("Activity date")), str(when))
+        return {"person": self.owner_name(self.owner_id(who)), "period": span,
+                "calls": calls.get("matching", 0), "outcomes": outcomes,
+                "conversations": sum(g["count"] for g in talked),
+                "counted_as_conversation": [g["group"] for g in talked],
+                "meetings_set_on_calls": sum(g["count"] for g in outcomes if g["group"].lower() in MEETING_OUTCOMES),
+                "appointments_booked": booked.get("matching", 0), "booked": booked.get("rows", []),
+                "meetings_in_period": held.get("matching", 0), "meetings": held.get("rows", []),
+                "note": ("appointments_booked are meetings made in the period, whatever day they're for; "
+                         "meetings_in_period are the ones held or scheduled in it. Say which you mean.")}
+
     # ── one record, the whole picture ──
 
     def record(self, args: dict[str, Any]) -> dict[str, Any]:
@@ -774,6 +801,14 @@ class HubSpot:
         return out
 
 
+# Call outcomes where the rep actually talked with someone (TAG's 34 outcomes, checked Oct 2026). Voicemail, no
+# answer, wrong number, gatekeeper, gone, plain busy and the admin ones (bad info, do not call) are not.
+CONVERSATION = {"connected", "interest, call back later", "interest, send info", "not interested, follow up",
+                "busy call back", "busy, call back later", "busy, send information", "meeting scheduled", "meeting set",
+                "meeting rescheduled", "rescheduled meeting", "referral", "not decision maker",
+                "disqualified, reason in notes", "disqualified", "nurture", "no pitch", "send email"}
+MEETING_OUTCOMES = {"meeting scheduled", "meeting set"}
+
 DEALS_CAVEAT = ("TAG's HubSpot deals are mostly copies of Autotask quotes made by Zapier: nearly all sit at "
                 "'Appointment Scheduled' with no close date. Don't treat their stage or close date as a pipeline; "
                 "for pipeline questions use Autotask opportunities (find_opportunities).")
@@ -863,6 +898,14 @@ def hubspot_tools(hub: HubSpot) -> list[Tool]:
                       {"type": "object", "properties": {"object": {"type": "string", "enum": list(OBJECT_WORDS)},
                                                        "words": {"type": "string"}}, "required": ["object", "words"]}),
              handler=fields),
+        Tool(ToolSpec("hubspot_rep_activity", "One person's calling in HubSpot over a period, counted in code: calls made, "
+                      "their outcomes, how many were real conversations (and which outcomes count as one), appointments "
+                      "booked (meetings made in the period, whatever day they're for) and meetings held in the period. "
+                      "Use for 'how many calls did Garrett make today and how many appointments did he get', "
+                      "'how was RJ's week'.", {"type": "object", "properties": {
+                          "person": {"type": "string", "description": "A name, or 'me' for Dave"},
+                          "period": {"type": "string", "description": "A phrase: today, yesterday, this week, last week, October..."}},
+                          "required": ["person"]}), handler=hub.rep_activity),
         Tool(ToolSpec("hubspot_meeting_link", "Dave's HubSpot scheduling link(s), for someone outside TAG to book time "
                       "with him themselves.", {"type": "object", "properties": {}}), handler=links),
     ]

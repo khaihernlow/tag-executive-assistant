@@ -106,6 +106,11 @@ def build_cards(trace: list[ToolTrace]) -> list[dict[str, Any]]:
             # A workflow runs for minutes: the card follows it and shows the result
             cards.append({"type": "hatz_run", **{k: data.get(k) for k in ("job_id", "app", "steps")}})
 
+        elif t.name == "hubspot_rep_activity" and "calls" in data:
+            cards.append({"type": "rep_activity", **{k: data.get(k) for k in (
+                "person", "period", "calls", "outcomes", "conversations", "appointments_booked", "booked",
+                "meetings_in_period", "meetings")}})
+
         elif t.name == "hubspot_record" and data.get("title") and not data.get("choose"):
             cards.append({"type": "hubspot_record", **{k: data.get(k) for k in (
                 "object", "title", "sub", "url", "owner", "lifecycle_stage", "contacts", "deals", "recent_activity",

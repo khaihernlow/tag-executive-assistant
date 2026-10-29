@@ -178,7 +178,8 @@ def test_a_duplicate_company_record_is_resolved_by_its_history_and_mentioned(hub
 
 
 def test_the_tools_are_named_for_the_model(hub):
-    assert [t.spec.name for t in hubspot_tools(hub)] == ["hubspot_query", "hubspot_record", "hubspot_fields", "hubspot_meeting_link"]
+    assert [t.spec.name for t in hubspot_tools(hub)] == ["hubspot_query", "hubspot_record", "hubspot_fields", "hubspot_rep_activity",
+                                                          "hubspot_meeting_link"]
 
 
 def test_brief_material_keeps_what_tag_people_did_and_drops_the_noise(hub):
@@ -257,3 +258,26 @@ def test_a_card_showing_part_of_a_list_never_lets_it_claim_all_of_it():
     assert "shows these 50 of the 1,108" in note and "Never say all 1,108 are shown" in note and "Export all 1,108" in note
     assert shown_note({"matching": 3, "rows": [{}] * 3}) == SHOWN_ON_CARD
     assert shown_note({"matching": 110, "rows": [{}] * 10, "groups": [{"group": "x", "count": 110}]}) == SHOWN_ON_CARD
+
+
+def test_a_reps_day_counts_conversations_and_appointments_booked_not_just_held(hub, monkeypatch):
+    asked = []
+
+    def fake_query(args):
+        asked.append(args)
+        if args["object"] == "calls":
+            return {"matching": 110, "conditions": ["Activity assigned to is Garrett Smith", "Activity date: Oct 28, 2026 to Oct 28, 2026"],
+                    "groups": [{"group": "Left voicemail", "count": 52}, {"group": "No answer", "count": 48},
+                               {"group": "Not Interested, Follow Up", "count": 2}, {"group": "Meeting set", "count": 1},
+                               {"group": "Wrong number", "count": 7}]}
+        booked = any(f["field"] == "booked" for f in args["filters"])
+        return {"matching": 1, "rows": [{"title": "JConnelly" if booked else "CrushBank"}]}
+
+    monkeypatch.setattr(hub, "query", fake_query)
+    day = hub.rep_activity({"person": "Garrett", "period": "today"})
+    assert day["person"] == "Garrett Smith" and day["period"] == "Oct 28, 2026 to Oct 28, 2026" and day["calls"] == 110
+    assert day["conversations"] == 3 and day["counted_as_conversation"] == ["Not Interested, Follow Up", "Meeting set"]
+    assert day["meetings_set_on_calls"] == 1
+    assert day["appointments_booked"] == 1 and day["booked"][0]["title"] == "JConnelly"       # made today, for next week
+    assert day["meetings"][0]["title"] == "CrushBank"                                         # on today's calendar
+    assert [f["field"] for f in asked[1]["filters"]] == ["owner", "booked"]
