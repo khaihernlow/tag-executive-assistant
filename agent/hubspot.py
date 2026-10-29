@@ -830,6 +830,8 @@ class HubSpot:
         held = self.query({"object": "meetings", "filters": [owner, {"field": "when", "op": "during", "value": when}],
                            "sort_by": "when", "order": "ascending", "limit": 25})
         span = next((c.split(": ", 1)[1] for c in calls["conditions"] if c.startswith("Activity date")), str(when))
+        start, _, end = span.partition(" to ")
+        span = start if start == end else span          # one day: "Oct 28, 2026", not "Oct 28, 2026 to Oct 28, 2026"
         return {"person": self.owner_name(self.owner_id(who)), "period": span,
                 "calls": calls.get("matching", 0), "outcomes": outcomes,
                 "conversations": sum(g["count"] for g in talked),

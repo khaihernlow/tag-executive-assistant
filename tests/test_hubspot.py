@@ -275,7 +275,7 @@ def test_a_reps_day_counts_conversations_and_appointments_booked_not_just_held(h
 
     monkeypatch.setattr(hub, "query", fake_query)
     day = hub.rep_activity({"person": "Garrett", "period": "today"})
-    assert day["person"] == "Garrett Smith" and day["period"] == "Oct 28, 2026 to Oct 28, 2026" and day["calls"] == 110
+    assert day["person"] == "Garrett Smith" and day["period"] == "Oct 28, 2026" and day["calls"] == 110
     assert day["conversations"] == 3 and day["counted_as_conversation"] == ["Not Interested, Follow Up", "Meeting set"]
     assert day["meetings_set_on_calls"] == 1
     assert day["appointments_booked"] == 1 and day["booked"][0]["title"] == "JConnelly"       # made today, for next week
