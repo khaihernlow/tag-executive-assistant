@@ -270,6 +270,19 @@ Needs: `find_person`, `search_mail` + `read_email` + `extract_request`, `find_mu
   audio sent to models through its gateways is silently dropped (one model then invented a
   transcript). For now Dave uses iPhone keyboard dictation in the text box. Options for a real mic
   button later: self-hosted Whisper on TAG's server (private, free), or a paid speech-to-text API.
+- **R8 — HatzAI workflows may not use their own files in full. Found 2026-10-29, open.** Geronimo
+  runs Hatz workflows with only the user inputs; Hatz attaches the workflow's Files/Constants itself.
+  On the "RFP Automation" run for Aquatic Development Group (job 0280cebb…), the "TAG Canned
+  Responses" file (10 sections, ~6.2k tokens) was used for only 3 sections. The draft left
+  "[CLIENT INPUT REQUIRED]" for company history (the file says "founded in 1991"), cybersecurity
+  (EDR is in the file), onboarding, backup/recovery and references, all of which the file covers.
+  Causes found: (1) only the *Map Sections* step gets the file, and *Generate Draft Proposal*
+  never sees it; (2) the mapping step said content "was not visible in the excerpt", so Hatz
+  likely passes it fragments, not the whole file; (3) the file's certification list is empty
+  ("certifications such as:" and nothing after). Not a Geronimo bug.
+  Next: run the same RFP from inside Hatz to see if it's API-only. Then either the workflow's
+  owner moves the canned text into a Constant and also gives it to the draft step, or Geronimo
+  drafts RFPs itself from the full file (readable via `GET /v1/files/{type_id}/content`).
 - **R5 — SMS.** Maria texts people. Texting needs Twilio or similar (cost, number registration).
   Not needed until scheduling-by-text or lunch.
 - **R6 — Sending as Dave vs. as the assistant.** Decide whether scheduling emails go from Dave's
