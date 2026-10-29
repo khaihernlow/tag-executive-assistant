@@ -196,9 +196,10 @@ class HatzApps:
         try:
             app = self.app(raw.get("app_id") or "")
             names = {s["id"]: s.get("display_name") for s in app.get("steps") or []}
+            order = {s["id"]: (s.get("position") is None, s.get("position") or 0) for s in app.get("steps") or []}
             title = app["name"].strip()
         except ValueError:
-            names, title = {}, "Hatz workflow"
+            names, order, title = {}, {}, "Hatz workflow"
         outputs = sorted(raw.get("step_outputs") or [], key=lambda s: s.get("end_time") or s.get("start_time") or 0)
         done = [s for s in outputs if s.get("status") == "complete"]
         texts = [(s, step_text(s.get("output_data"))) for s in done if s.get("step_type") != "document_processing"]
@@ -208,8 +209,10 @@ class HatzApps:
         status = raw.get("status") or "running"
         return {"job_id": job_id, "app": title, "status": status, "steps": raw.get("number_of_steps") or len(names),
                 "done": len(done), "result": texts[-1][1] if texts and status == "complete" else "",
+                # In the workflow's own order (its branches finish in any order): an RFP's go/no-go before its draft
                 "all_steps": [{"name": names.get(s["step_id"]) or s.get("step_type"), "text": t}
-                              for s, t in texts] if status == "complete" else [],
+                              for s, t in sorted(texts, key=lambda st: order.get(st[0]["step_id"], (True, 0)))]
+                             if status == "complete" else [],
                 "documents": documents if status == "complete" else [],
                 "error": next((s.get("output_data") for s in outputs if s.get("status") == "failed"), "") if status == "failed" else ""}
 
