@@ -177,6 +177,10 @@ def _plain(text: str, limit: int = 300) -> str:
     return text if len(text) <= limit else text[:limit].rsplit(" ", 1)[0] + "…"
 
 
+def _plural(n: int, word: str) -> str:
+    return f"{n:,} {word}{'' if n == 1 else 's'}"
+
+
 def _number(value: Any) -> float:
     if isinstance(value, (int, float)):
         return float(value)
@@ -669,6 +673,82 @@ class HubSpot:
             out["about_deals"] = DEALS_CAVEAT
         return out
 
+    # ── who's most likely to buy: ranked in code, each with its reasons ──
+
+    def prospects(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Not-yet-clients ranked by what they've done: on TAG's website lately first, then TAG's own
+        Adjusted Lead Score and Engagement Score. Email clicks alone are weak: security scanners click
+        every link in an email, so a contact with clicks and no website visit is flagged."""
+        limit = max(5, min(int(args.get("limit") or 15), 40))
+        base = [{"propertyName": "lifecyclestage", "operator": "IN", "values": PROSPECT_STAGES},
+                {"propertyName": "email", "operator": "NOT_CONTAINS_TOKEN", "value": "*@" + (os.environ.get("INTERNAL_DOMAIN") or "tagsolutions.com")}]
+        said = ["not yet clients (subscriber, lead, MQL, SQL, opportunity, former customer)"]
+        if args.get("owner"):
+            base.append({"propertyName": "hubspot_owner_id", "operator": "EQ", "value": self.owner_id(str(args["owner"]))})
+            said.append(f"owned by {self.owner_name(self.owner_id(str(args['owner'])))}")
+        if args.get("company"):
+            cid, cname, _ = self.company_id(str(args["company"]))
+            base.append({"propertyName": "associations.company", "operator": "EQ", "value": cid})
+            said.append(f"at {cname}")
+        props = list(dict.fromkeys([*self.wanted_props("contacts"), *PROSPECT_PROPS]))
+        since = int((datetime.combine(self.today - timedelta(days=30), dtime.min, local_zone())).timestamp() * 1000)
+        visitors, _ = self.hs.search_all("contacts", max_rows=200, properties=props,
+                                         filters=base + [{"propertyName": "hs_analytics_last_visit_timestamp", "operator": "GTE", "value": since}],
+                                         sorts=[{"propertyName": "hs_analytics_last_visit_timestamp", "direction": "DESCENDING"}])
+        scored, total = self.hs.search_all("contacts", max_rows=200, properties=props,
+                                           filters=base + [{"propertyName": "adjusted_lead_score", "operator": "GT", "value": 0}],
+                                           sorts=[{"propertyName": "adjusted_lead_score", "direction": "DESCENDING"}])
+        people = {r["id"]: r for r in [*visitors, *scored]}
+        recent = {r["id"] for r in visitors}
+
+        def num(p: dict[str, Any], k: str) -> float:
+            try:
+                return float(p.get(k) or 0)
+            except ValueError:
+                return 0.0
+
+        ranked = sorted(people.values(), key=lambda r: (r["id"] not in recent, -num(r["properties"], "adjusted_lead_score"),
+                                                        -num(r["properties"], "contacts_engagement_score_jun25")))
+        rows = []
+        for r in ranked[:limit]:
+            p = r["properties"]
+            row = self.row("contacts", r)
+            why = []
+            views = int(num(p, "hs_analytics_num_page_views"))
+            if r["id"] in recent:
+                why.append(f"on the website {self.show('contacts', 'hs_analytics_last_visit_timestamp', p.get('hs_analytics_last_visit_timestamp'))}"
+                           + (f" ({_plural(views, 'page view')} in all)" if views else ""))
+            elif views:
+                why.append(f"{_plural(views, 'website page view')} in all")
+            if num(p, "adjusted_lead_score"):
+                why.append(f"lead score {int(num(p, 'adjusted_lead_score'))}")
+            if num(p, "contacts_engagement_score_jun25"):
+                why.append(f"engagement {int(num(p, 'contacts_engagement_score_jun25'))}, fit {int(num(p, 'contacts_fit_score_jun25'))}")
+            clicks = int(num(p, "hs_email_click"))
+            if clicks:
+                why.append(f"clicked {_plural(clicks, 'marketing email')}, last "
+                           f"{self.show('contacts', 'hs_email_last_click_date', p.get('hs_email_last_click_date'))}")
+            if clicks >= 5 and not num(p, "hs_analytics_num_page_views"):
+                row["caution"] = "Email clicks but never on the website: could be an email security scanner, not a person"
+            row["why"] = "; ".join(why)
+            rows.append(row)
+        # Several engaged people at one company says more than any one of them. The same company is often
+        # typed two ways ("Hudson Headwaters", "Hudson Headwaters Health Network"): the shorter name wins.
+        names = sorted({(r["properties"].get("company") or "").strip() for r in ranked[:120]} - {""}, key=len)
+        canon = {n: next((m for m in names if n.lower().startswith(m.lower())), n) for n in names}
+        by_company: dict[str, list[str]] = defaultdict(list)
+        for r in ranked[:120]:
+            company = canon.get((r["properties"].get("company") or "").strip())
+            person = " ".join(filter(None, [r["properties"].get("firstname"), r["properties"].get("lastname")]))
+            if company and person and person not in by_company[company]:
+                by_company[company].append(person)
+        accounts = [{"company": c, "people": len(n), "names": n[:8]} for c, n in
+                    sorted(by_company.items(), key=lambda kv: -len(kv[1])) if len(n) >= 2][:6]
+        return {"object": "contacts", "conditions": said, "considered": len(people), "rows": rows, "accounts": accounts,
+                "with_a_lead_score": total, "on_the_website_last_30_days": len(visitors),
+                "how_ranked": ("People on TAG's website in the last 30 days first, then by TAG's Adjusted Lead Score and "
+                               "Engagement Score. Email clicks alone don't rank anyone: security scanners click links too.")}
+
     # ── one rep's calling: calls, conversations, appointments ──
 
     def rep_activity(self, args: dict[str, Any]) -> dict[str, Any]:
@@ -809,6 +889,12 @@ CONVERSATION = {"connected", "interest, call back later", "interest, send info",
                 "disqualified, reason in notes", "disqualified", "nurture", "no pitch", "send email"}
 MEETING_OUTCOMES = {"meeting scheduled", "meeting set"}
 
+# Not yet clients: TAG's lifecycle stages before Customer, plus former customers (win-backs)
+PROSPECT_STAGES = ["subscriber", "lead", "marketingqualifiedlead", "salesqualifiedlead", "opportunity", "222236330"]
+PROSPECT_PROPS = ["company", "adjusted_lead_score", "contacts_engagement_score_jun25", "contacts_fit_score_jun25",
+                  "hs_analytics_num_page_views", "hs_analytics_num_visits", "hs_analytics_last_visit_timestamp",
+                  "hs_email_click", "hs_email_open", "hs_email_last_click_date"]
+
 DEALS_CAVEAT = ("TAG's HubSpot deals are mostly copies of Autotask quotes made by Zapier: nearly all sit at "
                 "'Appointment Scheduled' with no close date. Don't treat their stage or close date as a pipeline; "
                 "for pipeline questions use Autotask opportunities (find_opportunities).")
@@ -898,6 +984,14 @@ def hubspot_tools(hub: HubSpot) -> list[Tool]:
                       {"type": "object", "properties": {"object": {"type": "string", "enum": list(OBJECT_WORDS)},
                                                        "words": {"type": "string"}}, "required": ["object", "words"]}),
              handler=fields),
+        Tool(ToolSpec("hubspot_prospects", "The people in HubSpot most likely to buy, ranked in code, each with the reasons: "
+                      "not yet clients, on TAG's website in the last 30 days first, then TAG's own Adjusted Lead Score and "
+                      "Engagement Score; companies where several people are engaged; contacts whose only signal is email "
+                      "clicks are flagged (security scanners click links). Use for 'who are my most likely prospects', "
+                      "'who's most engaged', 'who should we call'.", {"type": "object", "properties": {
+                          "owner": {"type": "string", "description": "Only this owner's contacts: a name, or 'me' for Dave. Leave out for everyone's"},
+                          "company": {"type": "string"},
+                          "limit": {"type": "integer", "description": "How many people (default 15)"}}}), handler=hub.prospects),
         Tool(ToolSpec("hubspot_rep_activity", "One person's calling in HubSpot over a period, counted in code: calls made, "
                       "their outcomes, how many were real conversations (and which outcomes count as one), appointments "
                       "booked (meetings made in the period, whatever day they're for) and meetings held in the period. "

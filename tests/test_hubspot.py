@@ -178,7 +178,7 @@ def test_a_duplicate_company_record_is_resolved_by_its_history_and_mentioned(hub
 
 
 def test_the_tools_are_named_for_the_model(hub):
-    assert [t.spec.name for t in hubspot_tools(hub)] == ["hubspot_query", "hubspot_record", "hubspot_fields", "hubspot_rep_activity",
+    assert [t.spec.name for t in hubspot_tools(hub)] == ["hubspot_query", "hubspot_record", "hubspot_fields", "hubspot_prospects", "hubspot_rep_activity",
                                                           "hubspot_meeting_link"]
 
 
@@ -281,3 +281,29 @@ def test_a_reps_day_counts_conversations_and_appointments_booked_not_just_held(h
     assert day["appointments_booked"] == 1 and day["booked"][0]["title"] == "JConnelly"       # made today, for next week
     assert day["meetings"][0]["title"] == "CrushBank"                                         # on today's calendar
     assert [f["field"] for f in asked[1]["filters"]] == ["owner", "booked"]
+
+
+def test_prospects_rank_website_visitors_first_flag_scanner_clicks_and_group_accounts(hub, monkeypatch):
+    def person(pid, first, company, score, views=0, clicks=0, visit=None):
+        return {"id": pid, "properties": {"firstname": first, "lastname": "X", "company": company, "adjusted_lead_score": str(score),
+                                          "hs_analytics_num_page_views": str(views), "hs_email_click": str(clicks),
+                                          "hs_analytics_last_visit_timestamp": visit}}
+    visitor = person("1", "Vera", "Hudson Headwaters Health Network", 40, views=27, visit="2026-10-07T14:00:00Z")
+    high = person("2", "Hal", "Hudson Headwaters", 90)
+    clicker = person("3", "Cleo", "Eberl Iron Works", 60, clicks=61)
+    asked = []
+
+    def search_all(obj, max_rows=2000, **kw):
+        asked.append(kw)
+        visits = any(f["propertyName"] == "hs_analytics_last_visit_timestamp" for f in kw["filters"])
+        return ([visitor], 1) if visits else ([high, clicker, visitor], 3)
+
+    monkeypatch.setattr(hub.hs, "search_all", search_all, raising=False)
+    out = hub.prospects({"owner": "me"})
+    assert [r["title"] for r in out["rows"]] == ["Vera X", "Hal X", "Cleo X"]          # on the website lately beats a higher score
+    assert out["rows"][0]["why"].startswith("on the website") and "27 page views" in out["rows"][0]["why"]
+    assert "security scanner" in out["rows"][2]["caution"] and "caution" not in out["rows"][0]
+    assert out["accounts"] == [{"company": "Hudson Headwaters", "people": 2, "names": ["Vera X", "Hal X"]}]
+    assert "considered" in out and "matching" not in out                                # no export promise for this card
+    stages = next(f for f in asked[0]["filters"] if f["propertyName"] == "lifecyclestage")
+    assert stages["operator"] == "IN" and "customer" not in stages["values"]

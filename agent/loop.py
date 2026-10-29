@@ -154,6 +154,7 @@ STEP_LABELS = {
     "create_company": "Preparing the new account",
     "find_hatz_apps": "Looking through the Hatz apps",
     "hubspot_rep_activity": "Counting their calls and appointments",
+    "hubspot_prospects": "Ranking who's most engaged",
     "run_hatz_app": "Starting it in Hatz",
     "hatz_job_result": "Checking the Hatz run",
     "check_time_entries": "Checking time entries in Autotask",

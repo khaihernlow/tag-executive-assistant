@@ -1634,9 +1634,27 @@ function hsMeta(r) {
 function hubspotRows(rows) {
   return el("ul", { class: "rows" }, rows.map((r) => el("li", {},
     el(r.url ? "a" : "div", { class: "row row--tap", ...(r.url ? { href: r.url, target: "_blank", rel: "noopener" } : {}) },
-      el("span", { class: "row__top" }, el("span", { class: "row__title", text: r.title })),
+      el("span", { class: "row__top" }, el("span", { class: "row__title", text: r.title }),
+        r.why && r.owner ? el("span", { class: "row__when", text: r.owner }) : null),
       r.sub ? el("span", { class: "row__sub", text: r.sub }) : null,
-      hsMeta(r) ? el("span", { class: "row__preview", text: hsMeta(r) }) : null))));
+      // A ranked person says why they're on the list; anything else shows its usual details
+      r.why ? el("span", { class: "row__preview", text: r.why }) : hsMeta(r) ? el("span", { class: "row__preview", text: hsMeta(r) }) : null,
+      r.caution ? el("span", { class: "row__preview warn", text: `⚠ ${r.caution}` }) : null))));
+}
+
+// Likely prospects: the accounts with several engaged people first, then each person and why
+function prospectsCard(card) {
+  return el("div", { class: "card" }, [
+    el("p", { class: "card__label", text: "HubSpot · most likely prospects" }),
+    card.conditions && card.conditions.length ? el("p", { class: "hs-conditions", text: card.conditions.join(" · ") }) : null,
+    (card.accounts || []).length ? el("div", { class: "prospects__accounts" },
+      el("p", { class: "rep__sub", text: "Accounts with several people engaged" }),
+      el("ul", { class: "prospects__chips" }, card.accounts.map((a) => el("li", { class: "prospects__chip", title: a.names.join(", ") },
+        el("strong", { text: a.company }), ` · ${a.people} people`)))) : null,
+    el("p", { class: "rep__sub", text: "People" }),
+    hubspotRows(card.rows || []),
+    card.how_ranked ? el("p", { class: "card__note prospects__how", text: card.how_ranked }) : null,
+  ].filter(Boolean));
 }
 
 function hsMore(title, rows) {
@@ -1827,6 +1845,7 @@ function renderCard(card) {
     case "hubspot": return hubspotCard(card);
     case "hubspot_record": return hubspotRecordCard(card);
     case "rep_activity": return repActivityCard(card);
+    case "prospects": return prospectsCard(card);
     case "timesheet": return timesheetCard(card);
     case "renewals": return renewalsCard(card);
     case "tasks": return tasksCard(card);
