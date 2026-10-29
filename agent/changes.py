@@ -111,7 +111,9 @@ def propose_move(graph: Any, actions: Actions, event_id: str, new_start: str,
     event, _ = get_event(graph, event_id)
     if not is_organizer(graph, event):
         raise ValueError(f"{event.organizer or 'Someone else'} organizes \"{event.subject}\", so Dave can't move it. "
-                         "Offer to decline it with a note suggesting another time, or to email the organizer.")
+                         "Propose the new time instead: respond_to_invite with response 'tentative' and new_start "
+                         "(Outlook's 'propose new time'; the organizer can accept it in one click). "
+                         "Use 'decline' with new_start only if Dave says he won't go at the original time either.")
     tz = local_zone()
     try:
         start = datetime.fromisoformat(new_start).replace(tzinfo=None).replace(tzinfo=tz)
