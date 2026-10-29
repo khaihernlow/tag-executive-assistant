@@ -63,12 +63,13 @@ SHAPES: dict[str, dict[str, Any]] = {
                    "lead status": "hs_lead_status", "phone": "phone", "city": "city", "state": "state",
                    "last contacted": "notes_last_contacted", "last activity": "notes_last_updated",
                    "created": "createdate", "modified": "lastmodifieddate", "current client": "current_client",
-                   # TAG's own scoring (set up Jun 2025) first; HubSpot's built-in score only when asked by name
-                   "score": "adjusted_lead_score", "lead score": "adjusted_lead_score",
+                   # TAG's 2026 combined scoring first; older scores (Adjusted, Jun 2025, HubSpot's) only by name
+                   "score": "lead_scoring_combined_2026", "lead score": "lead_scoring_combined_2026",
+                   "combined score": "lead_scoring_combined_2026", "tier": "lead_scoring_combined_2026_threshold",
+                   "lead tier": "lead_scoring_combined_2026_threshold", "score tier": "lead_scoring_combined_2026_threshold",
+                   "engagement score": "lead_scoring_combined_2026_engagement", "engagement": "lead_scoring_combined_2026_engagement",
+                   "fit score": "lead_scoring_combined_2026_fit", "fit": "lead_scoring_combined_2026_fit",
                    "adjusted lead score": "adjusted_lead_score", "hubspot score": "hubspotscore",
-                   "engagement score": "contacts_engagement_score_jun25", "engagement": "contacts_engagement_score_jun25",
-                   "engagement level": "contacts_engagement_score_jun25_threshold",
-                   "fit score": "contacts_fit_score_jun25", "fit": "contacts_fit_score_jun25",
                    "likelihood to close": "hs_predictivecontactscore", "predictive score": "hs_predictivecontactscore",
                    # What they've done: marketing emails, the website
                    "email clicks": "hs_email_click", "emails clicked": "hs_email_click", "clicks": "hs_email_click",
@@ -676,13 +677,28 @@ class HubSpot:
     # ── who's most likely to buy: ranked in code, each with its reasons ──
 
     def prospects(self, args: dict[str, Any], everyone: bool = False) -> dict[str, Any]:
-        """Not-yet-clients ranked by what they've done: on TAG's website lately first, then TAG's own
-        Adjusted Lead Score and Engagement Score. Email clicks alone are weak: security scanners click
-        every link in an email, so a contact with clicks and no website visit is flagged."""
+        """Sales plays from Khai's 'Sales Lead Prospector' agent in Hatz, run in code. Scores are TAG's
+        2026 combined lead scoring (fit + engagement, tiers A1-C3).
+        - engaged (default): not yet clients; on TAG's website in the last 30 days first, then the 2026 score.
+          Email clicks alone are weak (security scanners click every link), so clicks with no visit are flagged.
+        - neglected: Lead/MQL/SQL/Opportunity with no activity in 180+ days, oldest first; unassigned or
+          former-rep owners called out.
+        - tier: one scoring tier ("A3" is RJ's Tier 1 MQL list), MQLs unless a stage is given, best score first."""
+        play = (args.get("play") or ("tier" if args.get("tier") else "engaged")).lower()
+        if play not in PLAYS:
+            raise ValueError(f"play must be one of {', '.join(PLAYS)}")
         limit = 400 if everyone else max(5, min(int(args.get("limit") or 15), 40))   # everyone: the export
-        base = [{"propertyName": "lifecyclestage", "operator": "IN", "values": PROSPECT_STAGES},
+        tier = str(args.get("tier") or "").strip().upper()
+        if play == "tier" and tier not in TIERS:
+            raise ValueError(f"tier must be one of {', '.join(TIERS)} (A3 is RJ's Tier 1 MQL list)")
+        stages = {"engaged": PROSPECT_STAGES, "neglected": OPEN_STAGES, "tier": ["marketingqualifiedlead"]}[play]
+        base = [{"propertyName": "lifecyclestage", "operator": "IN", "values": stages},
                 {"propertyName": "email", "operator": "NOT_CONTAINS_TOKEN", "value": "*@" + (os.environ.get("INTERNAL_DOMAIN") or "tagsolutions.com")}]
-        said = ["not yet clients (subscriber, lead, MQL, SQL, opportunity, former customer)"]
+        said = [{"engaged": "not yet clients (subscriber, lead, MQL, SQL, opportunity, former customer)",
+                 "neglected": "Lead, MQL, SQL or Opportunity with no activity in 180+ days (or none ever)",
+                 "tier": f"MQLs in scoring tier {tier}" + (" (RJ's Tier 1 list)" if tier == "A3" else "")}[play]]
+        if play == "tier":
+            base.append({"propertyName": "lead_scoring_combined_2026_threshold", "operator": "EQ", "value": tier})
         if args.get("owner"):
             base.append({"propertyName": "hubspot_owner_id", "operator": "EQ", "value": self.owner_id(str(args["owner"]))})
             said.append(f"owned by {self.owner_name(self.owner_id(str(args['owner'])))}")
@@ -691,15 +707,7 @@ class HubSpot:
             base.append({"propertyName": "associations.company", "operator": "EQ", "value": cid})
             said.append(f"at {cname}")
         props = list(dict.fromkeys([*self.wanted_props("contacts"), *PROSPECT_PROPS]))
-        since = int((datetime.combine(self.today - timedelta(days=30), dtime.min, local_zone())).timestamp() * 1000)
-        visitors, _ = self.hs.search_all("contacts", max_rows=200, properties=props,
-                                         filters=base + [{"propertyName": "hs_analytics_last_visit_timestamp", "operator": "GTE", "value": since}],
-                                         sorts=[{"propertyName": "hs_analytics_last_visit_timestamp", "direction": "DESCENDING"}])
-        scored, total = self.hs.search_all("contacts", max_rows=200, properties=props,
-                                           filters=base + [{"propertyName": "adjusted_lead_score", "operator": "GT", "value": 0}],
-                                           sorts=[{"propertyName": "adjusted_lead_score", "direction": "DESCENDING"}])
-        people = {r["id"]: r for r in [*visitors, *scored]}
-        recent = {r["id"] for r in visitors}
+        pool = 400 if everyone else 200
 
         def num(p: dict[str, Any], k: str) -> float:
             try:
@@ -707,8 +715,37 @@ class HubSpot:
             except ValueError:
                 return 0.0
 
-        ranked = sorted(people.values(), key=lambda r: (r["id"] not in recent, -num(r["properties"], "adjusted_lead_score"),
-                                                        -num(r["properties"], "contacts_engagement_score_jun25")))
+        recent: set[str] = set()
+        if play == "engaged":
+            since = int((datetime.combine(self.today - timedelta(days=30), dtime.min, local_zone())).timestamp() * 1000)
+            visitors, _ = self.hs.search_all("contacts", max_rows=pool, properties=props,
+                                             filters=base + [{"propertyName": "hs_analytics_last_visit_timestamp", "operator": "GTE", "value": since}],
+                                             sorts=[{"propertyName": "hs_analytics_last_visit_timestamp", "direction": "DESCENDING"}])
+            scored, total = self.hs.search_all("contacts", max_rows=pool, properties=props,
+                                               filters=base + [{"propertyName": SCORE, "operator": "GT", "value": 0}],
+                                               sorts=[{"propertyName": SCORE, "direction": "DESCENDING"}])
+            people = {r["id"]: r for r in [*visitors, *scored]}
+            recent = {r["id"] for r in visitors}
+            order = lambda r: (r["id"] not in recent, -num(r["properties"], SCORE), -num(r["properties"], SCORE + "_engagement"))  # noqa: E731
+        elif play == "neglected":
+            cutoff = int((datetime.combine(self.today - timedelta(days=180), dtime.min, local_zone())).timestamp() * 1000)
+            found, total = self.hs.search_all("contacts", max_rows=pool, properties=props, filter_groups=[
+                {"filters": base + [{"propertyName": "notes_last_updated", "operator": "LT", "value": cutoff}]},
+                {"filters": base + [{"propertyName": "notes_last_updated", "operator": "NOT_HAS_PROPERTY"}]}],
+                sorts=[{"propertyName": "notes_last_updated", "direction": "ASCENDING"}])
+            people = {r["id"]: r for r in found}
+            # Best fit first, then the longest forgotten: oldest-first alone led with never-touched poor fits
+            order = lambda r: (-num(r["properties"], SCORE), r["properties"].get("notes_last_updated") or "")  # noqa: E731
+        else:
+            found, total = self.hs.search_all("contacts", max_rows=pool, properties=props, filters=base,
+                                              sorts=[{"propertyName": SCORE, "direction": "DESCENDING"}])
+            people = {r["id"]: r for r in found}
+            order = lambda r: -num(r["properties"], SCORE)  # noqa: E731
+        # Vendors' people (KnowBe4, Dell, VMware) aren't prospects
+        people = {k: r for k, r in people.items()
+                  if (r["properties"].get("email") or "").rsplit("@", 1)[-1].lower() not in VENDOR_DOMAINS}
+        ranked = sorted(people.values(), key=order)
+
         rows = []
         for r in ranked[:limit]:
             p = r["properties"]
@@ -718,22 +755,31 @@ class HubSpot:
             if r["id"] in recent:
                 why.append(f"on the website {self.show('contacts', 'hs_analytics_last_visit_timestamp', p.get('hs_analytics_last_visit_timestamp'))}"
                            + (f" ({_plural(views, 'page view')} in all)" if views else ""))
-            elif views:
+            elif views and play == "engaged":
                 why.append(f"{_plural(views, 'website page view')} in all")
-            if num(p, "adjusted_lead_score"):
-                why.append(f"lead score {int(num(p, 'adjusted_lead_score'))}")
-            if num(p, "contacts_engagement_score_jun25"):
-                why.append(f"engagement {int(num(p, 'contacts_engagement_score_jun25'))}, fit {int(num(p, 'contacts_fit_score_jun25'))}")
+            if play == "neglected":
+                last = p.get("notes_last_updated")
+                why.append(f"last activity {self.show('contacts', 'notes_last_updated', last)}" if last else "no activity ever logged")
+                owner = row.get("owner") or ""
+                if not p.get("hubspot_owner_id"):
+                    row["caution"] = "Unassigned: no owner"
+                elif "(former)" in owner:
+                    row["caution"] = f"Owner is a former rep: {owner.replace(' (former)', '')}"
+            if p.get(SCORE + "_threshold") or num(p, SCORE):
+                # The 2026 engagement part is 0 for every contact (checked Oct 2026): show it only once it's real
+                engaged = int(num(p, SCORE + "_engagement"))
+                why.append(f"tier {p.get(SCORE + '_threshold') or '?'}, fit score {int(num(p, SCORE + '_fit'))}"
+                           + (f", engagement {engaged}" if engaged else ""))
             clicks = int(num(p, "hs_email_click"))
-            if clicks:
+            if clicks and play != "neglected":
                 why.append(f"clicked {_plural(clicks, 'marketing email')}, last "
                            f"{self.show('contacts', 'hs_email_last_click_date', p.get('hs_email_last_click_date'))}")
-            if clicks >= 5 and not num(p, "hs_analytics_num_page_views"):
+            if play == "engaged" and clicks >= 5 and not views:
                 row["caution"] = "Email clicks but never on the website: could be an email security scanner, not a person"
             row["why"] = "; ".join(why)
             rows.append(row)
-        # Several engaged people at one company says more than any one of them. The same company is often
-        # typed two ways ("Hudson Headwaters", "Hudson Headwaters Health Network"): the shorter name wins.
+        # Several people at one company says more than any one of them. The same company is often typed two
+        # ways ("Hudson Headwaters", "Hudson Headwaters Health Network"): the shorter name wins.
         names = sorted({(r["properties"].get("company") or "").strip() for r in ranked[:120]} - {""}, key=len)
         canon = {n: next((m for m in names if n.lower().startswith(m.lower())), n) for n in names}
         by_company: dict[str, list[str]] = defaultdict(list)
@@ -744,12 +790,19 @@ class HubSpot:
                 by_company[company].append(person)
         accounts = [{"company": c, "people": len(n), "names": n[:8]} for c, n in
                     sorted(by_company.items(), key=lambda kv: -len(kv[1])) if len(n) >= 2][:6]
-        return {"object": "contacts", "conditions": said, "considered": len(people), "rows": rows, "accounts": accounts,
-                "with_a_lead_score": total, "on_the_website_last_30_days": len(visitors),
-                "how_ranked": ("People on TAG's website in the last 30 days first, then by TAG's Adjusted Lead Score and "
-                               "Engagement Score. Email clicks alone don't rank anyone: security scanners click links too."),
-                "export": (f"The card shows the top {len(rows)}; its 'Export the ranked list' button downloads all "
-                           f"{len(people)} ranked, with each one's reasons, as a spreadsheet. Point Dave to it for a list.")}
+        how = {"engaged": ("People on TAG's website in the last 30 days first, then by TAG's 2026 lead score. Email clicks "
+                           "alone don't rank anyone: security scanners click links too."),
+               "neglected": ("Best 2026 fit score first, then the longest without activity. Unassigned contacts and "
+                             "former reps' contacts are flagged."),
+               "tier": "Highest 2026 lead score first."}[play]
+        return {"object": "contacts", "play": play, "conditions": said, "considered": len(people), "in_hubspot": total,
+                "rows": rows, "accounts": accounts, "how_ranked": how,
+                "scoring_note": ("TAG's 2026 lead score is fit only for now: its engagement part is 0 for every contact, so "
+                                 "the tiers are only A3/B3/C3 and a high score means a good fit, not interest. Website "
+                                 "visits are the interest signal."),
+                "export": (f"The card shows the top {len(rows)}; its 'Export the ranked list' button downloads "
+                           f"{'all ' + str(len(people)) if len(people) >= total else f'the first {len(people)} of {total:,}'} "
+                           "ranked, with each one's reasons, as a spreadsheet. Point Dave to it for a list.")}
 
     def export_prospects(self, args: dict[str, Any]) -> tuple[list[str], list[list[str]], int]:
         """The whole ranked list behind a prospects card, as spreadsheet rows, best first."""
@@ -900,9 +953,16 @@ CONVERSATION = {"connected", "interest, call back later", "interest, send info",
                 "disqualified, reason in notes", "disqualified", "nurture", "no pitch", "send email"}
 MEETING_OUTCOMES = {"meeting scheduled", "meeting set"}
 
+# The sales plays of Khai's "Sales Lead Prospector" agent in Hatz (read Oct 2026), run in code
+PLAYS = ("engaged", "neglected", "tier")
 # Not yet clients: TAG's lifecycle stages before Customer, plus former customers (win-backs)
 PROSPECT_STAGES = ["subscriber", "lead", "marketingqualifiedlead", "salesqualifiedlead", "opportunity", "222236330"]
-PROSPECT_PROPS = ["company", "adjusted_lead_score", "contacts_engagement_score_jun25", "contacts_fit_score_jun25",
+OPEN_STAGES = ["lead", "marketingqualifiedlead", "salesqualifiedlead", "opportunity"]
+# TAG's 2026 combined lead scoring: a total, its fit and engagement parts, and a tier (letter = fit, number = engagement)
+SCORE = "lead_scoring_combined_2026"
+TIERS = ("A1", "A2", "A3", "B1", "B2", "B3", "C1", "C2", "C3")
+VENDOR_DOMAINS = {"knowbe4.com", "dell.com", "vmware.com"}
+PROSPECT_PROPS = ["company", SCORE, SCORE + "_fit", SCORE + "_engagement", SCORE + "_threshold", "notes_last_updated",
                   "hs_analytics_num_page_views", "hs_analytics_num_visits", "hs_analytics_last_visit_timestamp",
                   "hs_email_click", "hs_email_open", "hs_email_last_click_date"]
 
@@ -995,11 +1055,16 @@ def hubspot_tools(hub: HubSpot) -> list[Tool]:
                       {"type": "object", "properties": {"object": {"type": "string", "enum": list(OBJECT_WORDS)},
                                                        "words": {"type": "string"}}, "required": ["object", "words"]}),
              handler=fields),
-        Tool(ToolSpec("hubspot_prospects", "The people in HubSpot most likely to buy, ranked in code, each with the reasons: "
-                      "not yet clients, on TAG's website in the last 30 days first, then TAG's own Adjusted Lead Score and "
-                      "Engagement Score; companies where several people are engaged; contacts whose only signal is email "
-                      "clicks are flagged (security scanners click links). Use for 'who are my most likely prospects', "
-                      "'who's most engaged', 'who should we call'.", {"type": "object", "properties": {
+        Tool(ToolSpec("hubspot_prospects", "TAG's sales plays on HubSpot contacts, ranked in code with each person's "
+                      "reasons, using TAG's 2026 lead scoring (score, fit, engagement, tier A1-C3). Plays: "
+                      "'engaged' (default): who's most likely to buy now (on TAG's website lately, then score; email-only "
+                      "clickers flagged as possible security scanners); 'neglected': leads/MQLs/SQLs/opportunities with no "
+                      "activity in 180+ days, unassigned and former reps' contacts flagged; 'tier': one scoring tier, e.g. "
+                      "'RJ's list', 'Ximena's list', 'top marketing leads' or 'List 3481' = tier A3 MQLs. Use for "
+                      "'most likely prospects', 'most engaged', 'who should we call', 'neglected leads', 'RJ's list'.",
+                      {"type": "object", "properties": {
+                          "play": {"type": "string", "enum": list(PLAYS)},
+                          "tier": {"type": "string", "enum": list(TIERS), "description": "For play 'tier' (A3 = RJ's Tier 1 MQL list)"},
                           "owner": {"type": "string", "description": "Only this owner's contacts: a name, or 'me' for Dave. Leave out for everyone's"},
                           "company": {"type": "string"},
                           "limit": {"type": "integer", "description": "How many people (default 15)"}}}), handler=hub.prospects),

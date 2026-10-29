@@ -283,27 +283,57 @@ def test_a_reps_day_counts_conversations_and_appointments_booked_not_just_held(h
     assert [f["field"] for f in asked[1]["filters"]] == ["owner", "booked"]
 
 
+def _person(pid, first, company, score, views=0, clicks=0, visit=None, last=None, owner="1", email=None):
+    return {"id": pid, "properties": {"firstname": first, "lastname": "X", "company": company, "email": email or f"{first.lower()}@x.example",
+                                      "lead_scoring_combined_2026": str(score), "lead_scoring_combined_2026_fit": str(score),
+                                      "lead_scoring_combined_2026_engagement": "0", "lead_scoring_combined_2026_threshold": "A3",
+                                      "hs_analytics_num_page_views": str(views), "hs_email_click": str(clicks),
+                                      "hs_analytics_last_visit_timestamp": visit, "notes_last_updated": last, "hubspot_owner_id": owner}}
+
+
 def test_prospects_rank_website_visitors_first_flag_scanner_clicks_and_group_accounts(hub, monkeypatch):
-    def person(pid, first, company, score, views=0, clicks=0, visit=None):
-        return {"id": pid, "properties": {"firstname": first, "lastname": "X", "company": company, "adjusted_lead_score": str(score),
-                                          "hs_analytics_num_page_views": str(views), "hs_email_click": str(clicks),
-                                          "hs_analytics_last_visit_timestamp": visit}}
-    visitor = person("1", "Vera", "Hudson Headwaters Health Network", 40, views=27, visit="2026-10-07T14:00:00Z")
-    high = person("2", "Hal", "Hudson Headwaters", 90)
-    clicker = person("3", "Cleo", "Eberl Iron Works", 60, clicks=61)
+    visitor = _person("1", "Vera", "Hudson Headwaters Health Network", 40, views=27, visit="2026-10-07T14:00:00Z")
+    high = _person("2", "Hal", "Hudson Headwaters", 90)
+    clicker = _person("3", "Cleo", "Eberl Iron Works", 60, clicks=61)
+    vendor = _person("4", "Vic", "KnowBe4", 99, email="vic@knowbe4.com")
     asked = []
 
     def search_all(obj, max_rows=2000, **kw):
         asked.append(kw)
         visits = any(f["propertyName"] == "hs_analytics_last_visit_timestamp" for f in kw["filters"])
-        return ([visitor], 1) if visits else ([high, clicker, visitor], 3)
+        return ([visitor], 1) if visits else ([high, clicker, visitor, vendor], 4)
 
     monkeypatch.setattr(hub.hs, "search_all", search_all, raising=False)
     out = hub.prospects({"owner": "me"})
-    assert [r["title"] for r in out["rows"]] == ["Vera X", "Hal X", "Cleo X"]          # on the website lately beats a higher score
+    assert [r["title"] for r in out["rows"]] == ["Vera X", "Hal X", "Cleo X"]          # visitors first; vendors left out
     assert out["rows"][0]["why"].startswith("on the website") and "27 page views" in out["rows"][0]["why"]
+    assert "tier A3, fit score 40" in out["rows"][0]["why"] and "engagement" not in out["rows"][0]["why"]   # 0 everywhere: not shown
     assert "security scanner" in out["rows"][2]["caution"] and "caution" not in out["rows"][0]
     assert out["accounts"] == [{"company": "Hudson Headwaters", "people": 2, "names": ["Vera X", "Hal X"]}]
     assert "considered" in out and "matching" not in out                                # no export promise for this card
     stages = next(f for f in asked[0]["filters"] if f["propertyName"] == "lifecyclestage")
     assert stages["operator"] == "IN" and "customer" not in stages["values"]
+
+
+def test_neglected_leads_put_the_best_fit_first_and_flag_former_reps(hub, monkeypatch):
+    junk = _person("1", "Jo", "Nowhere", 3, last=None)
+    good = _person("2", "Gil", "Acme", 90, last="2025-01-10T15:00:00Z", owner="9")      # owner 9 is a former rep
+    asked = []
+    monkeypatch.setattr(hub.hs, "search_all", lambda obj, max_rows=2000, **kw: (asked.append(kw) or ([junk, good], 2)), raising=False)
+    out = hub.prospects({"play": "neglected"})
+    assert [r["title"] for r in out["rows"]] == ["Gil X", "Jo X"]
+    assert out["rows"][0]["caution"] == "Owner is a former rep: Phoebe Lawson" and "last activity Jan 10, 2025" in out["rows"][0]["why"]
+    assert out["rows"][1]["why"].startswith("no activity ever logged")
+    groups = asked[0]["filter_groups"]
+    assert [g["filters"][-1]["operator"] for g in groups] == ["LT", "NOT_HAS_PROPERTY"]
+
+
+def test_rjs_tier_list_is_a3_mqls(hub, monkeypatch):
+    asked = []
+    monkeypatch.setattr(hub.hs, "search_all", lambda obj, max_rows=2000, **kw: (asked.append(kw) or ([], 0)), raising=False)
+    out = hub.prospects({"tier": "a3"})
+    assert out["play"] == "tier" and "RJ's Tier 1 list" in out["conditions"][0]
+    f = {x["propertyName"]: x for x in asked[0]["filters"]}
+    assert f["lifecyclestage"]["values"] == ["marketingqualifiedlead"] and f["lead_scoring_combined_2026_threshold"]["value"] == "A3"
+    with pytest.raises(ValueError, match="tier must be one of"):
+        hub.prospects({"play": "tier", "tier": "Z9"})

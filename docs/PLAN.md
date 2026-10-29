@@ -270,6 +270,12 @@ Needs: `find_person`, `search_mail` + `read_email` + `extract_request`, `find_mu
   audio sent to models through its gateways is silently dropped (one model then invented a
   transcript). For now Dave uses iPhone keyboard dictation in the text box. Options for a real mic
   button later: self-hosted Whisper on TAG's server (private, free), or a paid speech-to-text API.
+- **R9 — HubSpot's 2026 lead scoring has no engagement score. Found 2026-10-29, open.** The
+  "Lead Scoring Combined 2026" engagement part is 0 on all 23,248 contacts, so only tiers A3/B3/C3
+  occur (2,640 / 6,059 / 14,549) and the score is fit only. "RJ's Tier 1 list" (A3 MQLs, 2,368) is
+  good-fit MQLs with no interest signal behind it. Geronimo ranks interest by website visits
+  instead (hubspot_prospects), and stops hiding engagement as soon as it's non-zero. Next: whoever
+  owns HubSpot scoring (marketing) checks the engagement criteria in the 2026 scoring setup.
 - **R8 — HatzAI workflows may not use their own files in full. Found 2026-10-29, open.** Geronimo
   runs Hatz workflows with only the user inputs; Hatz attaches the workflow's Files/Constants itself.
   On the "RFP Automation" run for Aquatic Development Group (job 0280cebb…), the "TAG Canned
