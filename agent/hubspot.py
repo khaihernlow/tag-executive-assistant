@@ -732,7 +732,7 @@ class HubSpot:
             found, total = self.hs.search_all("contacts", max_rows=pool, properties=props, filter_groups=[
                 {"filters": base + [{"propertyName": "notes_last_updated", "operator": "LT", "value": cutoff}]},
                 {"filters": base + [{"propertyName": "notes_last_updated", "operator": "NOT_HAS_PROPERTY"}]}],
-                sorts=[{"propertyName": "notes_last_updated", "direction": "ASCENDING"}])
+                sorts=[{"propertyName": SCORE, "direction": "DESCENDING"}])     # the best fits of all of them, not the oldest few
             people = {r["id"]: r for r in found}
             # Best fit first, then the longest forgotten: oldest-first alone led with never-touched poor fits
             order = lambda r: (-num(r["properties"], SCORE), r["properties"].get("notes_last_updated") or "")  # noqa: E731
