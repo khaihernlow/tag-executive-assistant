@@ -261,6 +261,12 @@ class Store:
         item["blocks"] = json.loads(item["blocks"])
         return item
 
+    def find_upload(self, name: str) -> dict[str, Any] | None:
+        """The latest file attached in chat under this name (the model knows files by name)."""
+        row = self._execute("SELECT id, name, kind, created_at FROM uploads WHERE lower(name) = lower(?) "
+                            "ORDER BY created_at DESC LIMIT 1", (name.strip(),)).fetchone()
+        return dict(row) if row else None
+
     # ── conversations ────────────────────────────────────────────────────────
 
     def create_conversation(self, title: str = "", topic: dict | None = None) -> str:

@@ -969,8 +969,63 @@ function inviteCard(inv) {
         }
       } }));
   row.append(...choices);
-  card.append(row, status);
+  const suggest = el("button", { class: "link-btn invite__suggest", type: "button", text: "Suggest another time",
+    onclick: () => suggestTimes(inv, suggest, row, choices, status) });
+  card.append(row, suggest, status);
   return card;
+}
+
+// Can't make it: free times near the day (same length, the TAG people on it free too), sent as Outlook's "propose new time"
+async function suggestTimes(inv, link, row, choices, status) {
+  const box = el("div", { class: "invite__times" }, el("p", { class: "card__note", text: "Finding times you’re free…" }));
+  link.replaceWith(box);
+  let t;
+  try {
+    t = await api(`/api/invites/${encodeURIComponent(inv.id)}/times`);
+  } catch (err) {
+    box.replaceChildren(el("p", { class: "card__note", text: `Couldn't find times: ${err.message}` }));
+    return;
+  }
+  if (!t.allowed) {
+    box.replaceChildren(el("p", { class: "card__note", text: `${firstName(inv.organizer)} turned off new-time suggestions on this invite. Decline, or reply to them directly.` }));
+    return;
+  }
+  if (!t.times.length) {
+    box.replaceChildren(el("p", { class: "card__note", text: "No free time in the week after it. Decline, or reply to them directly." }));
+    return;
+  }
+  let picked = null;
+  const send = (response) => async () => {
+    const all = [...choices, ...sendRow.children, ...slots];
+    all.forEach((b) => { b.disabled = true; });
+    status.textContent = "Sending…";
+    try {
+      const action = await api(`/api/invites/${encodeURIComponent(inv.id)}/respond`, {
+        method: "POST", body: JSON.stringify({ response, new_start: picked.start }) });
+      if (action.status !== "executed") throw new Error(action.error || "it didn't go through");
+      row.remove();
+      box.replaceWith(el("span", { class: "stamp stamp--done",
+        text: `${response === "decline" ? "Declined" : "Maybe sent"}, suggested ${picked.label} · ${firstName(inv.organizer)} is told` }));
+      status.textContent = "";
+    } catch (err) {
+      all.forEach((b) => { b.disabled = false; });
+      status.textContent = `Couldn't send that: ${err.message}`;
+    }
+  };
+  const sendRow = el("div", { class: "invite__actions", hidden: true },
+    el("button", { class: "btn btn--sign", type: "button", text: "Maybe, suggest this", onclick: send("tentative") }),
+    el("button", { class: "btn", type: "button", text: "Decline, suggest this", onclick: send("decline") }));
+  const slots = t.times.map((s) => el("button", { class: "slot", type: "button", text: s.label, "aria-pressed": "false",
+    onclick: (ev) => {
+      picked = s;
+      slots.forEach((b) => b.setAttribute("aria-pressed", String(b === ev.currentTarget)));
+      sendRow.hidden = false;
+    } }));
+  const who = t.checked ? ` and the ${t.checked === 1 ? "TAG person" : `${t.checked} TAG people`} on it` : "";
+  box.replaceChildren(
+    el("p", { class: "invite__label", text: "Suggest another time" }),
+    el("p", { class: "card__note", text: `${t.minutes} minutes, when you${who} are free` }),
+    el("div", { class: "invite__slots" }, ...slots), sendRow);
 }
 
 // Before Dave answers: what the meeting is, who's on it, the latest emails, last time, HubSpot
@@ -1140,6 +1195,7 @@ const KIND_LABELS = {
   move_to_junk: "Inbox clean-up", reply_email: "Email reply", hold_time: "Calendar hold", nudge_colleague: "Email to colleague",
   move_event: "Move meeting", cancel_event: "Cancel meeting", respond_invite: "Invite reply",
   create_opportunity: "New opportunity", update_opportunity: "Opportunity update", complete_tasks: "Autotask tasks",
+  create_company: "New Autotask account",
 };
 
 function slip(action) {
@@ -1326,7 +1382,7 @@ function fillSlip(node, action) {
 
   if (action.status === "pending") {
     const approveLabel = { reply_email: "Send", nudge_colleague: "Send", create_opportunity: "Save to Autotask",
-                           update_opportunity: "Save to Autotask" }[action.kind] || "Approve";
+                           update_opportunity: "Save to Autotask", create_company: "Save to Autotask" }[action.kind] || "Approve";
     const approve = el("button", { class: "btn btn--sign", type: "button", text: approveLabel });
     const decline = el("button", { class: "btn", type: "button", text: "Decline" });
     const decide = async (verb) => {
@@ -1362,11 +1418,11 @@ function fillSlip(node, action) {
       move_to_junk: `✓ Moved ${r.moved ?? ""} to Junk${r.failed && r.failed.length ? ` · ${r.failed.length} failed` : ""}`,
       reply_email: "✓ Sent", nudge_colleague: "✓ Sent", respond_invite: "✓ Reply sent",
       move_event: "✓ Moved", cancel_event: "✓ Done", hold_time: "✓ Held on your calendar",
-      create_opportunity: "✓ Saved in Autotask", update_opportunity: "✓ Updated in Autotask",
+      create_opportunity: "✓ Saved in Autotask", update_opportunity: "✓ Updated in Autotask", create_company: "✓ Added to Autotask",
       create_rule: "✓ Rule created",
       complete_tasks: `✓ ${r.completed ?? ""} marked complete${r.failed && r.failed.length ? ` · ${r.failed.length} failed` : ""}`,
     }[action.kind] || "✓ Booked";
-    const isAutotask = action.kind.endsWith("_opportunity");
+    const isAutotask = action.kind.endsWith("_opportunity") || action.kind === "create_company";
     parts.push(el("span", { class: "stamp stamp--done" }, doneText,
       r.join_url ? el("a", { href: r.join_url, target: "_blank", rel: "noopener", text: "Teams link" }) : null,
       r.web_link ? el("a", { href: r.web_link, target: "_blank", rel: "noopener", text: isAutotask ? "Open in Autotask" : "Outlook" }) : null,
@@ -1666,6 +1722,54 @@ function eventsCard(card) {
       e.location ? el("span", { class: "row__sub", text: e.location }) : null))));
 }
 
+// A HatzAI workflow running for a few minutes: follows the run, then shows what came out
+function hatzRunCard(card) {
+  const node = el("div", { class: "card hatz" });
+  const state = el("p", { class: "hatz__state", text: "Starting…" });
+  const body = el("div", { class: "hatz__body" });
+  node.append(el("p", { class: "card__label", text: `Hatz · ${card.app || "workflow"}` }), state, body);
+  const url = `/api/hatz/jobs/${encodeURIComponent(card.job_id)}`;
+  let misses = 0;
+  const check = async () => {
+    if (!node.isConnected && misses++ > 2) return;   // the chat was closed: stop asking
+    let job;
+    try {
+      job = await api(url);
+    } catch (err) {
+      state.textContent = `Couldn't check on it: ${err.message}`;
+      setTimeout(check, 15000);
+      return;
+    }
+    if (job.status === "complete") {
+      state.textContent = `✓ Done · ${job.steps} step${job.steps === 1 ? "" : "s"}`;
+      state.classList.add("hatz__state--done");
+      const result = el("div", { class: "hatz__result brief__text" });
+      result.innerHTML = renderMarkdown(job.result || "It finished without any text."); // escaped inside renderMarkdown
+      body.replaceChildren(
+        ...job.documents.map((d) => el("a", { class: "btn btn--sign hatz__doc", href: `${url}/documents/${encodeURIComponent(d.step_id)}`,
+          target: "_blank", rel: "noopener", text: `Download ${d.name.replace(/\s*generation$/i, "")}` })),
+        result,
+        job.all_steps.length > 1 ? el("details", { class: "hatz__steps" },
+          el("summary", { text: `Every step (${job.all_steps.length})` }),
+          ...job.all_steps.map((s) => {
+            const text = el("div", { class: "brief__text" });
+            text.innerHTML = renderMarkdown(s.text); // escaped inside renderMarkdown
+            return el("section", { class: "hatz__step" }, el("p", { class: "hatz__step-name", text: s.name }), text);
+          })) : null);
+      return;
+    }
+    if (job.status === "failed") {
+      state.textContent = `It failed in Hatz${job.error ? `: ${String(job.error).slice(0, 300)}` : "."}`;
+      state.classList.add("error");
+      return;
+    }
+    state.textContent = `Running in Hatz · ${job.done} of ${job.steps || "?"} steps done`;
+    setTimeout(check, 5000);
+  };
+  setTimeout(check, 1500);
+  return node;
+}
+
 function renderCard(card) {
   switch (card.type) {
     case "slots": return slotsCard(card);
@@ -1683,6 +1787,7 @@ function renderCard(card) {
     case "people": return peopleCard(card);
     case "events": return eventsCard(card);
     case "action": return slip(card);
+    case "hatz_run": return hatzRunCard(card);
     case "unsure": return el("div", { class: "card" },
       el("p", { class: "card__label", text: "Not sure \u2014 left in your inbox" }),
       el("ul", { class: "rows" }, card.items.map((i) => el("li", { class: "row" },
@@ -2263,6 +2368,41 @@ let recTick = null;
 let recDiscarded = false;
 let recFailed = null;     // { blob, name, eventId } when saving didn't work
 let recEventId = "";      // the meeting chosen when it started
+let recWake = null;       // keeps the screen on while recording: on an iPhone a locked screen stops the mic
+let recAway = 0;          // when the mic went quiet (screen off, another app), to say how much was missed
+let recMissed = 0;        // seconds missed so far
+
+const isIPhone = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+
+async function holdScreen() {
+  try {
+    if (recorder && "wakeLock" in navigator && !recWake && document.visibilityState === "visible") {
+      recWake = await navigator.wakeLock.request("screen");
+      recWake.addEventListener("release", () => { recWake = null; });
+    }
+  } catch { /* not allowed here (low battery mode): the hint still says to keep it on screen */ }
+}
+
+function micAway() {
+  if (recorder && !recAway) recAway = Date.now();
+}
+
+function micBack() {
+  if (!recorder || !recAway) return;
+  const gone = Math.round((Date.now() - recAway) / 1000);
+  recAway = 0;
+  if (gone < 3) return;   // a blip, not a gap
+  recMissed += gone;
+  const m = Math.floor(recMissed / 60), s = recMissed % 60;
+  $("#rec-gap-text").textContent = `The screen was off or another app was open, so about ${m ? `${m} min ` : ""}${m && !s ? "" : `${s} sec `}wasn't recorded. Keep Geronimo on screen.`;
+  $("#rec-gap").hidden = false;
+  placePill(pillPlace());
+}
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") micAway();
+  else { micBack(); holdScreen(); }   // the lock is dropped whenever the page is hidden
+});
 
 function recordingType() {
   for (const t of ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg"]) {
@@ -2286,6 +2426,7 @@ function showRecStart() {
   meetingOptions($("#rec-meeting"));
   joinsHint($("#rec-meeting"), $("#recstart-joins"));
   $("#recstart-error").hidden = true;
+  $("#recstart-phone").hidden = !isIPhone;
   $("#rec-start").disabled = false;
   openPopover("recstart");
 }
@@ -2311,9 +2452,16 @@ async function startRecording() {
   recorder.ondataavailable = (e) => { if (e.data && e.data.size) recChunks.push(e.data); };
   recorder.onstop = finishRecording;
   // If the phone takes the mic away (a call, the app closed), keep what was recorded
-  stream.getAudioTracks().forEach((t) => t.addEventListener("ended", () => stopRecording(false)));
+  stream.getAudioTracks().forEach((t) => {
+    t.addEventListener("ended", () => stopRecording(false));
+    t.addEventListener("mute", micAway);     // iPhone: the screen locked or Dave switched apps
+    t.addEventListener("unmute", micBack);
+  });
   recorder.start(10000);   // a chunk every 10s, so a long meeting isn't one huge buffer
   recStarted = Date.now();
+  recAway = recMissed = 0;
+  $("#rec-gap").hidden = true;
+  holdScreen();
 
   recEventId = $("#rec-meeting").value;
   $("#rec-for").textContent = recMeetingLabel();
@@ -2360,6 +2508,9 @@ function stopRecording(discard) {
 
 function endRecordingUi() {
   recorder = null;
+  if (recWake) recWake.release().catch(() => {});
+  recAway = recMissed = 0;
+  $("#rec-gap").hidden = true;
   $("#recbar").hidden = true;
   $("#record-btn").classList.remove("is-recording");
   $("#record-btn-label").textContent = "Record";

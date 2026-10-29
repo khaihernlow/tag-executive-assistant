@@ -13,6 +13,7 @@ from agent.events import create_event_kind, create_event_tool
 from agent.filing import file_kind, rule_kind
 from agent.junk import junk_kind, junk_tools
 from agent.mail import mail_tools
+from agent.companies import company_kinds, company_tools
 from agent.opportunities import Directory, opportunity_kinds, opportunity_tools
 from agent.timesheets import timesheet_tools
 from agent.renewals import renewal_tools
@@ -33,8 +34,10 @@ from agent.lunch import Lunch
 from agent.mealeo_order import fill_checkout
 from agent.notes import notes_tools
 from agent.todos import todo_tools
+from agent.hatz_apps import HatzApps, hatz_tools
 from agent.hubspot import HubSpot, hubspot_tools
 from connectors.azure_speech import AzureSpeech
+from connectors.hatz_apps import HatzAppsClient
 from connectors.hubspot import HubSpotClient
 from llm.hatzai import HatzAIProvider
 from app.worker import Worker
@@ -52,6 +55,7 @@ class Services:
     llm: HatzAIProvider
     autotask: Directory | None = None
     hubspot: HubSpot | None = None
+    hatz: HatzApps | None = None
 
 
 def build_services() -> Services:
@@ -62,7 +66,7 @@ def build_services() -> Services:
     picks = Picklists(autotask) if autotask else None
     actions = Actions(store, [create_event_kind(graph), junk_kind(graph, store), *request_kinds(graph, store),
                               file_kind(graph, store), rule_kind(graph, store), *change_kinds(graph),
-                              *(opportunity_kinds(autotask) + project_kinds(autotask, picks) if autotask else [])])
+                              *(opportunity_kinds(autotask) + company_kinds(autotask) + project_kinds(autotask, picks) if autotask else [])])
     directory = Directory(autotask) if autotask else None
     tag_data = TagData.from_env()  # Matt's nightly copy of TAG's systems; read-only
     apify = ApifyClient.from_env()
@@ -74,6 +78,10 @@ def build_services() -> Services:
     hubspot_client = HubSpotClient.from_env()
     hubspot = HubSpot(hubspot_client, graph) if hubspot_client else None
     # Quick, high-volume judgments (junk triage) use a faster, cheaper model.
+    hatz_client = HatzAppsClient.from_env()
+    hatz = HatzApps(hatz_client, graph, store) if hatz_client else None
+    if hatz:
+        hatz.refresh_later()   # the full list takes minutes; have it ready before it's asked for
     fast_llm = HatzAIProvider(model=os.environ.get("HATZAI_FAST_MODEL", "anthropic.claude-haiku-4-5"))
     registry = ToolRegistry(
         calendar_tools(graph, memory)
@@ -86,16 +94,17 @@ def build_services() -> Services:
         + junk_tools(graph, fast_llm, actions, store)
         + [create_event_tool(graph, actions)]
         + change_tools(graph, actions)
-        + (opportunity_tools(directory, actions, llm) if directory else [])
+        + (opportunity_tools(directory, actions, llm) + company_tools(directory, actions) if directory else [])
         + (timesheet_tools(autotask, store) if autotask else [])
         + (renewal_tools(tag_data, directory, actions) if tag_data and directory else [])
         + (project_tools(autotask, directory, actions, picks) if autotask else [])
         + (quote_tools(autotask, directory) if autotask else [])
         + (linkedin_tools(linkedin, graph, directory) if linkedin else [])
         + (hubspot_tools(hubspot) if hubspot else [])
+        + (hatz_tools(hatz) if hatz else [])
     )
     assistant = Assistant(llm, registry, store, actions, memory)
     lunch = Lunch(graph, Teams(own, os.environ["ASSISTANT_ACCOUNT"], store), llm, store, checkout=fill_checkout) if own else None
     worker = Worker(graph, llm, store, searcher=llm, fast_llm=fast_llm, actions=actions, autotask=directory,
                     linkedin=linkedin, lunch=lunch, speech=AzureSpeech.from_env(), hubspot=hubspot)
-    return Services(graph, store, actions, assistant, memory, worker, llm, directory, hubspot)
+    return Services(graph, store, actions, assistant, memory, worker, llm, directory, hubspot, hatz)

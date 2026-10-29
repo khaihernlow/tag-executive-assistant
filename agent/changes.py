@@ -95,9 +95,12 @@ def change_kinds(graph: Any) -> list[ActionKind]:
         return {"cancelled": True}
 
     def respond(payload: dict[str, Any], action_id: str) -> dict[str, Any]:
-        graph.post(f"/users/{graph.mailbox}/events/{payload['event_id']}/{RESPONSES[payload['response']]}",
-                   {"comment": payload.get("comment") or "", "sendResponse": True})
-        return {"responded": payload["response"]}
+        body: dict[str, Any] = {"comment": payload.get("comment") or "", "sendResponse": True}
+        if payload.get("proposed_start"):
+            # Outlook's "propose new time": the organizer gets it as a new-time request they can accept
+            body["proposedNewTime"] = {"start": utc(payload["proposed_start"]), "end": utc(payload["proposed_end"])}
+        graph.post(f"/users/{graph.mailbox}/events/{payload['event_id']}/{RESPONSES[payload['response']]}", body)
+        return {"responded": payload["response"], **({"proposed": payload["proposed_start"]} if payload.get("proposed_start") else {})}
 
     return [ActionKind(MOVE_KIND, move), ActionKind(CANCEL_KIND, cancel, editable=("comment",)),
             ActionKind(RESPOND_KIND, respond, editable=("comment",))]
@@ -147,16 +150,54 @@ def propose_cancel(graph: Any, actions: Actions, event_id: str, message: str = "
     return public_action(actions.propose(CANCEL_KIND, summary, payload))
 
 
-def propose_response(graph: Any, actions: Actions, event_id: str, response: str, message: str = "") -> dict[str, Any]:
+def propose_response(graph: Any, actions: Actions, event_id: str, response: str, message: str = "",
+                     new_start: str = "") -> dict[str, Any]:
     if response not in RESPONSES:
         raise ValueError("response must be accept, tentative or decline")
     event, _ = get_event(graph, event_id)
     if is_organizer(graph, event):
         raise ValueError("Dave organizes this meeting; there's no invite to answer.")
+    payload = {"event_id": event.id, "subject": event.subject, "response": response, "comment": message,
+               "to": event.organizer or event.organizer_email}
     summary = f"{RESPONSE_WORDS[response]} “{event.subject}” on {fmt_local(event.start)} from {event.organizer}"
-    return public_action(actions.propose(RESPOND_KIND, summary, {
-        "event_id": event.id, "subject": event.subject, "response": response, "comment": message,
-        "to": event.organizer or event.organizer_email}))
+    if new_start:
+        if response == "accept":
+            raise ValueError("A new time goes with tentative or decline, not accept.")
+        start = _local_start(new_start)
+        payload.update(proposed_start=start.isoformat(), proposed_end=(start + (event.end - event.start)).isoformat())
+        summary += f", suggesting {fmt_local(start)} instead"
+    return public_action(actions.propose(RESPOND_KIND, summary, payload))
+
+
+def _local_start(value: str) -> datetime:
+    try:
+        start = datetime.fromisoformat(value)
+    except ValueError as e:
+        raise ValueError("new_start must be YYYY-MM-DDTHH:MM") from e
+    return start.astimezone(local_zone()) if start.tzinfo else start.replace(tzinfo=local_zone())
+
+
+def other_times(graph: Any, event_id: str, memory: Any = None, now: datetime | None = None) -> dict[str, Any]:
+    """Free times to suggest instead of an invite Dave can't make: the same length, near its day,
+    when he and the TAG people on it are free. Some organizers turn new-time proposals off."""
+    from agent.people import internal_domain
+    from agent.requests import suggest_slots
+
+    event, _ = get_event(graph, event_id)
+    allowed = graph.get(f"/users/{graph.mailbox}/events/{event_id}", {"$select": "allowNewTimeProposals"})
+    if allowed.get("allowNewTimeProposals") is False:
+        return {"allowed": False, "times": []}
+    minutes = max(15, int((event.end - event.start).total_seconds() // 60))
+    me, domain = graph.mailbox.lower(), internal_domain()
+    team = [{"email": e} for e in dict.fromkeys((event.organizer_email, *event.attendee_emails))
+            if e and e != me and domain and e.endswith("@" + domain)]
+    day = event.start.date()
+    request = {"earliest_date": day.isoformat(), "latest_date": (day + timedelta(days=7)).isoformat(),
+               "duration_minutes": minutes, "team": team}
+    starts = [s for s in suggest_slots(graph, request, memory, now, count=4) if s != event.start][:3]
+    return {"allowed": True, "minutes": minutes, "checked": len(team),
+            "times": [{"start": s.isoformat(), "label": s.strftime("%a, %b %d · ").replace(" 0", " ") + _clock(s)}
+                      for s in starts]}
 
 
 # ── unanswered invites (Today) ───────────────────────────────────────────────
@@ -228,9 +269,10 @@ def pending_invites(graph: Any, now: datetime | None = None, days: int = 21) -> 
     return out
 
 
-def answer_invite(graph: Any, actions: Actions, event_id: str, response: str, decided_by: str = "dave") -> dict[str, Any]:
+def answer_invite(graph: Any, actions: Actions, event_id: str, response: str, decided_by: str = "dave",
+                  new_start: str = "") -> dict[str, Any]:
     """Dave tapped a response on Today: that tap is the sign-off."""
-    slip = propose_response(graph, actions, event_id, response)
+    slip = propose_response(graph, actions, event_id, response, new_start=new_start)
     return public_action(actions.approve(slip["action_id"], decided_by=decided_by))
 
 
@@ -249,7 +291,8 @@ def change_tools(graph: Any, actions: Actions) -> list[Tool]:
         return pending_note(propose_cancel(graph, actions, args["event_id"], args.get("message") or ""))
 
     def respond(args: dict[str, Any]) -> dict[str, Any]:
-        return pending_note(propose_response(graph, actions, args["event_id"], args["response"], args.get("message") or ""))
+        return pending_note(propose_response(graph, actions, args["event_id"], args["response"], args.get("message") or "",
+                                             args.get("new_start") or ""))
 
     event_id = {"type": "string", "description": "The event's id from find_events or list_calendar_events"}
     return [
@@ -272,10 +315,13 @@ def change_tools(graph: Any, actions: Actions) -> list[Tool]:
             }, "required": ["event_id"]}), handler=cancel),
         Tool(spec=ToolSpec(
             name="respond_to_invite",
-            description="Propose accepting, tentatively accepting or declining a meeting invite. Needs Dave's approval.",
+            description=("Propose accepting, tentatively accepting or declining a meeting invite. Needs Dave's approval. "
+                         "With new_start (tentative or decline), it also suggests another time, as Outlook's "
+                         "'propose new time' does; check Dave is free then first."),
             input_schema={"type": "object", "properties": {
                 "event_id": event_id,
                 "response": {"type": "string", "enum": ["accept", "tentative", "decline"]},
                 "message": {"type": "string", "description": "Optional short note to the organizer"},
+                "new_start": {"type": "string", "description": "A time to suggest instead, Dave's local YYYY-MM-DDTHH:MM"},
             }, "required": ["event_id", "response"]}), handler=respond),
     ]

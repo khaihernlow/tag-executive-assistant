@@ -20,7 +20,7 @@ from agent.actions import public_action
 from agent.briefs import needs_brief
 from agent.filing import filed_today, undo_filing
 from agent.junk import moved_today, undo as undo_junk
-from agent.changes import answer_invite, pending_invites
+from agent.changes import answer_invite, other_times, pending_invites
 from agent.hubspot import booking_link
 from agent.requests import open_requests_view, propose_booking, propose_hold, propose_nudge, propose_reply
 from agent.calendar import agenda_day, event_detail, local_zone, meeting_place, parse_event
@@ -317,7 +317,29 @@ async def upload(file: UploadFile = File(...), user: dict = Depends(require_auth
         raise HTTPException(status_code=400, detail=str(e))
     name = file.filename or "file"
     uid = svc.store.add_upload(name, prepared["kind"], prepared["summary"], prepared["thumb"], prepared["blocks"])
+    try:   # the file as it came, for tools that need the file itself (a Hatz workflow's file input)
+        from agent.hatz_apps import upload_path
+        upload_path(uid).parent.mkdir(parents=True, exist_ok=True)
+        upload_path(uid).write_bytes(data)
+    except OSError:
+        pass   # the chat still has its text
     return {"id": uid, "name": name, "kind": prepared["kind"], "summary": prepared["summary"], "thumb": prepared["thumb"]}
+
+
+@app.get("/api/hatz/jobs/{job_id}")
+def hatz_job(job_id: str, user: dict = Depends(require_auth), svc=Depends(services)):
+    """A Hatz workflow run, for the card in chat that follows it."""
+    if getattr(svc, "hatz", None) is None:
+        raise HTTPException(status_code=404, detail="HatzAI isn't connected")
+    return svc.hatz.job(job_id)
+
+
+@app.get("/api/hatz/jobs/{job_id}/documents/{step_id}")
+def hatz_document(job_id: str, step_id: str, user: dict = Depends(require_auth), svc=Depends(services)):
+    """A document a workflow made: Hatz gives a link that works for an hour, so it's fetched when tapped."""
+    if getattr(svc, "hatz", None) is None:
+        raise HTTPException(status_code=404, detail="HatzAI isn't connected")
+    return RedirectResponse(svc.hatz.document_url(job_id, step_id))
 
 
 @app.post("/api/lunch/skip")
@@ -612,6 +634,7 @@ def request_nudge(message_id: str, user: dict = Depends(require_auth), svc=Depen
 
 class InviteIn(BaseModel):
     response: str
+    new_start: str = ""   # with tentative or decline: the time Dave suggests instead
 
 
 @app.get("/api/invites/{event_id:path}/context")
@@ -624,11 +647,21 @@ def invite_context_view(event_id: str, user: dict = Depends(require_auth), svc=D
         raise HTTPException(status_code=404, detail=str(e))
 
 
+@app.get("/api/invites/{event_id:path}/times")
+def invite_times(event_id: str, user: dict = Depends(require_auth), svc=Depends(services)):
+    """Times Dave could suggest instead, when he can't make the one on the invite."""
+    try:
+        return other_times(svc.graph, event_id, getattr(svc, "memory", None))
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
 @app.post("/api/invites/{event_id:path}/respond")
 def invite_respond(event_id: str, body: InviteIn, user: dict = Depends(require_auth), svc=Depends(services)):
     """Dave tapped Accept, Maybe or Decline on Today: that tap is his decision, so it goes straight out."""
     try:
-        return answer_invite(svc.graph, svc.actions, event_id, body.response, decided_by=f"dave: {user.get('email', '')}")
+        return answer_invite(svc.graph, svc.actions, event_id, body.response, decided_by=f"dave: {user.get('email', '')}",
+                             new_start=body.new_start)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 

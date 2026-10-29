@@ -162,3 +162,35 @@ def test_an_invite_dave_already_blocked_for_himself_needs_no_answer():
                   organizer="shaun@coach.example", response="none", attendees=(DAVE,))
     found = [i["id"] for i in pending_invites(FakeGraph(events=(own, invite, other)), NOW)]
     assert found == ["oth"]          # same time, but a different meeting: still Dave's to answer
+
+
+def test_suggesting_another_time_sends_outlooks_new_time_proposal_for_the_same_length():
+    graph, actions = setup()
+    result = answer_invite(graph, actions, "vendor", "tentative", new_start="2026-10-15T14:00")
+    assert result["status"] == "executed" and "suggesting Thu Oct 15 2:00 PM" in result["summary"]
+    [(_, path, body)] = [c for c in graph.calls if c[0] == "POST"]
+    assert path == f"/users/{DAVE}/events/vendor/tentativelyAccept"
+    # 2:00-3:00 PM Eastern, the invite's hour, in UTC
+    assert body["proposedNewTime"] == {"start": {"dateTime": "2026-10-15T18:00:00", "timeZone": "UTC"},
+                                       "end": {"dateTime": "2026-10-15T19:00:00", "timeZone": "UTC"}}
+
+
+def test_a_new_time_never_goes_with_accept():
+    graph, actions = setup()
+    with pytest.raises(ValueError, match="tentative or decline"):
+        propose_response(graph, actions, "vendor", "accept", new_start="2026-10-15T14:00")
+
+
+def test_other_times_are_free_times_near_the_invite_other_than_its_own():
+    from agent.changes import other_times
+    t = other_times(FakeGraph(), "vendor", now=NOW)
+    assert t["allowed"] and t["minutes"] == 60 and 1 <= len(t["times"]) <= 3
+    starts = [datetime.fromisoformat(s["start"]) for s in t["times"]]
+    assert datetime(2026, 10, 14, 11, 0, tzinfo=NY) not in starts
+    assert all(datetime(2026, 10, 14, tzinfo=NY) <= s < datetime(2026, 10, 22, tzinfo=NY) for s in starts)
+
+
+def test_no_times_offered_when_the_organizer_turned_proposals_off():
+    from agent.changes import other_times
+    graph = FakeGraph(events=(SYNC, {**VENDOR, "allowNewTimeProposals": False}))
+    assert other_times(graph, "vendor", now=NOW) == {"allowed": False, "times": []}

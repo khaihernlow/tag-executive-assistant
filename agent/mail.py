@@ -179,17 +179,29 @@ def read_email(graph: GraphSource, message_id: str) -> dict[str, Any]:
     return result
 
 
-def read_attachment(graph: Any, message_id: str, attachment: str) -> dict[str, Any]:
+def _attachment(graph: Any, message_id: str, attachment: str) -> tuple[bytes, dict[str, Any]]:
     """`attachment` may be the attachment id or its file name (search results
     show names, so the model often has only the name)."""
     listing = graph.get_all(f"/users/{graph.mailbox}/messages/{message_id}/attachments",
                             {"$select": "id,name,contentType,size"}, limit=50)
     match = next((a for a in listing if a.get("id") == attachment), None) or next(
         (a for a in listing if (a.get("name") or "").lower() == attachment.strip().lower()), None)
+    if match is None and len(listing) == 1 and not attachment.strip():
+        match = listing[0]   # "the attachment" on an email with just one
     if match is None:
         names = ", ".join(a.get("name") or "?" for a in listing) or "none"
         raise ValueError(f"No attachment {attachment!r} on that email. Attachments: {names}")
-    data = graph.get_bytes(f"/users/{graph.mailbox}/messages/{message_id}/attachments/{match['id']}/$value")
+    return graph.get_bytes(f"/users/{graph.mailbox}/messages/{message_id}/attachments/{match['id']}/$value"), match
+
+
+def attachment_bytes(graph: Any, message_id: str, attachment: str) -> tuple[bytes, str]:
+    """The file itself, for handing on (to a Hatz workflow)."""
+    data, match = _attachment(graph, message_id, attachment)
+    return data, match.get("name") or "attachment"
+
+
+def read_attachment(graph: Any, message_id: str, attachment: str) -> dict[str, Any]:
+    data, match = _attachment(graph, message_id, attachment)
     return {"name": match.get("name"),
             "text": extract_text(data, match.get("name") or "", match.get("contentType") or "")}
 

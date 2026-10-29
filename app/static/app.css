@@ -1089,6 +1089,7 @@ svg.icon { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: ro
 .recpill__more { display: grid; gap: var(--s2); padding: var(--s3); border-top: 1px solid var(--rule-soft); }
 .recpill__more[hidden] { display: none; }
 .recpill__more p { margin: 0; font-size: 14px; line-height: 1.45; color: var(--ink-soft); }
+.recpill__more .recpill__gap { color: var(--pencil); }
 .recpill__row { display: flex; gap: var(--s2); }
 .recpill__row .btn { min-height: 38px; font-size: 14px; }
 .btn--danger { background: var(--pencil); border-color: var(--pencil); color: var(--surface); }
@@ -1222,6 +1223,13 @@ svg.icon { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: ro
 /* An invite's background, so Dave can answer without going to look */
 .invite__context { display: grid; gap: var(--s3); margin: var(--s3) 0; padding-top: var(--s3); border-top: 1px solid var(--rule-soft); }
 .invite__part { display: grid; gap: var(--s1); }
+.invite__suggest { margin-top: var(--s2); padding-left: 0; }
+.invite__times { display: grid; gap: var(--s2); margin-top: var(--s4); padding-top: var(--s3); border-top: 1px solid var(--rule); }
+.invite__times .card__note { margin: 0; }
+.invite__times .invite__actions { margin-top: var(--s1); }
+.invite__slots { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: var(--s2); }
+.invite__slots .slot { font-weight: 600; font-variant-numeric: tabular-nums; }
+.invite__slots .slot[aria-pressed="true"] { border-color: var(--link); background: var(--sunken); box-shadow: inset 0 0 0 1px var(--link); }
 .invite__label { margin: 0; font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-faint); }
 .invite__about, .invite__people { margin: 0; font-size: 14px; line-height: 1.45; color: var(--ink-soft); }
 .invite__link { font-size: 14px; color: var(--link); text-decoration: none; }
@@ -1239,3 +1247,16 @@ a.invite__email:hover { background: var(--sunken); }
 .invite__email-text { font-size: 13px; color: var(--ink-soft); line-height: 1.4; overflow: hidden; display: -webkit-box;
                       -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .invite__brief { justify-self: start; padding-left: 0; }
+
+/* A HatzAI workflow's run: progress, then its result (long, so it scrolls inside the card) */
+.hatz { display: grid; gap: var(--s2); }
+.hatz .card__label { margin: 0; }
+.hatz__state { margin: 0; font-size: 14px; color: var(--ink-soft); }
+.hatz__state--done { color: var(--sage); font-weight: 600; }
+.hatz__body { display: grid; gap: var(--s3); }
+.hatz__body:empty { display: none; }
+.hatz__doc { justify-self: start; text-decoration: none; }
+.hatz__result { max-height: 420px; overflow-y: auto; padding-right: var(--s2); font-size: 15px; line-height: 1.5; }
+.hatz__steps summary { cursor: pointer; font-size: 13px; font-weight: 600; color: var(--link); }
+.hatz__step { padding-top: var(--s3); }
+.hatz__step-name { margin: 0 0 var(--s1); font-size: 12px; font-weight: 600; color: var(--ink-faint); text-transform: uppercase; letter-spacing: 0.06em; }

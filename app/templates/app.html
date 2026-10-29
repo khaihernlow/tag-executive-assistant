@@ -311,6 +311,7 @@
       </label>
       <p class="recstart__joins" id="recstart-joins" hidden>This meeting already has notes. The recording will be added to them, and they'll be written up again to cover both.</p>
       <p class="recstart__hint">Keep the app open on screen while it records. When you stop, the notes are written up for you.</p>
+      <p class="recstart__hint recstart__hint--phone" id="recstart-phone" hidden>On an iPhone, recording stops if the screen locks or you switch apps, so Geronimo keeps the screen on. For a long meeting, plug in. To record with the screen off, use Voice Memos and upload it from Notes afterwards.</p>
       <p class="error" id="recstart-error" hidden></p>
       <button class="btn btn--sign recstart__go" id="rec-start" type="button">{{ icon('mic') }}<span>Start recording</span></button>
     </div>
@@ -328,6 +329,9 @@
       </span>
       <button class="recpill__discard" id="rec-discard" type="button" aria-label="Discard recording" title="Discard recording">{{ icon('trash-2') }}</button>
       <button class="btn btn--sign recpill__stop" id="rec-stop" type="button">{{ icon('square') }}<span>Stop &amp; save</span></button>
+    </div>
+    <div class="recpill__more" id="rec-gap" hidden>
+      <p class="recpill__gap" id="rec-gap-text"></p>
     </div>
     <div class="recpill__more" id="rec-confirm" hidden>
       <p>Discard this recording? Everything recorded so far will be lost.</p>
