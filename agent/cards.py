@@ -97,8 +97,10 @@ def build_cards(trace: list[ToolTrace]) -> list[dict[str, Any]]:
             cards.append({"type": "opportunities", "opportunities": data["opportunities"][:25]})
 
         elif t.name == "hubspot_query" and (data.get("rows") or data.get("groups")):
+            # The search itself, so the card can export every record it matched, not just this page
             cards.append({"type": "hubspot", **{k: data.get(k) for k in ("object", "matching", "conditions", "groups",
-                                                                          "total", "counted", "rows")}})
+                                                                          "total", "counted", "rows")},
+                          "query": {k: v for k, v in (t.input or {}).items() if k not in ("limit", "group_by", "sum")}})
 
         elif t.name == "run_hatz_app" and data.get("job_id"):
             # A workflow runs for minutes: the card follows it and shows the result

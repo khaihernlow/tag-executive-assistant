@@ -62,8 +62,22 @@ SHAPES: dict[str, dict[str, Any]] = {
                    "owner": "hubspot_owner_id", "lifecycle": "lifecyclestage", "lifecycle stage": "lifecyclestage",
                    "lead status": "hs_lead_status", "phone": "phone", "city": "city", "state": "state",
                    "last contacted": "notes_last_contacted", "last activity": "notes_last_updated",
-                   "created": "createdate", "modified": "lastmodifieddate", "score": "hubspotscore",
-                   "lead score": "hubspotscore", "current client": "current_client"},
+                   "created": "createdate", "modified": "lastmodifieddate", "current client": "current_client",
+                   # TAG's own scoring (set up Jun 2025) first; HubSpot's built-in score only when asked by name
+                   "score": "adjusted_lead_score", "lead score": "adjusted_lead_score",
+                   "adjusted lead score": "adjusted_lead_score", "hubspot score": "hubspotscore",
+                   "engagement score": "contacts_engagement_score_jun25", "engagement": "contacts_engagement_score_jun25",
+                   "engagement level": "contacts_engagement_score_jun25_threshold",
+                   "fit score": "contacts_fit_score_jun25", "fit": "contacts_fit_score_jun25",
+                   "likelihood to close": "hs_predictivecontactscore", "predictive score": "hs_predictivecontactscore",
+                   # What they've done: marketing emails, the website
+                   "email clicks": "hs_email_click", "emails clicked": "hs_email_click", "clicks": "hs_email_click",
+                   "email opens": "hs_email_open", "emails opened": "hs_email_open", "opens": "hs_email_open",
+                   "last email click": "hs_email_last_click_date", "last clicked": "hs_email_last_click_date",
+                   "page views": "hs_analytics_num_page_views", "pageviews": "hs_analytics_num_page_views",
+                   "website visits": "hs_analytics_num_visits", "visits": "hs_analytics_num_visits",
+                   "sessions": "hs_analytics_num_visits", "last website visit": "hs_analytics_last_visit_timestamp",
+                   "last visit": "hs_analytics_last_visit_timestamp", "last seen": "hs_analytics_last_timestamp"},
         "modified": "lastmodifieddate"},
     "deals": {
         "title": ["dealname"], "sub": [],
@@ -78,33 +92,39 @@ SHAPES: dict[str, dict[str, Any]] = {
         "show": ["hubspot_owner_id", "hs_timestamp", "hs_call_duration"],
         "fields": {"title": "hs_call_title", "owner": "hubspot_owner_id", "made by": "hubspot_owner_id", "when": "hs_timestamp",
                    "date": "hs_timestamp", "direction": "hs_call_direction", "outcome": "hs_call_disposition",
-                   "duration": "hs_call_duration", "status": "hs_call_status", "notes": "hs_call_body"},
+                   "duration": "hs_call_duration", "status": "hs_call_status", "notes": "hs_call_body",
+                   "created": "hs_createdate", "logged": "hs_createdate"},
         "modified": "hs_lastmodifieddate", "when": "hs_timestamp"},
     "meetings": {
         "title": ["hs_meeting_title"], "sub": ["hs_meeting_outcome"],
         "show": ["hubspot_owner_id", "hs_timestamp"],
+        # "when" is the meeting itself; "booked" is when it was set up (an appointment got "today" can be next week)
         "fields": {"title": "hs_meeting_title", "owner": "hubspot_owner_id", "when": "hs_timestamp", "date": "hs_timestamp",
-                   "outcome": "hs_meeting_outcome", "notes": "hs_meeting_body"},
+                   "meeting date": "hs_timestamp", "held": "hs_timestamp", "outcome": "hs_meeting_outcome",
+                   "notes": "hs_meeting_body", "created": "hs_createdate", "booked": "hs_createdate",
+                   "booked on": "hs_createdate", "set": "hs_createdate", "scheduled on": "hs_createdate"},
         "modified": "hs_lastmodifieddate", "when": "hs_timestamp"},
     "notes": {
         "title": ["hs_note_body"], "sub": [],
         "show": ["hubspot_owner_id", "hs_timestamp"],
         "fields": {"text": "hs_note_body", "body": "hs_note_body", "owner": "hubspot_owner_id", "written by": "hubspot_owner_id",
-                   "when": "hs_timestamp", "date": "hs_timestamp"},
+                   "when": "hs_timestamp", "date": "hs_timestamp", "created": "hs_createdate"},
         "modified": "hs_lastmodifieddate", "when": "hs_timestamp"},
     "tasks": {
         "title": ["hs_task_subject"], "sub": ["hs_task_status", "hs_task_priority"],
         "show": ["hubspot_owner_id", "hs_timestamp"],
         "fields": {"subject": "hs_task_subject", "title": "hs_task_subject", "owner": "hubspot_owner_id",
                    "assigned to": "hubspot_owner_id", "due": "hs_timestamp", "due date": "hs_timestamp",
-                   "status": "hs_task_status", "priority": "hs_task_priority", "type": "hs_task_type"},
+                   "status": "hs_task_status", "priority": "hs_task_priority", "type": "hs_task_type",
+                   "created": "hs_createdate"},
         "modified": "hs_lastmodifieddate", "when": "hs_timestamp"},
     "emails": {
         "title": ["hs_email_subject"], "sub": ["hs_email_from_email", "hs_email_to_email"],
         "show": ["hubspot_owner_id", "hs_timestamp"],
         "fields": {"subject": "hs_email_subject", "title": "hs_email_subject", "owner": "hubspot_owner_id",
                    "sent by": "hubspot_owner_id", "when": "hs_timestamp", "date": "hs_timestamp", "from": "hs_email_from_email",
-                   "to": "hs_email_to_email", "direction": "hs_email_direction", "text": "hs_email_text", "body": "hs_email_text"},
+                   "to": "hs_email_to_email", "direction": "hs_email_direction", "text": "hs_email_text", "body": "hs_email_text",
+                   "created": "hs_createdate"},
         "modified": "hs_lastmodifieddate", "when": "hs_timestamp"},
 }
 
@@ -521,6 +541,21 @@ class HubSpot:
     # ── the query ──
 
     def query(self, args: dict[str, Any]) -> dict[str, Any]:
+        obj, common, extra, said, sort_prop, direction = self._search(args)
+        group_word, sum_word = args.get("group_by"), args.get("sum")
+        return self._answer(obj, args, common, extra, said, sort_prop, direction, group_word, sum_word)
+
+    def export(self, args: dict[str, Any], max_rows: int = 10000) -> tuple[list[str], list[list[str]], int]:
+        """Every record a query matches (not just the card's page), as spreadsheet columns and rows."""
+        obj, common, extra, _, _, _ = self._search(args)
+        records, total = self.hs.search_all(obj, max_rows=max_rows, **common)
+        rows = [self.row(obj, r, extra) for r in records]
+        keys = list(dict.fromkeys(k for r in rows for k in r if k not in ("id", "url")))
+        heads = ["Name" if k == "title" else "Details" if k == "sub" else k.replace("_", " ").capitalize() for k in keys]
+        return [*heads, "HubSpot link"], [[str(r.get(k, "")) for k in keys] + [r.get("url", "")] for r in rows], total
+
+    def _search(self, args: dict[str, Any]) -> tuple[str, dict[str, Any], list[str], list[str], str, str]:
+        """Dave's question as a HubSpot search: the filters, columns and order, plus the conditions in words."""
         obj = object_type(args.get("object", ""))
         filters, said = [], []
         for f in args.get("filters") or []:
@@ -559,8 +594,10 @@ class HubSpot:
             common["filter_groups"] = groups
         else:
             common["filters"] = filters
+        return obj, common, extra, said, sort_prop, direction
 
-        group_word, sum_word = args.get("group_by"), args.get("sum")
+    def _answer(self, obj: str, args: dict[str, Any], common: dict[str, Any], extra: list[str], said: list[str],
+                sort_prop: str, direction: str, group_word: Any, sum_word: Any) -> dict[str, Any]:
         limit = max(1, min(int(args.get("limit") or 15), 50))
         out: dict[str, Any] = {"object": obj, "conditions": said or ["all " + obj]}
         if group_word or sum_word:
@@ -760,6 +797,10 @@ Examples:
  "who hasn't been contacted in 6 months among customers" -> companies, filters [lifecycle is Customer],
    either [last contacted before "6 months ago", last contacted is_empty]
  "how many calls did RJ make last week" -> calls, filters [owner is RJ, when during "last week"]
+ "appointments Garrett set today" -> meetings, filters [owner is Garrett, booked during "today"] ("when" is the
+   meeting's own date: a meeting booked today is often next week). For a rep's day or week, hubspot_rep_activity.
+ "most engaged leads" -> contacts, sort_by "lead score" (TAG's own score), show [engagement score, page views,
+   website visits, email clicks]; or hubspot_prospects, which ranks them with reasons.
  "calls by person this month" -> calls, filters [when during "this month"], group_by owner
  "my open tasks" -> tasks, filters [owner is me, status is_not Completed], sort_by due, order ascending
  "contacts at Equinox" -> contacts, company "Equinox"

@@ -221,3 +221,39 @@ def test_brief_material_keeps_what_tag_people_did_and_drops_the_noise(hub):
     for noise in ("trellus", "ConnectAndSell", "breakfast", "quick question", "Thanks Dave"):
         assert noise not in texts                                           # dialer, Dave's own calendar, sequences, his own mail
     assert plain_style("Low-cost leader [HubSpot 2, 3]") == "Low-cost leader [HubSpot 2, HubSpot 3]"
+
+
+MEETING_PROPS = [
+    {"name": "hs_meeting_title", "label": "Meeting name", "type": "string"},
+    {"name": "hubspot_owner_id", "label": "Activity assigned to", "type": "enumeration"},
+    {"name": "hs_timestamp", "label": "Activity date", "type": "datetime"},
+    {"name": "hs_createdate", "label": "Create date", "type": "datetime"},
+    {"name": "hs_lastmodifieddate", "label": "Last Modified Date", "type": "datetime"},
+]
+
+
+def test_an_appointment_booked_today_is_by_when_it_was_made_not_when_it_happens(hub, monkeypatch):
+    monkeypatch.setattr(FakeHubSpot, "properties", lambda self, obj: MEETING_PROPS if obj == "meetings" else COMPANY_PROPS)
+    assert hub.field("meetings", "booked")["name"] == "hs_createdate"
+    assert hub.field("meetings", "when")["name"] == "hs_timestamp"
+    built, said = hub.build_filter("meetings", {"field": "booked", "op": "during", "value": "today"})
+    assert {f["propertyName"] for f in built} == {"hs_createdate"} and said.startswith("Create date")
+
+
+def test_export_gives_every_matching_record_with_its_link(hub):
+    hub.hs.companies = [company("1", "Acme", "acme.example", contacts=4, lifecycle="customer", owner="2"),
+                        company("2", "Birch", "birch.example", lifecycle="lead")]
+    hub.hs.totals = {"all": 2}
+    heads, rows, total = hub.export({"object": "companies", "filters": [{"field": "lifecycle", "op": "any_of", "value": ["Lead", "Customer"]}]})
+    assert total == 2 and len(rows) == 2
+    assert heads[0] == "Name" and heads[-1] == "HubSpot link"
+    assert rows[0][0] == "Acme" and rows[0][-1] == "https://app.hubspot.example/companies/1"
+    assert "Richard Gray" in rows[0]
+
+
+def test_a_card_showing_part_of_a_list_never_lets_it_claim_all_of_it():
+    from agent.tools import SHOWN_ON_CARD, shown_note
+    note = shown_note({"matching": 1108, "rows": [{}] * 50})
+    assert "shows these 50 of the 1,108" in note and "Never say all 1,108 are shown" in note and "Export all 1,108" in note
+    assert shown_note({"matching": 3, "rows": [{}] * 3}) == SHOWN_ON_CARD
+    assert shown_note({"matching": 110, "rows": [{}] * 10, "groups": [{"group": "x", "count": 110}]}) == SHOWN_ON_CARD

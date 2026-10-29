@@ -8,7 +8,7 @@ from pathlib import Path
 from authlib.integrations.starlette_client import OAuth, OAuthError
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
@@ -324,6 +324,27 @@ async def upload(file: UploadFile = File(...), user: dict = Depends(require_auth
     except OSError:
         pass   # the chat still has its text
     return {"id": uid, "name": name, "kind": prepared["kind"], "summary": prepared["summary"], "thumb": prepared["thumb"]}
+
+
+@app.get("/api/hubspot/export")
+def hubspot_export(q: str, user: dict = Depends(require_auth), svc=Depends(services)):
+    """Every record a HubSpot card's search matches, as a spreadsheet (the card shows a page of them)."""
+    import csv
+    import io
+    if getattr(svc, "hubspot", None) is None:
+        raise HTTPException(status_code=404, detail="HubSpot isn't connected")
+    try:
+        heads, rows, total = svc.hubspot.export(json.loads(q))
+    except (ValueError, TypeError) as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    out = io.StringIO()
+    writer = csv.writer(out)
+    writer.writerow(heads)
+    writer.writerows(rows)
+    name = f"hubspot-{json.loads(q).get('object', 'records')}-{datetime.now(local_zone()):%Y-%m-%d}.csv"
+    # A byte-order mark so Excel reads names with accents right
+    return Response(content="﻿" + out.getvalue(), media_type="text/csv; charset=utf-8",
+                    headers={"Content-Disposition": f'attachment; filename="{name}"', "X-Total": str(total)})
 
 
 @app.get("/api/hatz/jobs/{job_id}")

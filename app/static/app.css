@@ -1163,6 +1163,11 @@ svg.icon { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: ro
 
 /* HubSpot cards: what was counted, groups as quiet bars, records that open in HubSpot */
 .hs-conditions { margin: 0 0 var(--s2); font-size: 13px; line-height: 1.45; color: var(--ink-faint); }
+.hs-foot { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--s2);
+  margin-top: var(--s3); padding-top: var(--s3); border-top: 1px solid var(--rule-soft); }
+.hs-foot__note { font-size: 13px; color: var(--ink-faint); }
+.hs-foot__export { display: inline-flex; align-items: center; gap: var(--s1); text-decoration: none; margin-left: auto; }
+.hs-foot__export svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .hs-groups { list-style: none; margin: 0 0 var(--s2); padding: 0; display: grid; gap: 6px; }
 .hs-group { display: grid; grid-template-columns: minmax(0, 11em) 1fr auto; align-items: center; gap: var(--s2); font-size: 14px; }
 .hs-group__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); }

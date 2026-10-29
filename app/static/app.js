@@ -1663,6 +1663,15 @@ function hubspotCard(card) {
   } else if (card.rows && card.rows.length) {
     body.push(hubspotRows(card.rows));
   }
+  // A page of a bigger list: say so, and offer the whole thing as a spreadsheet
+  const matching = Number(card.matching || 0), shown = (card.rows || []).length;
+  if (card.query && matching > 0 && (matching > shown || groups.length)) {
+    const href = `/api/hubspot/export?q=${encodeURIComponent(JSON.stringify(card.query))}`;
+    body.push(el("div", { class: "hs-foot" },
+      groups.length ? null : el("span", { class: "hs-foot__note", text: `Showing ${shown} of ${matching.toLocaleString()}` }),
+      el("a", { class: "btn hs-foot__export", href, download: "" }, icon("download"),
+        ` Export all ${matching.toLocaleString()}${matching > 10000 ? " (first 10,000)" : ""}`)));
+  }
   return el("div", { class: "card" }, body.filter(Boolean));
 }
 
