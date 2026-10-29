@@ -687,7 +687,7 @@ class HubSpot:
         play = (args.get("play") or ("tier" if args.get("tier") else "engaged")).lower()
         if play not in PLAYS:
             raise ValueError(f"play must be one of {', '.join(PLAYS)}")
-        limit = 400 if everyone else max(5, min(int(args.get("limit") or 15), 40))   # everyone: the export
+        limit = EXPORT_MAX if everyone else max(5, min(int(args.get("limit") or 15), 40))   # everyone: the export
         tier = str(args.get("tier") or "").strip().upper()
         if play == "tier" and tier not in TIERS:
             raise ValueError(f"tier must be one of {', '.join(TIERS)} (A3 is RJ's Tier 1 MQL list)")
@@ -707,7 +707,7 @@ class HubSpot:
             base.append({"propertyName": "associations.company", "operator": "EQ", "value": cid})
             said.append(f"at {cname}")
         props = list(dict.fromkeys([*self.wanted_props("contacts"), *PROSPECT_PROPS]))
-        pool = 400 if everyone else 200
+        pool = EXPORT_MAX if everyone else 200
 
         def num(p: dict[str, Any], k: str) -> float:
             try:
@@ -801,8 +801,8 @@ class HubSpot:
                                  "the tiers are only A3/B3/C3 and a high score means a good fit, not interest. Website "
                                  "visits are the interest signal."),
                 "export": (f"The card shows the top {len(rows)}; its 'Export the ranked list' button downloads "
-                           f"{'all ' + str(len(people)) if len(people) >= total else f'the first {len(people)} of {total:,}'} "
-                           "ranked, with each one's reasons, as a spreadsheet. Point Dave to it for a list.")}
+                           f"{f'all {total:,}' if total <= EXPORT_MAX else f'the top {EXPORT_MAX:,} of {total:,}'} ranked, "
+                           "with each one's reasons, as a spreadsheet. Point Dave to it for a list; say that number.")}
 
     def export_prospects(self, args: dict[str, Any]) -> tuple[list[str], list[list[str]], int]:
         """The whole ranked list behind a prospects card, as spreadsheet rows, best first."""
@@ -955,6 +955,7 @@ MEETING_OUTCOMES = {"meeting scheduled", "meeting set"}
 
 # The sales plays of Khai's "Sales Lead Prospector" agent in Hatz (read Oct 2026), run in code
 PLAYS = ("engaged", "neglected", "tier")
+EXPORT_MAX = 3000          # a prospects export: all of RJ's A3 list (2,368) in one spreadsheet
 # Not yet clients: TAG's lifecycle stages before Customer, plus former customers (win-backs)
 PROSPECT_STAGES = ["subscriber", "lead", "marketingqualifiedlead", "salesqualifiedlead", "opportunity", "222236330"]
 OPEN_STAGES = ["lead", "marketingqualifiedlead", "salesqualifiedlead", "opportunity"]
