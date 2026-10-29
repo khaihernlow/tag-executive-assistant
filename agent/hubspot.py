@@ -675,11 +675,11 @@ class HubSpot:
 
     # ── who's most likely to buy: ranked in code, each with its reasons ──
 
-    def prospects(self, args: dict[str, Any]) -> dict[str, Any]:
+    def prospects(self, args: dict[str, Any], everyone: bool = False) -> dict[str, Any]:
         """Not-yet-clients ranked by what they've done: on TAG's website lately first, then TAG's own
         Adjusted Lead Score and Engagement Score. Email clicks alone are weak: security scanners click
         every link in an email, so a contact with clicks and no website visit is flagged."""
-        limit = max(5, min(int(args.get("limit") or 15), 40))
+        limit = 400 if everyone else max(5, min(int(args.get("limit") or 15), 40))   # everyone: the export
         base = [{"propertyName": "lifecyclestage", "operator": "IN", "values": PROSPECT_STAGES},
                 {"propertyName": "email", "operator": "NOT_CONTAINS_TOKEN", "value": "*@" + (os.environ.get("INTERNAL_DOMAIN") or "tagsolutions.com")}]
         said = ["not yet clients (subscriber, lead, MQL, SQL, opportunity, former customer)"]
@@ -747,7 +747,18 @@ class HubSpot:
         return {"object": "contacts", "conditions": said, "considered": len(people), "rows": rows, "accounts": accounts,
                 "with_a_lead_score": total, "on_the_website_last_30_days": len(visitors),
                 "how_ranked": ("People on TAG's website in the last 30 days first, then by TAG's Adjusted Lead Score and "
-                               "Engagement Score. Email clicks alone don't rank anyone: security scanners click links too.")}
+                               "Engagement Score. Email clicks alone don't rank anyone: security scanners click links too."),
+                "export": (f"The card shows the top {len(rows)}; its 'Export the ranked list' button downloads all "
+                           f"{len(people)} ranked, with each one's reasons, as a spreadsheet. Point Dave to it for a list.")}
+
+    def export_prospects(self, args: dict[str, Any]) -> tuple[list[str], list[list[str]], int]:
+        """The whole ranked list behind a prospects card, as spreadsheet rows, best first."""
+        out = self.prospects(args, everyone=True)
+        heads = ["Rank", "Name", "Title and company", "Owner", "Email", "Lifecycle stage", "Why", "Caution", "HubSpot link"]
+        rows = [[str(i), r.get("title", ""), r.get("sub", ""), r.get("owner", ""), r.get("email", ""),
+                 r.get("lifecycle_stage", ""), r.get("why", ""), r.get("caution", ""), r.get("url", "")]
+                for i, r in enumerate(out["rows"], 1)]
+        return heads, rows, out["considered"]
 
     # ── one rep's calling: calls, conversations, appointments ──
 

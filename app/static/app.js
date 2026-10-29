@@ -1654,6 +1654,11 @@ function prospectsCard(card) {
     el("p", { class: "rep__sub", text: "People" }),
     hubspotRows(card.rows || []),
     card.how_ranked ? el("p", { class: "card__note prospects__how", text: card.how_ranked }) : null,
+    card.query ? el("div", { class: "hs-foot" },
+      el("span", { class: "hs-foot__note", text: `Showing ${(card.rows || []).length} of ${Number(card.considered || 0).toLocaleString()} ranked` }),
+      el("a", { class: "btn hs-foot__export", download: "",
+        href: `/api/hubspot/export?q=${encodeURIComponent(JSON.stringify({ ...card.query, ranked: true }))}` },
+        icon("download"), " Export the ranked list")) : null,
   ].filter(Boolean));
 }
 

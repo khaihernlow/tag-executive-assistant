@@ -334,14 +334,15 @@ def hubspot_export(q: str, user: dict = Depends(require_auth), svc=Depends(servi
     if getattr(svc, "hubspot", None) is None:
         raise HTTPException(status_code=404, detail="HubSpot isn't connected")
     try:
-        heads, rows, total = svc.hubspot.export(json.loads(q))
+        args = json.loads(q)
+        heads, rows, total = (svc.hubspot.export_prospects(args) if args.get("ranked") else svc.hubspot.export(args))
     except (ValueError, TypeError) as e:
         raise HTTPException(status_code=400, detail=str(e))
     out = io.StringIO()
     writer = csv.writer(out)
     writer.writerow(heads)
     writer.writerows(rows)
-    name = f"hubspot-{json.loads(q).get('object', 'records')}-{datetime.now(local_zone()):%Y-%m-%d}.csv"
+    name = f"hubspot-{'prospects' if args.get('ranked') else args.get('object', 'records')}-{datetime.now(local_zone()):%Y-%m-%d}.csv"
     # A byte-order mark so Excel reads names with accents right
     return Response(content="﻿" + out.getvalue(), media_type="text/csv; charset=utf-8",
                     headers={"Content-Disposition": f'attachment; filename="{name}"', "X-Total": str(total)})

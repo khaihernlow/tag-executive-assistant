@@ -107,7 +107,8 @@ def build_cards(trace: list[ToolTrace]) -> list[dict[str, Any]]:
             cards.append({"type": "hatz_run", **{k: data.get(k) for k in ("job_id", "app", "steps")}})
 
         elif t.name == "hubspot_prospects" and data.get("rows"):
-            cards.append({"type": "prospects", **{k: data.get(k) for k in ("conditions", "rows", "accounts", "how_ranked")}})
+            cards.append({"type": "prospects", **{k: data.get(k) for k in ("conditions", "rows", "accounts", "how_ranked", "considered")},
+                          "query": {k: v for k, v in (t.input or {}).items() if k != "limit"}})
 
         elif t.name == "hubspot_rep_activity" and "calls" in data:
             cards.append({"type": "rep_activity", **{k: data.get(k) for k in (
