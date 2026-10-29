@@ -1722,6 +1722,20 @@ function eventsCard(card) {
       e.location ? el("span", { class: "row__sub", text: e.location }) : null))));
 }
 
+// "DOCX Generation" -> "Open the Word document"
+function docLabel(name) {
+  if (/docx|word/i.test(name)) return "Open the Word document";
+  if (/pdf/i.test(name)) return "Open the PDF";
+  if (/xlsx|excel|sheet/i.test(name)) return "Open the spreadsheet";
+  return `Open ${name.replace(/\s*generation$/i, "")}`;
+}
+
+// "🟢 Report Writer - Output a Clean Human-Readable Summary" -> "Output a Clean Human-Readable Summary"
+function stepName(name) {
+  const plain = String(name || "Step").replace(/^[^\p{L}\p{N}]+/u, "").trim();
+  return plain.includes(" - ") ? plain.split(" - ").slice(1).join(" - ") : plain;
+}
+
 // A HatzAI workflow running for a few minutes: follows the run, then shows what came out
 function hatzRunCard(card) {
   const node = el("div", { class: "card hatz" });
@@ -1743,19 +1757,25 @@ function hatzRunCard(card) {
     if (job.status === "complete") {
       state.textContent = `✓ Done · ${job.steps} step${job.steps === 1 ? "" : "s"}`;
       state.classList.add("hatz__state--done");
-      const result = el("div", { class: "hatz__result brief__text" });
+      // The made document first: it's the finished thing
+      const docs = job.documents.map((d) => el("a", { class: "btn btn--sign", href: `${url}/documents/${encodeURIComponent(d.step_id)}`,
+        target: "_blank", rel: "noopener", text: docLabel(d.name) }));
+      const summarize = el("button", { class: docs.length ? "btn" : "btn btn--sign", type: "button", text: "Summarize for me",
+        onclick: () => send(`Summarize the ${card.app || "Hatz"} run for me: the verdict or answer first, then what I need to decide or do.`) });
+      // A preview that opens in place: no box scrolling inside the chat
+      const result = el("div", { class: "hatz__result brief__text is-clamped" });
       result.innerHTML = renderMarkdown(job.result || "It finished without any text."); // escaped inside renderMarkdown
-      body.replaceChildren(
-        ...job.documents.map((d) => el("a", { class: "btn btn--sign hatz__doc", href: `${url}/documents/${encodeURIComponent(d.step_id)}`,
-          target: "_blank", rel: "noopener", text: `Download ${d.name.replace(/\s*generation$/i, "")}` })),
-        result,
-        job.all_steps.length > 1 ? el("details", { class: "hatz__steps" },
-          el("summary", { text: `Every step (${job.all_steps.length})` }),
-          ...job.all_steps.map((s) => {
-            const text = el("div", { class: "brief__text" });
-            text.innerHTML = renderMarkdown(s.text); // escaped inside renderMarkdown
-            return el("section", { class: "hatz__step" }, el("p", { class: "hatz__step-name", text: s.name }), text);
-          })) : null);
+      const more = el("button", { class: "link-btn hatz__more", type: "button", text: "Show all of it",
+        onclick: () => { const shut = result.classList.toggle("is-clamped"); more.textContent = shut ? "Show all of it" : "Show less"; } });
+      const steps = job.all_steps.length > 1 ? el("div", { class: "hatz__steps" },
+        el("p", { class: "hatz__steps-title", text: `Each step (${job.all_steps.length})` }),
+        ...job.all_steps.map((s) => {
+          const text = el("div", { class: "brief__text" });
+          text.innerHTML = renderMarkdown(s.text); // escaped inside renderMarkdown
+          return el("details", { class: "hatz__step" }, el("summary", { text: stepName(s.name) }), text);
+        })) : null;
+      body.replaceChildren(el("div", { class: "hatz__actions" }, ...docs, summarize), result, more, ...(steps ? [steps] : []));
+      requestAnimationFrame(() => { more.hidden = result.scrollHeight <= result.clientHeight + 4; });
       return;
     }
     if (job.status === "failed") {

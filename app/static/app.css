@@ -1248,15 +1248,24 @@ a.invite__email:hover { background: var(--sunken); }
                       -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .invite__brief { justify-self: start; padding-left: 0; }
 
-/* A HatzAI workflow's run: progress, then its result (long, so it scrolls inside the card) */
+/* A HatzAI workflow's run: progress, then the document, a preview that opens in place, and each step */
 .hatz { display: grid; gap: var(--s2); }
 .hatz .card__label { margin: 0; }
 .hatz__state { margin: 0; font-size: 14px; color: var(--ink-soft); }
 .hatz__state--done { color: var(--sage); font-weight: 600; }
 .hatz__body { display: grid; gap: var(--s3); }
 .hatz__body:empty { display: none; }
-.hatz__doc { justify-self: start; text-decoration: none; }
-.hatz__result { max-height: 420px; overflow-y: auto; padding-right: var(--s2); font-size: 15px; line-height: 1.5; }
-.hatz__steps summary { cursor: pointer; font-size: 13px; font-weight: 600; color: var(--link); }
-.hatz__step { padding-top: var(--s3); }
-.hatz__step-name { margin: 0 0 var(--s1); font-size: 12px; font-weight: 600; color: var(--ink-faint); text-transform: uppercase; letter-spacing: 0.06em; }
+.hatz__actions { display: flex; flex-wrap: wrap; gap: var(--s2); }
+.hatz__actions .btn { flex: 0 1 auto; text-decoration: none; }
+.hatz__result { font-size: 15px; line-height: 1.5; border-top: 1px solid var(--rule-soft); padding-top: var(--s3); }
+.hatz__result.is-clamped { max-height: 13.5em; overflow: hidden;
+  -webkit-mask-image: linear-gradient(to bottom, #000 60%, transparent); mask-image: linear-gradient(to bottom, #000 60%, transparent); }
+.hatz__more { justify-self: start; margin-top: calc(-1 * var(--s2)); padding-left: 0; }
+.hatz__steps { border-top: 1px solid var(--rule-soft); padding-top: var(--s3); }
+.hatz__steps-title { margin: 0 0 var(--s1); font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-faint); }
+.hatz__step { border-bottom: 1px solid var(--rule-soft); }
+.hatz__step:last-child { border-bottom: 0; }
+.hatz__step summary { cursor: pointer; padding: var(--s2) 0; font-size: 14px; font-weight: 500; color: var(--ink); }
+.hatz__step summary:hover { color: var(--link); }
+.hatz__step[open] summary { font-weight: 600; }
+.hatz__step .brief__text { padding: 0 0 var(--s3); font-size: 14px; line-height: 1.5; color: var(--ink-soft); }

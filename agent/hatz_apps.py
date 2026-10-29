@@ -231,7 +231,9 @@ def hatz_tools(hatz: HatzApps) -> list[Tool]:
     def result(args: dict[str, Any]) -> dict[str, Any]:
         out = hatz.job(args["job_id"])
         out["result"] = out["result"][:MAX_RESULT_CHARS]
-        out.pop("all_steps", None)
+        # Every step, shortened: the answer Dave wants first (an RFP's go/no-go) is often a middle step
+        per = max(1500, 24000 // max(1, len(out["all_steps"])))
+        out["all_steps"] = [{"name": s["name"], "text": s["text"][:per]} for s in out["all_steps"]]
         return out
 
     return [
@@ -255,7 +257,8 @@ def hatz_tools(hatz: HatzApps) -> list[Tool]:
             handler=run),
         Tool(spec=ToolSpec(
             name="hatz_job_result",
-            description="Where a HatzAI workflow run stands, and its result once complete.",
+            description=("Where a HatzAI workflow run stands, and once complete its result and every step's output "
+                         "(the job_id is on the run's card). Use it to summarize or answer questions about a run."),
             input_schema={"type": "object", "properties": {"job_id": {"type": "string"}}, "required": ["job_id"]}),
             handler=result),
     ]
